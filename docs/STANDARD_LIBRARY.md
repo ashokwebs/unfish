@@ -146,8 +146,52 @@
 * `random()`: Random floating point number in `[0.0, 1.0)`.
 * `random_int(min, max)`: Random integer in `[min, max]` inclusive.
 
-## 5. Future Standard Library Modules (Phase 8 Roadmap)
+---
 
-* `collections`: `List`, `Map`, `Set`, `Stack`, `Queue`.
-* `fs`: Sandboxed filesystem access (`read_text`, `write_text`, `exists`).
-* `time`: `sleep(seconds)`, `timestamp()`.
+## 5. Built-in Standard Library Modules (Milestone 9)
+
+### 5.1. `sys` Module
+* **Import**: `import sys` or `from sys import exit, args, platform, env`
+* **Functions**:
+  - `sys.exit(code)`: Immediately terminates program execution with integer exit code `code`.
+  - `sys.args()`: Returns an array of strings representing command line arguments passed to the Unfish script.
+  - `sys.platform()`: Returns the host operating system identifier string: `"linux"`, `"darwin"`, `"windows"`, or `"unknown"`.
+  - `sys.env(name)`: Returns the string value of the environment variable `name`, or `null` if unset.
+
+### 5.2. `fs` Module (Sandboxed Filesystem)
+* **Import**: `import fs` or `from fs import read_text, write_text, exists, delete_file`
+* **Functions**:
+  - `fs.read_text(path)`: Reads the entire contents of file at `path` as a UTF-8 string. Returns `null` if the file cannot be opened or read.
+  - `fs.write_text(path, content)`: Writes `content` string to file at `path`. Returns `true` on success, `false` on failure.
+  - `fs.exists(path)`: Returns `true` if a file or directory exists at `path`, `false` otherwise.
+  - `fs.delete_file(path)`: Deletes the file at `path`. Returns `true` on success, `false` on failure.
+
+### 5.3. `random` Module
+* **Import**: `import random` or `from random import random, random_int, choice, shuffle`
+* **Functions**:
+  - `random.random()`: Returns a pseudo-random floating point number in `[0.0, 1.0)`.
+  - `random.random_int(min, max)`: Returns a pseudo-random integer in `[min, max]` inclusive.
+  - `random.choice(array)`: Returns a randomly selected element from `array`, or `null` if empty.
+  - `random.shuffle(array)`: Returns a new array with elements of `array` randomly permuted (Fisher-Yates shuffle).
+
+### 5.4. `time` Module
+* **Import**: `import time` or `from time import clock, sleep, timestamp`
+* **Functions**:
+  - `time.clock()`: Returns a high-resolution monotonic timer value in seconds as a `Number`.
+  - `time.sleep(seconds)`: Pauses process execution for `seconds` floating-point seconds. Returns `null`.
+  - `time.timestamp()`: Returns the current UNIX epoch timestamp in seconds as a `Number`.
+
+### 5.5. `json` Module
+* **Import**: `import json` or `from json import parse, stringify`
+* **Functions**:
+  - `json.parse(json_string)`: Parses valid JSON text into Unfish values (`null`, `boolean`, `number`, `string`, `array`, `map`). Returns `null` if the input is malformed.
+  - `json.stringify(value)`: Serializes any Unfish value into a formatted JSON string.
+
+### 5.6. `testing` Module
+* **Import**: `import testing` or `from testing import assert_equal, assert_true, assert_throws, run_tests`
+* **Location**: `src/stdlib/testing.unfish`
+* **Functions**:
+  - `assert_equal(actual, expected, [message])`: Raises `AssertionError` if `actual != expected`.
+  - `assert_true(condition, [message])`: Raises `AssertionError` if `condition` is falsy.
+  - `assert_throws(fn, [message])`: Executes `fn()` inside a `try/catch` block and asserts that an exception was raised.
+  - `run_tests(suite_map)`: Takes a map of test names to nullary functions, executes each with error isolation, prints per-test PASS/FAIL logs, and returns `true` if all passed.

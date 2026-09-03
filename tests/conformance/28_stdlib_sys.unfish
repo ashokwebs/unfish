@@ -1,0 +1,16 @@
+# expect: sys stdlib test passed
+
+import sys
+
+assert(sys.platform() == "linux")
+
+let args = sys.args()
+assert(len(args) >= 1)
+
+let p = sys.env("PATH")
+assert(p != null)
+
+let missing = sys.env("NON_EXISTENT_VAR_987654321")
+assert(missing == null)
+
+say "sys stdlib test passed"

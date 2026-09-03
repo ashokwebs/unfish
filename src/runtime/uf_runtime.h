@@ -61,9 +61,13 @@ struct UfRuntime {
     FILE* out_stream;
     FILE* err_stream;
     UfDiagnosticReporter* reporter;
+
+    int argc;
+    char** argv;
 };
 
 void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter);
+void uf_runtime_set_args(UfRuntime* rt, int argc, char** argv);
 void uf_runtime_free(UfRuntime* rt);
 
 void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj, size_t size);

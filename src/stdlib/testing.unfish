@@ -1,0 +1,43 @@
+# Unfish Standard Testing Framework
+
+function assert_equal(actual, expected, message):
+    if actual != expected:
+        let msg = "Assertion failed: expected " + expected + ", got " + actual
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
+function assert_true(condition, message):
+    if not condition:
+        let msg = "Assertion failed: expected true"
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
+function assert_throws(fn, message):
+    let threw = false
+    try:
+        fn()
+    catch err:
+        threw = true
+    if not threw:
+        let msg = "Assertion failed: expected function to throw an error"
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
+function run_tests(suite):
+    let passed = 0
+    let failed = 0
+    say "Running test suite..."
+    for test_name in keys(suite):
+        let test_fn = suite[test_name]
+        try:
+            test_fn()
+            say "  PASS: " + test_name
+            passed = passed + 1
+        catch err:
+            say "  FAIL: " + test_name + " -> " + err.message
+            failed = failed + 1
+    say "Results: " + passed + " passed, " + failed + " failed."
+    return failed == 0

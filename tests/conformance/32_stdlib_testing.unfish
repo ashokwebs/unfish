@@ -1,0 +1,42 @@
+# expect: Running test suite...
+# expect:   PASS: test_math
+# expect:   PASS: test_logic
+# expect:   PASS: test_fail
+# expect: Results: 3 passed, 0 failed.
+# expect: testing stdlib test passed
+
+from testing import assert_equal, assert_true, assert_throws, run_tests
+
+# 1. assert_equal
+assert_equal(10 + 20, 30, "arithmetic check")
+assert_equal("un" + "fish", "unfish", "string concat")
+
+# 2. assert_true
+assert_true(5 > 3, "comparison")
+
+# 3. assert_throws
+function faulty():
+    error("Something broke", "CustomError")
+
+assert_throws(faulty, "should throw error")
+
+# 4. run_tests suite
+function test_math():
+    assert_equal(2 * 3, 6, "multiplication")
+
+function test_logic():
+    assert_true(true and not false, "boolean logic")
+
+function test_fail():
+    assert_throws(function(): error("boom", "BoomError"), "boom check")
+
+let suite = {
+    "test_math": test_math,
+    "test_logic": test_logic,
+    "test_fail": test_fail
+}
+
+let ok = run_tests(suite)
+assert(ok == true)
+
+say "testing stdlib test passed"

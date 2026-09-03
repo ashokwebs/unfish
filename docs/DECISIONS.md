@@ -205,3 +205,20 @@
      - Because all heap values are tracked on `rt->all_objects` in the mark-and-sweep GC and program structures in arenas, stack unwinding does NOT leak memory or leave orphaned heap blocks.
   5. **Native `error(message, [kind])`**: Standard library built-in enabling user scripts to raise custom exceptions with arbitrary error kinds (defaulting to `"UserError"`).
 * **Consequences**: Complete, structured, and leak-free exception handling across nested function calls, verified under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## ADR 019: Standard Library Modularization and Sandboxed Core Modules
+* **Date**: Milestone 9 (Phase 4 Part 2)
+* **Status**: Accepted
+* **Context**: Following the introduction of the Module System in ADR 012, standard library capabilities must be partitioned into importable modules (`sys`, `fs`, `random`, `time`, `json`, `testing`) rather than continuing to pollute the global namespace.
+* **Decision**:
+  1. **Partitioning**:
+     - `sys`: Process termination (`sys.exit`), CLI argument introspection (`sys.args`), host platform identification (`sys.platform`), and environment variables (`sys.env`).
+     - `fs`: Sandboxed filesystem operations with tier 1 error reporting (`fs.read_text`, `fs.write_text`, `fs.exists`, `fs.delete_file`).
+     - `random`: Pseudo-random number generation (`random.random`, `random.random_int`), sequence sampling (`random.choice`), and Fisher-Yates array permutation (`random.shuffle`).
+     - `time`: High-resolution monotonic timer (`time.clock`), process pause (`time.sleep`), and UNIX timestamp (`time.timestamp`).
+     - `json`: Native recursive-descent parser (`json.parse`) translating valid JSON directly into Unfish primitive and composite values, and complete serializer (`json.stringify`) with character escaping.
+     - `testing`: Written in Unfish (`src/stdlib/testing.unfish`), providing assertions (`assert_equal`, `assert_true`, `assert_throws`) and an isolated test runner (`run_tests`).
+  2. **Lazy Built-in Resolution**:
+     - Built-in modules (`math`, `strings`, `sys`, `fs`, `random`, `time`, `json`) are instantiated lazily on their first `import` or `from ... import`, keeping baseline runtime allocation minimal.
+     - Filesystem module resolution automatically checks `src/stdlib/<name>.unfish` as a fallback, allowing standard library modules written in Unfish to be imported cleanly without explicit path prefixes.
+* **Consequences**: Programs can import only the capabilities they require, keeping educational sandboxes lean and preventing unexpected system interactions.

@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -Isrc/common -Isrc/lexer -Isrc/ast -Isrc/parser -Isrc/semantic -Isrc/runtime -Isrc/interpreter
+CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -Isrc/common -Isrc/lexer -Isrc/ast -Isrc/parser -Isrc/semantic -Isrc/runtime -Isrc/interpreter -Isrc/stdlib
 LDFLAGS = -lm
 
 ASAN_FLAGS = -fsanitize=address,undefined -g
@@ -17,6 +17,11 @@ SRCS = src/common/uf_arena.c \
        src/runtime/uf_runtime.c \
        src/runtime/uf_stdlib.c \
        src/runtime/uf_module.c \
+       src/stdlib/uf_mod_sys.c \
+       src/stdlib/uf_mod_fs.c \
+       src/stdlib/uf_mod_random.c \
+       src/stdlib/uf_mod_time.c \
+       src/stdlib/uf_mod_json.c \
        src/interpreter/uf_interpreter.c
 
 CLI_SRC = src/cli/main.c

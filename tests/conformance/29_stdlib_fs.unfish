@@ -1,0 +1,22 @@
+# expect: fs stdlib test passed
+
+import fs
+
+let test_path = "tests/conformance/tmp_fs_test.txt"
+
+# 1. Write text
+assert(fs.write_text(test_path, "Hello Unfish Filesystem!"))
+assert(fs.exists(test_path))
+
+# 2. Read text
+let text = fs.read_text(test_path)
+assert(text == "Hello Unfish Filesystem!")
+
+# 3. Nonexistent file returns null
+assert(fs.read_text("tests/conformance/nonexistent_xyz.txt") == null)
+
+# 4. Delete file
+assert(fs.delete_file(test_path))
+assert(not fs.exists(test_path))
+
+say "fs stdlib test passed"

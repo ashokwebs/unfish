@@ -1,0 +1,35 @@
+# expect: random and time stdlib test passed
+
+import random
+import time
+
+# 1. Random float [0, 1)
+let r = random.random()
+assert(r >= 0 and r < 1)
+
+# 2. Random int [min, max]
+let ri = random.random_int(10, 20)
+assert(ri >= 10 and ri <= 20)
+
+# 3. Choice from array
+let items = ["red", "green", "blue"]
+let ch = random.choice(items)
+assert(ch == "red" or ch == "green" or ch == "blue")
+assert(random.choice([]) == null)
+
+# 4. Shuffle array
+let original = [1, 2, 3, 4, 5]
+let shuffled = random.shuffle(original)
+assert(len(shuffled) == 5)
+assert(len(original) == 5) # original intact
+
+# 5. Time functions
+let t0 = time.clock()
+time.sleep(0.01)
+let t1 = time.clock()
+assert(t1 >= t0)
+
+let epoch = time.timestamp()
+assert(epoch > 1700000000)
+
+say "random and time stdlib test passed"

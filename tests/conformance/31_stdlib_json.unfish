@@ -1,0 +1,37 @@
+# expect: json stdlib test passed
+
+import json
+
+# 1. Serialize map and primitives
+let data = {
+    "language": "Unfish",
+    "version": 1,
+    "fast": true,
+    "options": null,
+    "features": ["lexer", "parser", "modules"]
+}
+
+let json_str = json.stringify(data)
+assert(len(json_str) > 0)
+
+# 2. Parse serialized JSON back
+let parsed = json.parse(json_str)
+assert(parsed.language == "Unfish")
+assert(parsed.version == 1)
+assert(parsed.fast == true)
+assert(parsed.options == null)
+assert(len(parsed.features) == 3)
+assert(parsed.features[0] == "lexer")
+assert(parsed.features[1] == "parser")
+assert(parsed.features[2] == "modules")
+
+# 3. Parse nested and escaped JSON string
+let raw = "{\"title\": \"Hello \\\"World\\\"!\", \"nested\": [10, 20, 30]}"
+let obj = json.parse(raw)
+assert(obj.title == "Hello \"World\"!")
+assert(obj.nested[1] == 20)
+
+# 4. Malformed JSON returns null
+assert(json.parse("{invalid json") == null)
+
+say "json stdlib test passed"

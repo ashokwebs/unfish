@@ -5,6 +5,11 @@
 #include "../parser/uf_parser.h"
 #include "../semantic/uf_semantic.h"
 #include "../interpreter/uf_interpreter.h"
+#include "../stdlib/uf_mod_sys.h"
+#include "../stdlib/uf_mod_fs.h"
+#include "../stdlib/uf_mod_random.h"
+#include "../stdlib/uf_mod_time.h"
+#include "../stdlib/uf_mod_json.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,6 +126,10 @@ static char* resolve_module_path(const char* name, SourceSpan span) {
         free(copy);
     }
 
+    /* 4. Built-in stdlib Unfish modules (e.g. testing) */
+    snprintf(path, sizeof(path), "src/stdlib/%s.unfish", name);
+    if (access(path, R_OK) == 0) return strdup(path);
+
     return NULL;
 }
 
@@ -202,6 +211,36 @@ UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span)
         str_mod->state = UF_MOD_LOADED;
         uf_module_cache_add(rt, "strings", str_mod);
         return str_mod;
+    }
+
+    if (strcmp(name, "sys") == 0) {
+        UfModuleObject* mod = uf_mod_sys_create(rt);
+        uf_module_cache_add(rt, "sys", mod);
+        return mod;
+    }
+
+    if (strcmp(name, "fs") == 0) {
+        UfModuleObject* mod = uf_mod_fs_create(rt);
+        uf_module_cache_add(rt, "fs", mod);
+        return mod;
+    }
+
+    if (strcmp(name, "random") == 0) {
+        UfModuleObject* mod = uf_mod_random_create(rt);
+        uf_module_cache_add(rt, "random", mod);
+        return mod;
+    }
+
+    if (strcmp(name, "time") == 0) {
+        UfModuleObject* mod = uf_mod_time_create(rt);
+        uf_module_cache_add(rt, "time", mod);
+        return mod;
+    }
+
+    if (strcmp(name, "json") == 0) {
+        UfModuleObject* mod = uf_mod_json_create(rt);
+        uf_module_cache_add(rt, "json", mod);
+        return mod;
     }
 
     /* 3. Resolve module file path */

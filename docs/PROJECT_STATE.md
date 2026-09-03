@@ -1,6 +1,6 @@
 # UNFISH — PROJECT STATE INVENTORY
 
-**Last Updated:** Milestone 8 Complete (Module System, Singleton Cache, Circular Detection, ADR 012)  
+**Last Updated:** Milestone 9 Complete (Standard Library Modules: sys, fs, random, time, json, testing, ADR 019)  
 **Project Health:** Healthy, 100% Tests Passing under ASan / UBSan  
 
 ---
@@ -10,7 +10,7 @@
 ### COMPLETE
 * **Formal Language Specification & Grammar**: EBNF, lexical rules, off-side indentation, operator precedence table (`docs/LANGUAGE_SPEC.md`).
 * **Complete Documentation Architecture**: 23 living technical documents in `docs/` covering vision, architecture, memory model, type system, error model, runtime, VM roadmap, compiler roadmap, blocks, tooling, testing, and security.
-* **Architectural Decision Records (ADRs)**: ADR 001 through ADR 017 documented in `docs/DECISIONS.md`.
+* **Architectural Decision Records (ADRs)**: ADR 001 through ADR 019 documented in `docs/DECISIONS.md`.
 * **Lexer**: UTF-8 scanner emitting typed tokens (`UfToken`) with source spans, indentation stack (`INDENT`, `DEDENT`, `NEWLINE`), string escapes, number scanning, brackets (`[`, `]`), braces (`{`, `}`), dot (`.`), keywords (`let`, `say`, `function`, `return`, `if`, `else`, `while`, `repeat`, `times`, `for`, `in`, `break`, `continue`, `try`, `catch`, `import`, `from`, `as`, `and`, `or`, `not`, `true`, `false`, `null`), and diagnostics.
 * **AST Data Structures**: Strongly typed AST nodes with source span preservation (`UfExpr`, `UfStmt`, `UfProgram`).
 * **AST Pretty Printer**: S-expression tree printer (`uf_ast_print`) supporting all statements, expressions, array literals, map literals, anonymous function expressions, try-catch blocks, and import/from-import statements.
@@ -18,7 +18,14 @@
 * **Semantic Analysis**: Lexical scope analysis, symbol tables, undefined identifier detection with Levenshtein suggestions, duplicate declaration prevention, return-outside-function checks, loop-depth checks, arity checks, anonymous function scope analysis, try-catch variable scoping, module import scoping, standard library symbol table registration, and top-level function hoisting.
 * **Diagnostics Engine**: Colored terminal diagnostics with source code snippets, line numbers, and column-accurate carets (`^~~~~`).
 * **Runtime & Value Representation**: Tagged union `UfValue` (`Null`, `Boolean`, `Number`, `String`, `Array`, `Map`, `Function`, `NativeFunction`, `Error`, `Module`), deep structural equality for arrays and maps, string conversion, truthiness, and call stack backtraces.
-* **Module System**: First-class `UfModuleObject` (`UF_OBJ_MODULE` / `UF_VAL_MODULE`), isolated `UfArena` and `UfInterner` lifetimes per module, singleton module caching (`rt->module_cache`), cycle detection (`CircularImportError`), lazy standard module initialization (`math`, `strings`), and multi-tier path resolution.
+* **Module System**: First-class `UfModuleObject` (`UF_OBJ_MODULE` / `UF_VAL_MODULE`), isolated `UfArena` and `UfInterner` lifetimes per module, singleton module caching (`rt->module_cache`), cycle detection (`CircularImportError`), lazy standard module initialization, and multi-tier path resolution.
+* **Standard Library Modules**: Full suite of 6 standard library modules:
+  - `sys`: Process exit, command-line arguments, host platform detection, environment variables.
+  - `fs`: Sandboxed filesystem operations (`read_text`, `write_text`, `exists`, `delete_file`).
+  - `random`: Uniform pseudo-random floats, bounded integers, array element choice, Fisher-Yates array shuffling.
+  - `time`: High-resolution monotonic clock, sleep delay, UNIX epoch timestamp.
+  - `json`: Native recursive-descent JSON parser and compliant stringifier with character escaping.
+  - `testing`: Standard testing module written in Unfish (`src/stdlib/testing.unfish`) with assertion helpers and isolated test suite runner.
 * **Structured Exception Recovery (try/catch)**: First-class `UfErrorObject` with `.message`, `.kind`, `.line`, and `.file` property introspection; `setjmp`/`longjmp` stack unwinding restoring scope frames, call frames, and evaluation roots without memory leaks.
 * **User Exception Built-in (`error`)**: `error(message, [kind])` standard library procedure for domain assertions and custom error reporting.
 * **First-Class Dynamic Arrays**: Heap-allocated `UfArrayObject` with dynamic resizing, negative index support (`arr[-1]`), string subscripting (`s[0]`), in-place mutation (`arr[i] = v`), `len()`, `push()`, and `pop()`.
@@ -33,20 +40,20 @@
 * **Tree-Walking Interpreter**: AST evaluator supporting expressions, statements, closures, recursion, loops with early breaks/continues, step quota guards, recursion stack overflow traps, and universal `uf_runtime_call` interface.
 * **CLI (`unfish`)**: Full-featured CLI with commands `run`, `check`, `ast`, `tokens`, `repl`, `version`.
 * **Interactive REPL**: Multiline block entry, persistent session arena, direct expression evaluation.
-* **Verification Harness**: 4 unit test binaries in C, comprehensive stress test suite (`test_stress`, 12 tests including module GC pressure), automated conformance test runner (`tools/run_conformance_tests.sh`) with 41 test suites passing under ASan/UBSan.
+* **Verification Harness**: 4 unit test binaries in C, comprehensive stress test suite (`test_stress`, 13 tests including JSON/stdlib GC stress), automated conformance test runner (`tools/run_conformance_tests.sh`) with 46 test suites passing under ASan/UBSan.
 
 ### PARTIAL
-* **Filesystem & System Modules**: Sandboxed I/O planned for Section J.
+* *None.*
 
 ### BROKEN
-* *None.* (All 4 unit test suites, 12 stress tests, and 41 conformance tests pass with 0 errors).
+* *None.* (All 4 unit test suites, 13 stress tests, and 46 conformance tests pass with 0 errors).
 
 ### MISSING
-* **Standard Library Modules**: Full native module expansion (`sys`, `fs`, `random`, `time`, `json`, `testing` - Section J).
-* **Block ↔ AST Round-Tripping**: Visual block translation (Phase 5).
-* **Interactive Debugger**: Breakpoint and step debugging hooks (Phase 6).
-* **Bytecode VM**: Stack-based virtual machine (Phase 7, ISA designed in ADR 013).
-* **AOT Compiler**: C code emission and native compiler (Phase 9).
+* **Type Annotations & Gradual Checking** (Section K).
+* **Block ↔ AST Round-Tripping**: Visual block translation (Section L / Phase 5).
+* **Interactive Debugger**: Breakpoint and step debugging hooks (Section M / Phase 6).
+* **Bytecode VM**: Stack-based virtual machine (Section N / Phase 7, ISA designed in ADR 013).
+* **AOT Compiler**: C code emission and native compiler (Section P / Phase 9).
 
 ### EXPERIMENTAL
 * *None.*
@@ -55,28 +62,24 @@
 
 ## 2. Milestone Checkpoint (Section 51)
 
-* **Current Milestone:** Milestone 8 Complete (Module System, Singleton Cache, Circular Import Detection, ADR 012)
+* **Current Milestone:** Milestone 9 Complete (Standard Library Modules: sys, fs, random, time, json, testing, ADR 019)
 * **Status:** VERIFIED & COMPLETE
 * **Implemented:**
-  - `import`, `from`, and `as` lexer tokens with source span preservation.
-  - `UF_STMT_IMPORT` and `UF_STMT_FROM_IMPORT` AST nodes with S-expression pretty printer support.
-  - Parser rules: `import <mod> [as <alias>]` and `from <mod> import <syms>`.
-  - Semantic scope analysis registering imported module and symbol bindings.
-  - First-class `UF_OBJ_MODULE` / `UF_VAL_MODULE` representation (`UfModuleObject`) with dot access (`mod.field`).
-  - Isolated arena and interner lifetimes per module, guaranteeing memory safety for AST nodes and string literals.
-  - Module lifecycle state machine (`UNLOADED` -> `LOADING` -> `LOADED`) with circular dependency traps (`CircularImportError`).
-  - Runtime module cache (`rt->module_cache`) ensuring single-evaluation singleton semantics.
-  - Multi-tier path resolution: relative to caller, relative to working directory, and `UNFISH_PATH`.
-  - Lazy on-demand instantiation of standard library modules (`math`, `strings`).
-  - Full GC mark-and-sweep integration for modules, their environments, and export maps.
-  - Conformance test suite expanded to 41 tests (`26_import_module`, `27_from_import`, `err_circular_import`, `err_module_not_found`, `err_import_symbol_not_found`).
-  - Stress test suite expanded to 12 tests (`test_module_stress` with live module calls under aggressive GC pressure).
-  - Example demonstrations in `examples/geometry.unfish` and `examples/modules_demo.unfish`.
-  - Architectural decision ADR 012 updated in `docs/DECISIONS.md`.
+  - `sys` module: `exit`, `args`, `platform`, `env`.
+  - `fs` module: `read_text`, `write_text`, `exists`, `delete_file`.
+  - `random` module: `random`, `random_int`, `choice`, `shuffle`.
+  - `time` module: `clock`, `sleep`, `timestamp`.
+  - `json` module: `parse`, `stringify`.
+  - `testing` module: `assert_equal`, `assert_true`, `assert_throws`, `run_tests` in `src/stdlib/testing.unfish`.
+  - Lazy built-in module registration and fallback loading for `src/stdlib/*.unfish`.
+  - CLI script argument forwarding into `UfRuntime` (`uf_runtime_set_args`).
+  - Conformance test suite expanded to 46 tests (`28_stdlib_sys`, `29_stdlib_fs`, `30_stdlib_random_time`, `31_stdlib_json`, `32_stdlib_testing`).
+  - Stress test suite expanded to 13 tests (`test_json_and_stdlib_stress`).
+  - Architectural decision ADR 019 recorded in `docs/DECISIONS.md`.
 * **Verified:**
   - Unit tests: `test_lexer`, `test_parser`, `test_semantic`, `test_interpreter`.
-  - Stress tests: `test_stress` (12 tests including module GC stress).
-  - Conformance test suite: 41 test cases.
+  - Stress tests: `test_stress` (13 tests including JSON stdlib GC stress).
+  - Conformance test suite: 46 test cases.
   - 100% clean execution under AddressSanitizer and UndefinedBehaviorSanitizer with zero memory leaks.
 * **Next Recommended Task:**
-  - Section J: Standard Library Modules (`sys`, `fs`, `time`, `json`, `testing`).
+  - Section K: Type Annotations & Gradual Checking.

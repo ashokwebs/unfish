@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0-alpha] - 2026-09-04
+
+### Added
+- **Core Standard Library Modules (Section J / ADR 019)**:
+  - `sys`: Process exit (`sys.exit`), CLI argument access (`sys.args`), host platform detection (`sys.platform`), and environment variable inspection (`sys.env`).
+  - `fs`: Sandboxed filesystem I/O (`fs.read_text`, `fs.write_text`, `fs.exists`, `fs.delete_file`).
+  - `random`: Pseudo-random generation (`random.random`, `random.random_int`), sequence sampling (`random.choice`), and Fisher-Yates array shuffling (`random.shuffle`).
+  - `time`: High-resolution monotonic timer (`time.clock`), sleep delay (`time.sleep`), and UNIX epoch timestamp (`time.timestamp`).
+  - `json`: Native recursive-descent parser (`json.parse`) and full serializer (`json.stringify`) with character escaping.
+  - `testing`: Written in Unfish (`src/stdlib/testing.unfish`), providing assertions (`assert_equal`, `assert_true`, `assert_throws`) and an isolated test runner (`run_tests`).
+- **CLI Argument Forwarding**: CLI script execution forwards trailing arguments into `UfRuntime` via `uf_runtime_set_args`, accessible by `sys.args()`.
+- **Stdlib Conformance & Stress Tests**: Added `28_stdlib_sys.unfish`, `29_stdlib_fs.unfish`, `30_stdlib_random_time.unfish`, `31_stdlib_json.unfish`, and `32_stdlib_testing.unfish`, expanding conformance test suite to 46 passing tests. Added `test_json_and_stdlib_stress` to `test_stress` under heavy GC pressure (13 passing stress tests).
+- **Documentation**: Recorded ADR 019 in `docs/DECISIONS.md`; updated `docs/STANDARD_LIBRARY.md` and `docs/PROJECT_STATE.md`.
+
+---
+
 ## [0.8.0-alpha] - 2026-09-04
 
 ### Added

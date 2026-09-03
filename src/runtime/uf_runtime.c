@@ -645,10 +645,17 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->out_stream = stdout;
     rt->err_stream = stderr;
     rt->reporter = reporter;
+    rt->argc = 0;
+    rt->argv = NULL;
 
     register_builtins(rt);
     uf_stdlib_register_runtime(rt);
     uf_module_init(rt);
+}
+
+void uf_runtime_set_args(UfRuntime* rt, int argc, char** argv) {
+    rt->argc = argc;
+    rt->argv = argv;
 }
 
 void uf_runtime_free(UfRuntime* rt) {

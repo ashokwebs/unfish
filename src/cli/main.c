@@ -151,14 +151,18 @@ static int cmd_check(const char* file_path) {
     return exit_code;
 }
 
-static int cmd_run(const char* file_path) {
+static int cmd_run(const char* file_path, int script_argc, char** script_argv) {
     char* source = read_file(file_path);
-    if (!source) return 1;
+    if (!source) {
+        fprintf(stderr, "Error: Could not open or read file '%s'\n", file_path);
+        return 66;
+    }
 
     UfArena arena;
-    uf_arena_init(&arena, 16384);
+    uf_arena_init(&arena, 65536);
     UfInterner interner;
     uf_interner_init(&interner, &arena);
+
     UfDiagnosticReporter reporter;
     uf_diag_reporter_init(&reporter, file_path, source);
 
@@ -187,6 +191,7 @@ static int cmd_run(const char* file_path) {
 
     UfRuntime rt;
     uf_runtime_init(&rt, &reporter);
+    uf_runtime_set_args(&rt, script_argc, script_argv);
 
     UfInterpretResult result = uf_interpret_program(&rt, program);
     int exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error) ? 0 : 3;
@@ -339,12 +344,12 @@ int main(int argc, char* argv[]) {
             fprintf(stderr, "Error: Expected file path for 'run'\n");
             return 64;
         }
-        return cmd_run(argv[2]);
+        return cmd_run(argv[2], argc - 2, argv + 2);
     }
 
     /* Shorthand: unfish <file.unfish> */
     if (argv[1][0] != '-') {
-        return cmd_run(argv[1]);
+        return cmd_run(argv[1], argc - 1, argv + 1);
     }
 
     fprintf(stderr, "Error: Unknown command or option '%s'\n", argv[1]);
