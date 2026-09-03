@@ -95,6 +95,14 @@
 * **Description**: Raises an `AssertionError` if `condition` is falsy.
 * **Returns**: `null`.
 
+### `error(message, [kind])`
+* **Description**: Raises an exception with the given `message` and optional `kind` string (defaults to `"UserError"`). Can be caught by enclosing `try ... catch <err>:` blocks. The resulting error object exposes properties:
+  - `err.message`: Error message (`String`).
+  - `err.kind`: Exception category name (`String`).
+  - `err.line`: Source code line number (`Number`).
+  - `err.file`: Source code file name (`String`).
+* **Returns**: Never returns normally; triggers stack unwinding via `longjmp`.
+
 ## 3. String Standard Library
 
 | Function | Signature | Description |

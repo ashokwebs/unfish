@@ -1,0 +1,22 @@
+# expect: Caught division: Division by zero
+# expect: Kind: DivisionByZero
+# expect: Caught bounds: IndexOutOfBounds
+# expect: Execution continued normally
+
+# 1. Catching division by zero
+try:
+    let x = 10 / 0
+    say "Unreachable"
+catch err:
+    say "Caught division: " + err.message
+    say "Kind: " + err.kind
+
+# 2. Catching index out of bounds
+let arr = [1, 2, 3]
+try:
+    let item = arr[99]
+    say "Unreachable"
+catch err:
+    say "Caught bounds: " + err.kind
+
+say "Execution continued normally"

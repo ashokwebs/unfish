@@ -1,0 +1,4 @@
+# expect-exit: 3
+# expect-error: Runtime Error: CrashReport
+
+error("CrashReport", "UserError")

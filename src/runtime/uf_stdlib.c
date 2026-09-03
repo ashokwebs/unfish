@@ -506,6 +506,30 @@ static UfValue std_random_int(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_number((double)res);
 }
 
+static UfValue std_error(UfRuntime* rt, int argc, UfValue* args) {
+    const char* msg = "Error";
+    if (argc >= 1) {
+        if (args[0].kind == UF_VAL_STRING) {
+            msg = args[0].as.string->chars;
+        } else {
+            char* s = uf_val_to_string(args[0]);
+            UfValue sv = uf_val_string(rt, s, strlen(s));
+            free(s);
+            msg = sv.as.string->chars;
+        }
+    }
+    const char* kind = (argc >= 2 && args[1].kind == UF_VAL_STRING) ? args[1].as.string->chars : "UserError";
+
+    SourceLoc loc = source_loc_make("<user>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+    if (rt->frame_count > 0) {
+        span = rt->frames[rt->frame_count - 1].call_span;
+    }
+
+    uf_runtime_raise(rt, kind, span, "%s", msg);
+    return uf_val_null();
+}
+
 /* ========================================================================= */
 /* REGISTRATION                                                              */
 /* ========================================================================= */
@@ -548,6 +572,9 @@ void uf_stdlib_register_runtime(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "PI",       uf_val_number(3.14159265358979323846));
     uf_env_declare(rt->global_env, "E",        uf_val_number(2.71828182845904523536));
     uf_env_declare(rt->global_env, "INFINITY", uf_val_number(HUGE_VAL));
+
+    /* Error handling */
+    uf_env_declare(rt->global_env, "error", uf_val_native("error", std_error, -1));
 }
 
 void uf_stdlib_register_semantic(struct UfSemanticAnalyzer* analyzer) {
@@ -591,4 +618,7 @@ void uf_stdlib_register_semantic(struct UfSemanticAnalyzer* analyzer) {
     uf_semantic_add_symbol(analyzer, "PI",       UF_SYM_VAR, span, -1);
     uf_semantic_add_symbol(analyzer, "E",        UF_SYM_VAR, span, -1);
     uf_semantic_add_symbol(analyzer, "INFINITY", UF_SYM_VAR, span, -1);
+
+    /* Error handling */
+    uf_semantic_add_symbol(analyzer, "error", UF_SYM_BUILTIN, span, -1);
 }

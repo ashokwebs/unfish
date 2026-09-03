@@ -1,0 +1,25 @@
+# expect: Inner caught: Division by zero
+# expect: Inner caught: first failure
+# expect: Outer caught: escalated from inner
+# expect: Finished nested try-catch
+
+# 1. Inner catches, outer does not trigger
+try:
+    try:
+        let a = 1 / 0
+    catch inner_err:
+        say "Inner caught: " + inner_err.message
+catch outer_err:
+    say "Outer caught unexpectedly: " + outer_err.message
+
+# 2. Inner re-throws / raises to outer
+try:
+    try:
+        error("first failure", "AppError")
+    catch e1:
+        say "Inner caught: " + e1.message
+        error("escalated from inner", "EscalatedError")
+catch e2:
+    say "Outer caught: " + e2.message
+
+say "Finished nested try-catch"

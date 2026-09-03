@@ -99,7 +99,8 @@ typedef enum {
     UF_STMT_CONTINUE,
     UF_STMT_FUNCTION,
     UF_STMT_RETURN,
-    UF_STMT_BLOCK
+    UF_STMT_BLOCK,
+    UF_STMT_TRY_CATCH
 } UfStmtKind;
 
 struct UfStmt {
@@ -167,6 +168,12 @@ struct UfStmt {
             UfStmt** stmts;
             size_t count;
         } block;
+
+        struct {
+            UfStmt* try_block;
+            const char* catch_var;
+            UfStmt* catch_block;
+        } try_catch;
     } as;
 };
 
@@ -207,6 +214,7 @@ UfStmt* uf_stmt_continue(UfArena* arena, SourceSpan span);
 UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body);
 UfStmt* uf_stmt_return(UfArena* arena, SourceSpan span, UfExpr* value);
 UfStmt* uf_stmt_block(UfArena* arena, SourceSpan span, UfStmt** stmts, size_t count);
+UfStmt* uf_stmt_try_catch(UfArena* arena, SourceSpan span, UfStmt* try_block, const char* catch_var, UfStmt* catch_block);
 
 void uf_ast_print(const UfProgram* program, FILE* out);
 void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent);

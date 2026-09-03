@@ -87,6 +87,8 @@ static void synchronize(UfParser* parser) {
             case UF_TOK_REPEAT:
             case UF_TOK_RETURN:
             case UF_TOK_SAY:
+            case UF_TOK_TRY:
+            case UF_TOK_CATCH:
             case UF_TOK_DEDENT:
                 return;
             default:
@@ -361,9 +363,11 @@ static const ParseRule rules[] = {
     [UF_TOK_TIMES]      = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_FOR]        = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_IN]         = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_BREAK]      = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_CONTINUE]   = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_AND]        = { NULL,             parse_binary, PREC_AND },
+    [UF_TOK_BREAK]      = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_CONTINUE]   = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_TRY]        = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_CATCH]      = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_AND]        = { NULL,                 parse_binary, PREC_AND },
     [UF_TOK_OR]         = { NULL,             parse_binary, PREC_OR },
     [UF_TOK_NOT]        = { parse_unary,      NULL,         PREC_UNARY },
     [UF_TOK_TRUE]       = { parse_literal,    NULL,         PREC_NONE },
@@ -620,6 +624,26 @@ static UfStmt* parse_expression_or_assignment_statement(UfParser* parser) {
     return uf_stmt_expr(parser->arena, span, expr);
 }
 
+static UfStmt* parse_try_catch_statement(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start; /* 'try' token */
+    UfStmt* try_block = parse_block(parser);
+
+    consume(parser, UF_TOK_CATCH, "Expected 'catch' after 'try' block", "Syntax: 'try:\\n    <block>\\ncatch <err>:\\n    <block>'");
+
+    const char* catch_var = NULL;
+    if (check(parser, UF_TOK_IDENTIFIER)) {
+        advance(parser);
+        catch_var = parser->previous.as.string_val;
+    } else {
+        error_current(parser, "Expected error variable name after 'catch'", "e.g., 'catch err:'");
+    }
+
+    UfStmt* catch_block = parse_block(parser);
+
+    SourceSpan span = source_span_make(start, parser->previous.span.end);
+    return uf_stmt_try_catch(parser->arena, span, try_block, catch_var, catch_block);
+}
+
 static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_LET))      return parse_let_statement(parser);
     if (match(parser, UF_TOK_SAY))      return parse_say_statement(parser);
@@ -630,6 +654,7 @@ static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_FOR))      return parse_for_statement(parser);
     if (match(parser, UF_TOK_BREAK))    return parse_break_statement(parser);
     if (match(parser, UF_TOK_CONTINUE)) return parse_continue_statement(parser);
+    if (match(parser, UF_TOK_TRY))      return parse_try_catch_statement(parser);
     if (match(parser, UF_TOK_FUNCTION)) return parse_function_statement(parser);
 
     return parse_expression_or_assignment_statement(parser);

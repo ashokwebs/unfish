@@ -176,3 +176,19 @@
      - Constants: `PI` (3.14159...), `E` (2.71828...), `INFINITY` (IEEE 754 positive infinity).
   4. **Error Handling**: Tier 1 errors return `null` (e.g. `to_number("invalid") -> null`, `char_at` out-of-bounds -> `""`); math domain violations (e.g. `sqrt(-1)`, `log(0)`) emit runtime diagnostic errors.
 * **Consequences**: Provides complete string and math capabilities out of the box with zero third-party dependencies, adhering to C99 standards and tested under memory sanitizers.
+
+## ADR 017: Structured Exception Recovery with try/catch and Stack Unwinding
+* **Date**: Milestone 7 (Phase 3 Part 5)
+* **Status**: Accepted
+* **Context**: ADR 011 establishes a tiered error recovery strategy. Real programs and robust scripts need the ability to catch runtime anomalies (division by zero, index out of bounds, invalid JSON/CSV data) and raise application-level exceptions (`error(msg, [kind])`) without crashing the entire runtime.
+* **Decision**:
+  1. **Syntax**: Block-structured `try: <block> catch <ident>: <block>`. Catch variable is scoped exclusively to the catch block.
+  2. **First-Class Error Object**: `UF_OBJ_ERROR` / `UF_VAL_ERROR` (`UfErrorObject`) storing `message` (`UfStringObject*`), `kind` (`UfStringObject*`), `line`, and source `file`.
+  3. **Object Properties**: Subscript and dot access desugaring (`err.message`, `err.kind`, `err.line`, `err.file`) allows inspectable exception metadata in user code.
+  4. **Stack Unwinding via `setjmp`/`longjmp`**:
+     - `UfRuntime` maintains a handler stack `UfTryHandler try_handlers[UF_MAX_TRY_HANDLERS]`.
+     - Each handler saves `jmp_buf`, calling `env`, `frame_count`, and `temp_root_count`.
+     - When `uf_runtime_raise` or `uf_runtime_error` triggers inside an active try block, runtime state (`frame_count`, `temp_root_count`, `current_env`) is restored, and `longjmp` transfers control to the catch block handler.
+     - Because all heap values are tracked on `rt->all_objects` in the mark-and-sweep GC and program structures in arenas, stack unwinding does NOT leak memory or leave orphaned heap blocks.
+  5. **Native `error(message, [kind])`**: Standard library built-in enabling user scripts to raise custom exceptions with arbitrary error kinds (defaulting to `"UserError"`).
+* **Consequences**: Complete, structured, and leak-free exception handling across nested function calls, verified under AddressSanitizer and UndefinedBehaviorSanitizer.

@@ -70,11 +70,10 @@ An identifier begins with an ASCII letter (`a-z`, `A-Z`) or an underscore (`_`),
 
 ### 2.6. Keywords [IMPLEMENTED]
 Reserved keywords:
-```
-and         break       continue    else        false
-function    if          let         not         null
-or          repeat      return      say         times
-true        while
+and         break       catch       continue    else
+false       function    if          let         not
+null        or          repeat      return      say
+times       true        try         while
 ```
 
 ### 2.7. Literals [IMPLEMENTED]
@@ -102,6 +101,7 @@ Statement      = LetStmt
                | ContinueStmt
                | FunctionStmt
                | ReturnStmt
+               | TryCatchStmt
                | ExprStmt ;
 
 Block          = ":" , NEWLINE , INDENT , { Statement | NEWLINE } , DEDENT ;
@@ -120,6 +120,7 @@ WhileStmt      = "while" , Expression , Block ;
 RepeatStmt     = "repeat" , Expression , "times" , Block ;
 ForStmt        = "for" , identifier , "in" , Expression , Block ;
 FunctionStmt   = "function" , identifier , "(" , [ ParamList ] , ")" , Block ;
+TryCatchStmt   = "try" , Block , "catch" , identifier , Block ;
 
 ParamList      = identifier , { "," , identifier } ;
 ArgList        = Expression , { "," , Expression } ;

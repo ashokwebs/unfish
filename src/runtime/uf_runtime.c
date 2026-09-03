@@ -533,6 +533,12 @@ void uf_gc_mark_value(UfValue val) {
                 uf_gc_mark_value(map->order_keys[i]);
             }
         }
+    } else if (val.kind == UF_VAL_ERROR) {
+        if (val.as.error && !val.as.error->obj.marked) {
+            val.as.error->obj.marked = true;
+            if (val.as.error->message) val.as.error->message->obj.marked = true;
+            if (val.as.error->kind) val.as.error->kind->obj.marked = true;
+        }
     }
 }
 
@@ -563,6 +569,8 @@ void uf_gc_collect(UfRuntime* rt) {
     for (size_t i = 0; i < rt->temp_root_count; ++i) {
         uf_gc_mark_value(rt->temp_roots[i]);
     }
+
+    uf_gc_mark_value(rt->current_error);
 
     /* 2. Sweep */
     UfObj** curr = &rt->all_objects;
@@ -608,6 +616,8 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->step_count = 0;
     rt->max_steps = 10000000;
     rt->had_runtime_error = false;
+    rt->try_handler_count = 0;
+    rt->current_error = uf_val_null();
     rt->call_fn = NULL;
     rt->out_stream = stdout;
     rt->err_stream = stderr;
@@ -664,14 +674,70 @@ void uf_runtime_pop_frame(UfRuntime* rt) {
     }
 }
 
-void uf_runtime_error(UfRuntime* rt, SourceSpan span, const char* fmt, ...) {
-    rt->had_runtime_error = true;
-
+void uf_runtime_raise(UfRuntime* rt, const char* kind, SourceSpan span, const char* fmt, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
+
+    if (rt->try_handler_count > 0) {
+        UfValue err = uf_val_error(rt, buffer, kind ? kind : "RuntimeError", span);
+        rt->current_error = err;
+        UfTryHandler* h = &rt->try_handlers[--rt->try_handler_count];
+        rt->frame_count = h->frame_count;
+        rt->temp_root_count = h->temp_root_count;
+        rt->current_env = h->scope_env;
+        longjmp(h->jmp, 1);
+    }
+
+    rt->had_runtime_error = true;
+
+    if (rt->reporter) {
+        uf_report_diag(rt->reporter, UF_DIAG_RUNTIME_ERROR, span, buffer, NULL);
+    } else {
+        fprintf(rt->err_stream, "Runtime Error: %s\n", buffer);
+    }
+
+    if (rt->frame_count > 0) {
+        fprintf(rt->err_stream, "Traceback (most recent call first):\n");
+        for (int i = (int)rt->frame_count - 1; i >= 0; --i) {
+            fprintf(rt->err_stream, "  frame %d: %s() at %s:%u\n",
+                    i, rt->frames[i].fn_name,
+                    rt->frames[i].call_span.start.file ? rt->frames[i].call_span.start.file : "<unknown>",
+                    rt->frames[i].call_span.start.line);
+        }
+        fprintf(rt->err_stream, "\n");
+    }
+}
+
+void uf_runtime_error(UfRuntime* rt, SourceSpan span, const char* fmt, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+
+    if (rt->try_handler_count > 0) {
+        const char* kind = "RuntimeError";
+        if (strncmp(buffer, "Division by zero", 16) == 0) kind = "DivisionByZero";
+        else if (strncmp(buffer, "IndexOutOfBounds", 16) == 0) kind = "IndexOutOfBounds";
+        else if (strncmp(buffer, "StackOverflowError", 18) == 0) kind = "StackOverflowError";
+        else if (strncmp(buffer, "ExecutionQuotaExceeded", 22) == 0) kind = "ExecutionQuotaExceeded";
+        else if (strncmp(buffer, "AssertionError", 14) == 0) kind = "AssertionError";
+        else if (strstr(buffer, "domain error") != NULL) kind = "DomainError";
+        else if (strstr(buffer, "expects") != NULL || strstr(buffer, "Cannot") != NULL || strstr(buffer, "must be") != NULL) kind = "TypeError";
+
+        UfValue err = uf_val_error(rt, buffer, kind, span);
+        rt->current_error = err;
+        UfTryHandler* h = &rt->try_handlers[--rt->try_handler_count];
+        rt->frame_count = h->frame_count;
+        rt->temp_root_count = h->temp_root_count;
+        rt->current_env = h->scope_env;
+        longjmp(h->jmp, 1);
+    }
+
+    rt->had_runtime_error = true;
 
     if (rt->reporter) {
         uf_report_diag(rt->reporter, UF_DIAG_RUNTIME_ERROR, span, buffer, NULL);

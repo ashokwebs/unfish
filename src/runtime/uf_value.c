@@ -355,6 +355,36 @@ bool uf_map_delete(UfMapObject* map, UfValue key) {
     return false;
 }
 
+UfValue uf_val_error(UfRuntime* rt, const char* message, const char* kind, SourceSpan span) {
+    UfErrorObject* err = (UfErrorObject*)malloc(sizeof(UfErrorObject));
+    if (!err) {
+        fprintf(stderr, "Fatal error: Out of memory allocating error object\n");
+        abort();
+    }
+    err->obj.kind = UF_OBJ_ERROR;
+    err->obj.marked = false;
+    err->obj.next = NULL;
+
+    UfValue msg_val = uf_val_string(rt, message ? message : "", message ? strlen(message) : 0);
+    err->message = msg_val.as.string;
+
+    const char* k = kind ? kind : "Error";
+    UfValue kind_val = uf_val_string(rt, k, strlen(k));
+    err->kind = kind_val.as.string;
+
+    err->line = (int)span.start.line;
+    err->file = span.start.file ? span.start.file : "<unknown>";
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)err, sizeof(UfErrorObject));
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_ERROR;
+    v.as.error = err;
+    return v;
+}
+
 bool uf_val_is_truthy(UfValue val) {
     switch (val.kind) {
         case UF_VAL_NULL:
@@ -372,6 +402,8 @@ bool uf_val_is_truthy(UfValue val) {
             return val.as.array->count > 0;
         case UF_VAL_MAP:
             return val.as.map->count > 0;
+        case UF_VAL_ERROR:
+            return true;
     }
     return false;
 }
@@ -415,6 +447,8 @@ bool uf_val_equal(UfValue a, UfValue b) {
             }
             return true;
         }
+        case UF_VAL_ERROR:
+            return a.as.error == b.as.error;
     }
     return false;
 }
@@ -533,6 +567,13 @@ char* uf_val_to_string(UfValue val) {
             strcat(out, "}");
             return out;
         }
+        case UF_VAL_ERROR: {
+            char ebuf[512];
+            snprintf(ebuf, sizeof(ebuf), "[%s: %s]",
+                     val.as.error->kind ? val.as.error->kind->chars : "Error",
+                     val.as.error->message ? val.as.error->message->chars : "");
+            return strdup(ebuf);
+        }
     }
     return strdup("<unknown>");
 }
@@ -547,6 +588,7 @@ const char* uf_val_type_name(UfValue val) {
         case UF_VAL_NATIVE_FN: return "function";
         case UF_VAL_ARRAY:     return "array";
         case UF_VAL_MAP:       return "map";
+        case UF_VAL_ERROR:     return "error";
     }
     return "<unknown>";
 }

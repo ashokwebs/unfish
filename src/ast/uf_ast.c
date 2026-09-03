@@ -239,6 +239,16 @@ UfStmt* uf_stmt_block(UfArena* arena, SourceSpan span, UfStmt** stmts, size_t co
     return stmt;
 }
 
+UfStmt* uf_stmt_try_catch(UfArena* arena, SourceSpan span, UfStmt* try_block, const char* catch_var, UfStmt* catch_block) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_TRY_CATCH;
+    stmt->span = span;
+    stmt->as.try_catch.try_block = try_block;
+    stmt->as.try_catch.catch_var = catch_var;
+    stmt->as.try_catch.catch_block = catch_block;
+    return stmt;
+}
+
 static void print_indent(FILE* out, int indent) {
     for (int i = 0; i < indent; ++i) {
         fprintf(out, "  ");
@@ -447,6 +457,16 @@ void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent) {
             for (size_t i = 0; i < stmt->as.block.count; ++i) {
                 uf_ast_print_stmt(stmt->as.block.stmts[i], out, indent + 1);
             }
+            print_indent(out, indent);
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_TRY_CATCH:
+            fprintf(out, "(try\n");
+            uf_ast_print_stmt(stmt->as.try_catch.try_block, out, indent + 1);
+            print_indent(out, indent);
+            fprintf(out, " catch %s\n", stmt->as.try_catch.catch_var ? stmt->as.try_catch.catch_var : "_");
+            uf_ast_print_stmt(stmt->as.try_catch.catch_block, out, indent + 1);
             print_indent(out, indent);
             fprintf(out, ")\n");
             break;

@@ -447,6 +447,16 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
                 analyze_stmt(analyzer, stmt->as.block.stmts[i]);
             }
             break;
+
+        case UF_STMT_TRY_CATCH:
+            analyze_stmt(analyzer, stmt->as.try_catch.try_block);
+            push_scope(analyzer, false);
+            if (stmt->as.try_catch.catch_var) {
+                add_symbol(analyzer, stmt->as.try_catch.catch_var, UF_SYM_VAR, stmt->span, -1);
+            }
+            analyze_stmt(analyzer, stmt->as.try_catch.catch_block);
+            pop_scope(analyzer);
+            break;
     }
 }
 

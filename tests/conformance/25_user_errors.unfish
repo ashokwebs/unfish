@@ -1,0 +1,28 @@
+# expect: Caught: file not found
+# expect: Kind: IOError
+# expect: Deep stack unwind: deep failure
+# expect: Success after deep unwind
+
+function level3():
+    error("deep failure", "CallStackError")
+
+function level2():
+    level3()
+
+function level1():
+    level2()
+
+# 1. Custom error and kind
+try:
+    error("file not found", "IOError")
+catch err:
+    say "Caught: " + err.message
+    say "Kind: " + err.kind
+
+# 2. Deep stack unwinding through function calls
+try:
+    level1()
+catch err:
+    say "Deep stack unwind: " + err.message
+
+say "Success after deep unwind"

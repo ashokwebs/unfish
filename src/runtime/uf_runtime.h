@@ -8,8 +8,11 @@
 #include "uf_value.h"
 #include "uf_env.h"
 
+#include <setjmp.h>
+
 #define UF_MAX_CALL_FRAMES 512
 #define UF_MAX_TEMP_ROOTS 512
+#define UF_MAX_TRY_HANDLERS 64
 #define UF_GC_INITIAL_THRESHOLD (64 * 1024) /* 64 KB */
 
 typedef struct {
@@ -17,6 +20,13 @@ typedef struct {
     SourceSpan call_span;
     UfEnv* env;
 } UfCallFrame;
+
+typedef struct {
+    jmp_buf jmp;
+    UfEnv* scope_env;
+    size_t frame_count;
+    size_t temp_root_count;
+} UfTryHandler;
 
 typedef UfValue (*UfCallValueFn)(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span);
 
@@ -34,6 +44,10 @@ struct UfRuntime {
 
     UfCallFrame frames[UF_MAX_CALL_FRAMES];
     size_t frame_count;
+
+    UfTryHandler try_handlers[UF_MAX_TRY_HANDLERS];
+    size_t try_handler_count;
+    UfValue current_error;
 
     uint64_t step_count;
     uint64_t max_steps;
@@ -65,5 +79,6 @@ void uf_runtime_pop_frame(UfRuntime* rt);
 UfValue uf_runtime_call(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span);
 
 void uf_runtime_error(UfRuntime* rt, SourceSpan span, const char* fmt, ...);
+void uf_runtime_raise(UfRuntime* rt, const char* kind, SourceSpan span, const char* fmt, ...);
 
 #endif /* UF_RUNTIME_H */

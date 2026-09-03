@@ -1,0 +1,41 @@
+# Unfish - Structured Exception Recovery (try/catch)
+
+say "=== Safe Math Division ==="
+
+function safe_divide(a, b):
+    try:
+        return a / b
+    catch err:
+        say "Warning: Failed to divide " + a + " by " + b + " (" + err.message + ")"
+        return 0
+
+say "10 / 2 = " + safe_divide(10, 2)
+say "10 / 0 = " + safe_divide(10, 0)
+
+say ""
+say "=== JSON-like Parsing Validation ==="
+
+function validate_user(user):
+    if not has_key(user, "username"):
+        error("Missing required field 'username'", "ValidationError")
+    if not has_key(user, "age"):
+        error("Missing required field 'age'", "ValidationError")
+    if user.age < 0:
+        error("Age cannot be negative: " + user.age, "RangeError")
+    return "User " + user.username + " is valid."
+
+let good_user = { username: "ada", age: 36 }
+let bad_user_1 = { username: "bob" }
+let bad_user_2 = { username: "carol", age: -5 }
+
+let users = [good_user, bad_user_1, bad_user_2]
+
+for u in users:
+    try:
+        let msg = validate_user(u)
+        say "[OK] " + msg
+    catch err:
+        say "[REJECTED] " + err.kind + ": " + err.message
+
+say ""
+say "=== Exception Recovery Completed Successfully ==="

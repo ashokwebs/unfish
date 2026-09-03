@@ -551,6 +551,63 @@ static void test_map_gc_stress(void) {
     printf("test_map_gc_stress passed! (GC ran %zu times)\n", rt.gc_count);
 }
 
+static void test_try_catch_gc_stress(void) {
+    const char* src =
+        "let caught_count = 0\n"
+        "for i in range(0, 50):\n"
+        "    try:\n"
+        "        let garbage = [i, \"str\", {key: i * 2}]\n"
+        "        if i % 2 == 0:\n"
+        "            error(\"even error\", \"EvenKind\")\n"
+        "        else:\n"
+        "            let div = 10 / 0\n"
+        "    catch err:\n"
+        "        let catch_garbage = [err.message, err.kind]\n"
+        "        caught_count = caught_count + 1\n"
+        "say caught_count\n";
+
+    UfArena arena;
+    uf_arena_init(&arena, 4096);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "try_catch_stress.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "try_catch_stress.unfish", src, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+    assert(program && !parser.had_error);
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    assert(uf_analyze_program(&sema, program));
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+    rt.next_gc_threshold = 256;
+
+    char* out_buf = NULL;
+    size_t out_len = 0;
+    FILE* mem = open_memstream(&out_buf, &out_len);
+    rt.out_stream = mem;
+
+    UfInterpretResult res = uf_interpret_program(&rt, program);
+    fclose(mem);
+
+    assert(res == UF_INTERPRET_OK);
+    assert(!rt.had_runtime_error);
+    assert(strcmp(out_buf, "50\n") == 0);
+    assert(rt.gc_count >= 2);
+
+    free(out_buf);
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_try_catch_gc_stress passed! (GC ran %zu times)\n", rt.gc_count);
+}
+
 int main(void) {
     printf("Running comprehensive stress tests...\n");
     test_deeply_nested_closures();
@@ -559,6 +616,7 @@ int main(void) {
     test_gc_stress_collection_under_pressure();
     test_nested_arrays_closures_gc_stress();
     test_map_gc_stress();
+    test_try_catch_gc_stress();
     test_deeply_nested_expressions();
     test_recursion_stack_overflow_limit();
     test_step_limit_quota();

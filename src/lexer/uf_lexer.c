@@ -207,6 +207,7 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             if (memcmp(word, "and", 3) == 0) return UF_TOK_AND;
             if (memcmp(word, "not", 3) == 0) return UF_TOK_NOT;
             if (memcmp(word, "for", 3) == 0) return UF_TOK_FOR;
+            if (memcmp(word, "try", 3) == 0) return UF_TOK_TRY;
             break;
         case 4:
             if (memcmp(word, "else", 4) == 0) return UF_TOK_ELSE;
@@ -218,6 +219,7 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             if (memcmp(word, "times", 5) == 0) return UF_TOK_TIMES;
             if (memcmp(word, "false", 5) == 0) return UF_TOK_FALSE;
             if (memcmp(word, "break", 5) == 0) return UF_TOK_BREAK;
+            if (memcmp(word, "catch", 5) == 0) return UF_TOK_CATCH;
             break;
         case 6:
             if (memcmp(word, "return", 6) == 0) return UF_TOK_RETURN;

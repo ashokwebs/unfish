@@ -31,6 +31,8 @@ typedef enum {
     UF_TOK_IN,
     UF_TOK_BREAK,
     UF_TOK_CONTINUE,
+    UF_TOK_TRY,
+    UF_TOK_CATCH,
     UF_TOK_AND,
     UF_TOK_OR,
     UF_TOK_NOT,

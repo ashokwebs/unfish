@@ -398,6 +398,24 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                         result = uf_val_string(rt, ch, 1);
                     }
                 }
+            } else if (target.kind == UF_VAL_ERROR) {
+                if (idx_val.kind != UF_VAL_STRING) {
+                    uf_runtime_error(rt, expr->span, "Error property must be a string");
+                } else {
+                    const char* prop = idx_val.as.string->chars;
+                    UfErrorObject* err = target.as.error;
+                    if (strcmp(prop, "message") == 0) {
+                        result = uf_val_string(rt, err->message ? err->message->chars : "", err->message ? err->message->length : 0);
+                    } else if (strcmp(prop, "kind") == 0) {
+                        result = uf_val_string(rt, err->kind ? err->kind->chars : "Error", err->kind ? err->kind->length : 5);
+                    } else if (strcmp(prop, "line") == 0) {
+                        result = uf_val_number((double)err->line);
+                    } else if (strcmp(prop, "file") == 0) {
+                        result = uf_val_string_cstr(rt, err->file ? err->file : "<unknown>");
+                    } else {
+                        result = uf_val_null();
+                    }
+                }
             } else {
                 uf_runtime_error(rt, expr->span, "Cannot index value of type '%s'", uf_val_type_name(target));
             }
@@ -707,6 +725,42 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
 
         case UF_STMT_BLOCK:
             return execute_block(rt, env, stmt);
+
+        case UF_STMT_TRY_CATCH: {
+            if (rt->try_handler_count >= UF_MAX_TRY_HANDLERS) {
+                uf_runtime_error(rt, stmt->span, "Maximum nested try-catch handlers exceeded");
+                return exec_error();
+            }
+
+            UfTryHandler* h = &rt->try_handlers[rt->try_handler_count++];
+            h->scope_env = env;
+            h->frame_count = rt->frame_count;
+            h->temp_root_count = rt->temp_root_count;
+
+            if (setjmp(h->jmp) == 0) {
+                ExecResult res = execute_statement(rt, env, stmt->as.try_catch.try_block);
+                if (rt->try_handler_count > 0 && &rt->try_handlers[rt->try_handler_count - 1] == h) {
+                    rt->try_handler_count--;
+                }
+                return res;
+            } else {
+                /* Exception was caught via longjmp */
+                UfValue caught_err = rt->current_error;
+                uf_runtime_push_temp_root(rt, caught_err);
+                UfEnv* catch_env = uf_env_create(rt, env);
+                if (stmt->as.try_catch.catch_var) {
+                    uf_env_declare(catch_env, stmt->as.try_catch.catch_var, caught_err);
+                }
+                UfEnv* prev_env = rt->current_env;
+                rt->current_env = catch_env;
+                ExecResult res = execute_statement(rt, catch_env, stmt->as.try_catch.catch_block);
+                rt->current_env = prev_env;
+                uf_runtime_pop_temp_roots(rt, 1);
+                rt->current_error = uf_val_null();
+                rt->had_runtime_error = false;
+                return res;
+            }
+        }
     }
 
     return exec_ok();

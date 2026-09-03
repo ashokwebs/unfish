@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0-alpha] - 2026-09-04
+
+### Added
+- **Structured Exception Recovery (try/catch)**: `try: <block> catch <ident>: <block>` syntax (`UF_STMT_TRY_CATCH`) supporting block indentation and nested error handling (ADR 017).
+- **First-Class Error Objects**: Added `UF_OBJ_ERROR` and `UF_VAL_ERROR` (`UfErrorObject`) storing error message, exception kind, source line, and source file.
+- **Error Object Property Introspection**: Dot property access desugaring for `err.message`, `err.kind`, `err.line`, and `err.file`.
+- **Non-Local Stack Unwinding via setjmp/longjmp**: Runtime try handler stack in `UfRuntime` that cleanly restores frame counts, temp roots, and environment pointers without memory leaks under mark-and-sweep GC.
+- **User Exception Built-in (`error`)**: `error(message, [kind])` standard library procedure for domain validations, raising catchable exceptions with custom kind strings (defaults to `"UserError"`).
+- **GC Root In-Flight Preservation**: Added GC root marking for `rt->current_error` to protect error objects during garbage collection cycles inside catch handlers.
+- **Exception Conformance & Stress Tests**: Added `23_try_catch.unfish`, `24_nested_try_catch.unfish`, `25_user_errors.unfish`, and `err_uncaught_error.unfish`, bringing conformance suite to 36 passing tests. Added `test_try_catch_gc_stress` to `test_stress`.
+- **Example Applications**: Added `examples/error_handling.unfish` demonstrating safe division and multi-field JSON-like object validation.
+- **Documentation**: Recorded ADR 017 in `docs/DECISIONS.md`; updated `LANGUAGE_SPEC.md`, `STANDARD_LIBRARY.md`, and `PROJECT_STATE.md`.
+
+---
+
 ## [0.6.0-alpha] - 2026-09-04
 
 ### Added
