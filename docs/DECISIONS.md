@@ -290,5 +290,25 @@
      Arms evaluate in lexical order. Returns, breaks, and continues within an arm cleanly propagate to enclosing functions and loops.
 * **Consequences**: Provides pedagogical clarity for algorithms, tree traversals, and state machines while maintaining zero overhead when unused.
 
+## ADR 023: Canonical Source Code Formatter (`unfish format`)
+* **Date**: Milestone 13 (Phase 4 Part 6)
+* **Status**: Accepted
+* **Context**: Consistent code style across codebases, teaching materials, and repositories eliminates stylistic bike-shedding and improves readability. A deterministic, idempotency-guaranteed formatter ensures canonical presentation.
+* **Decision**:
+  1. **Canonical Formatting Rules**:
+     - Indentation: Exactly 4 spaces per nesting level.
+     - Spacing: Binary operators spaced (`a + b * c`), commas followed by 1 space, colons followed by 1 space in annotations and block headers.
+     - Newlines: Maximum 1 blank line between top-level declarations (functions, structs). No trailing spaces.
+     - Minimal Parentheses: Precedence-aware expression emission only inserts parentheses when sub-expression precedence is lower than or equal to surrounding operators.
+     - Property Access: Desugars string index operations matching identifier rules to dot syntax (`inst.field`).
+  2. **CLI Interface**:
+     - `unfish format <file>`: Writes formatted source to standard output.
+     - `unfish format -i <file>` / `--in-place`: Rewrites source file in-place if changes were necessary.
+     - `unfish format --check <file>`: Verification mode for CI; exits with 0 if already canonical, 1 otherwise.
+  3. **Idempotency Guarantee**:
+     Formally verified: `format(format(x)) == format(x)` across all grammar productions and test suites.
+* **Consequences**: Standardized tooling ecosystem with zero external dependencies.
+
+
 
 
