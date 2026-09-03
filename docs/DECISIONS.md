@@ -309,6 +309,25 @@
      Formally verified: `format(format(x)) == format(x)` across all grammar productions and test suites.
 * **Consequences**: Standardized tooling ecosystem with zero external dependencies.
 
+## ADR 024: Debugger Hook Architecture & Execution Visualization
+* **Date**: Milestone 14 (Phase 4 Part 7)
+* **Status**: Accepted
+* **Context**: Educational inspection, step-through debugging, and visual execution traces require runtime hooks without degrading performance during normal execution.
+* **Decision**:
+  1. **Zero-Overhead Hook Model**:
+     `UfRuntime` stores an optional `debug_hook` callback function pointer and `debug_user_ctx`. When `debug_hook == NULL`, standard execution proceeds at full speed without extra allocations.
+  2. **Event Model**:
+     - `UF_DEBUG_EVENT_STEP`: Emitted before executing every non-block statement.
+     - `UF_DEBUG_EVENT_CALL_ENTER` / `CALL_EXIT`: Emitted on function invocation and return with argument and return value inspection.
+     - `UF_DEBUG_EVENT_VAR_BIND` / `VAR_ASSIGN`: Emitted when variables are created (`let`) or mutated (`=`).
+     - `UF_DEBUG_EVENT_GC_START` / `GC_END`: Emitted during garbage collection with memory metrics.
+  3. **Visual Execution Tracer (`unfish trace <file>`)**:
+     Streams newline-delimited JSON events to stdout for consumption by visualizers, IDEs, or automated verification tools.
+  4. **Interactive CLI Debugger (`unfish debug <file>`)**:
+     Provides an interactive REPL (`ufdb`) with breakpoints (`b <line>`), single-stepping (`s`), step-over (`n`), continue (`c`), backtraces (`stack`), and scope inspection (`p <var>`, `env`, `heap`).
+* **Consequences**: First-class developer tooling embedded directly into the core runtime without third-party dependencies.
+
+
 
 
 

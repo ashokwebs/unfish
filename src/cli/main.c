@@ -11,6 +11,7 @@
 #include "../runtime/uf_runtime.h"
 #include "../interpreter/uf_interpreter.h"
 #include "../formatter/uf_formatter.h"
+#include "../debugger/uf_debugger.h"
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -47,6 +48,8 @@ static void print_usage(const char* prog) {
     printf("  %s run [--strict] <file.unfish>   Execute an Unfish program\n", prog);
     printf("  %s check [--strict] <file.unfish> Check program syntax and semantic analysis\n", prog);
     printf("  %s format [-i|--in-place] [--check] <file.unfish> Format source code\n", prog);
+    printf("  %s debug <file.unfish>            Run interactive step debugger\n", prog);
+    printf("  %s trace <file.unfish>            Emit JSON execution trace\n", prog);
     printf("  %s ast <file.unfish>              Dump parsed Abstract Syntax Tree\n", prog);
     printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
@@ -191,6 +194,103 @@ static int cmd_format(int argc, char** argv) {
         printf("✓ Cleanly formatted: %s\n", file_path);
     }
     return 0;
+}
+
+static int cmd_trace(const char* file_path) {
+    char* source = read_file(file_path);
+    if (!source) return 1;
+
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, file_path, source);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, file_path, source, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+
+    if (parser.had_error || !program) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    if (!uf_analyze_program(&sema, program) || reporter.error_count > 0) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 2;
+    }
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+    uf_debugger_attach_tracer(&rt, stdout);
+
+    UfInterpretResult result = uf_interpret_program(&rt, program);
+    uf_debugger_detach(&rt);
+
+    int exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error) ? 0 : 70;
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    free(source);
+    return exit_code;
+}
+
+static int cmd_debug(const char* file_path) {
+    char* source = read_file(file_path);
+    if (!source) return 1;
+
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, file_path, source);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, file_path, source, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+
+    if (parser.had_error || !program) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    if (!uf_analyze_program(&sema, program) || reporter.error_count > 0) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 2;
+    }
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+    uf_debugger_attach_interactive(&rt, stdin, stdout);
+
+    printf("Unfish Debugger (ufdb) started for '%s'. Type 'h' or 'help' for commands.\n", file_path);
+    UfInterpretResult result = uf_interpret_program(&rt, program);
+    uf_debugger_detach(&rt);
+
+    int exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error) ? 0 : 70;
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    free(source);
+    return exit_code;
 }
 
 static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict) {
@@ -404,6 +504,22 @@ int main(int argc, char* argv[]) {
 
     if (strcmp(cmd, "format") == 0) {
         return cmd_format(argc - (arg_idx + 1), argv + arg_idx + 1);
+    }
+
+    if (strcmp(cmd, "trace") == 0) {
+        if (arg_idx + 1 >= argc) {
+            fprintf(stderr, "Error: Expected file path for 'trace'\n");
+            return 64;
+        }
+        return cmd_trace(argv[arg_idx + 1]);
+    }
+
+    if (strcmp(cmd, "debug") == 0) {
+        if (arg_idx + 1 >= argc) {
+            fprintf(stderr, "Error: Expected file path for 'debug'\n");
+            return 64;
+        }
+        return cmd_debug(argv[arg_idx + 1]);
     }
 
     if (strcmp(cmd, "run") == 0) {

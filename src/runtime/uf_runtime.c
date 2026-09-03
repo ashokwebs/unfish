@@ -579,6 +579,14 @@ void uf_gc_mark_env(UfEnv* env) {
 }
 
 void uf_gc_collect(UfRuntime* rt) {
+    if (rt->debug_hook) {
+        UfDebugEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = UF_DEBUG_EVENT_GC_START;
+        ev.gc_bytes = rt->bytes_allocated;
+        uf_runtime_emit_debug(rt, &ev);
+    }
+
     /* 1. Mark roots */
     uf_gc_mark_env(rt->global_env);
     uf_gc_mark_env(rt->current_env);
@@ -645,6 +653,20 @@ void uf_gc_collect(UfRuntime* rt) {
     rt->gc_count++;
     size_t min_thresh = 1024;
     rt->next_gc_threshold = (rt->bytes_allocated * 2 > min_thresh) ? rt->bytes_allocated * 2 : min_thresh;
+
+    if (rt->debug_hook) {
+        UfDebugEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = UF_DEBUG_EVENT_GC_END;
+        ev.gc_bytes = rt->bytes_allocated;
+        uf_runtime_emit_debug(rt, &ev);
+    }
+}
+
+void uf_runtime_emit_debug(UfRuntime* rt, const UfDebugEvent* event) {
+    if (rt && rt->debug_hook) {
+        rt->debug_hook(rt, event, rt->debug_user_ctx);
+    }
 }
 
 void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
@@ -666,6 +688,8 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->out_stream = stdout;
     rt->err_stream = stderr;
     rt->reporter = reporter;
+    rt->debug_hook = NULL;
+    rt->debug_user_ctx = NULL;
     rt->argc = 0;
     rt->argv = NULL;
 

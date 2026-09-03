@@ -30,6 +30,28 @@ typedef struct {
 
 typedef UfValue (*UfCallValueFn)(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span);
 
+typedef enum {
+    UF_DEBUG_EVENT_STEP,
+    UF_DEBUG_EVENT_CALL_ENTER,
+    UF_DEBUG_EVENT_CALL_EXIT,
+    UF_DEBUG_EVENT_VAR_BIND,
+    UF_DEBUG_EVENT_VAR_ASSIGN,
+    UF_DEBUG_EVENT_ERROR,
+    UF_DEBUG_EVENT_GC_START,
+    UF_DEBUG_EVENT_GC_END
+} UfDebugEventType;
+
+typedef struct {
+    UfDebugEventType type;
+    SourceSpan span;
+    const char* fn_name;
+    const char* var_name;
+    UfValue val;
+    size_t gc_bytes;
+} UfDebugEvent;
+
+typedef void (*UfDebugHook)(UfRuntime* rt, const UfDebugEvent* event, void* user_ctx);
+
 struct UfRuntime {
     UfEnv* global_env;
     UfEnv* current_env;
@@ -62,9 +84,14 @@ struct UfRuntime {
     FILE* err_stream;
     UfDiagnosticReporter* reporter;
 
+    UfDebugHook debug_hook;
+    void* debug_user_ctx;
+
     int argc;
     char** argv;
 };
+
+void uf_runtime_emit_debug(UfRuntime* rt, const UfDebugEvent* event);
 
 void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter);
 void uf_runtime_set_args(UfRuntime* rt, int argc, char** argv);

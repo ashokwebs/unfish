@@ -81,7 +81,27 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
                     uf_env_declare(call_env, fn->params[i], args[i]);
                 }
 
+                if (rt->debug_hook) {
+                    UfDebugEvent ev;
+                    memset(&ev, 0, sizeof(ev));
+                    ev.type = UF_DEBUG_EVENT_CALL_ENTER;
+                    ev.span = span;
+                    ev.fn_name = fn->name ? fn->name : "<anonymous>";
+                    uf_runtime_emit_debug(rt, &ev);
+                }
+
                 ExecResult body_res = execute_statement(rt, call_env, fn->body);
+
+                if (rt->debug_hook) {
+                    UfDebugEvent ev;
+                    memset(&ev, 0, sizeof(ev));
+                    ev.type = UF_DEBUG_EVENT_CALL_EXIT;
+                    ev.span = span;
+                    ev.fn_name = fn->name ? fn->name : "<anonymous>";
+                    ev.val = (body_res.status == EXEC_RETURN) ? body_res.value : uf_val_null();
+                    uf_runtime_emit_debug(rt, &ev);
+                }
+
                 uf_runtime_pop_frame(rt);
                 rt->current_env = prev_env;
 
@@ -530,6 +550,14 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
         return exec_error();
     }
 
+    if (rt->debug_hook && stmt->kind != UF_STMT_BLOCK && stmt->span.start.line > 0) {
+        UfDebugEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = UF_DEBUG_EVENT_STEP;
+        ev.span = stmt->span;
+        uf_runtime_emit_debug(rt, &ev);
+    }
+
     switch (stmt->kind) {
         case UF_STMT_LET: {
             UfValue init_val = uf_val_null();
@@ -539,6 +567,15 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 uf_runtime_push_temp_root(rt, init_val);
             }
             uf_env_declare(env, stmt->as.let_stmt.name, init_val);
+            if (rt->debug_hook) {
+                UfDebugEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.type = UF_DEBUG_EVENT_VAR_BIND;
+                ev.span = stmt->span;
+                ev.var_name = stmt->as.let_stmt.name;
+                ev.val = init_val;
+                uf_runtime_emit_debug(rt, &ev);
+            }
             if (stmt->as.let_stmt.init) {
                 uf_runtime_pop_temp_root(rt);
             }
@@ -553,6 +590,15 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 uf_runtime_error(rt, stmt->span, "Cannot assign to undefined identifier '%s'", stmt->as.assign_stmt.name);
                 uf_runtime_pop_temp_root(rt);
                 return exec_error();
+            }
+            if (rt->debug_hook) {
+                UfDebugEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.type = UF_DEBUG_EVENT_VAR_ASSIGN;
+                ev.span = stmt->span;
+                ev.var_name = stmt->as.assign_stmt.name;
+                ev.val = val;
+                uf_runtime_emit_debug(rt, &ev);
             }
             uf_runtime_pop_temp_root(rt);
             return exec_ok();

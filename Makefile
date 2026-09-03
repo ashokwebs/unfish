@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -Isrc/common -Isrc/lexer -Isrc/ast -Isrc/parser -Isrc/semantic -Isrc/runtime -Isrc/interpreter -Isrc/stdlib -Isrc/formatter
+CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -Isrc/common -Isrc/lexer -Isrc/ast -Isrc/parser -Isrc/semantic -Isrc/runtime -Isrc/interpreter -Isrc/stdlib -Isrc/formatter -Isrc/debugger
 LDFLAGS = -lm
 
 ASAN_FLAGS = -fsanitize=address,undefined -g
@@ -23,7 +23,8 @@ SRCS = src/common/uf_arena.c \
        src/stdlib/uf_mod_time.c \
        src/stdlib/uf_mod_json.c \
        src/interpreter/uf_interpreter.c \
-       src/formatter/uf_formatter.c
+       src/formatter/uf_formatter.c \
+       src/debugger/uf_debugger.c
 
 CLI_SRC = src/cli/main.c
 
@@ -51,6 +52,7 @@ test: $(BIN_DIR)/unfish
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_semantic.c $(LDFLAGS) -o $(BIN_DIR)/test_semantic
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_interpreter.c $(LDFLAGS) -o $(BIN_DIR)/test_interpreter
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_formatter.c $(LDFLAGS) -o $(BIN_DIR)/test_formatter
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_debugger.c $(LDFLAGS) -o $(BIN_DIR)/test_debugger
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	@echo "=== Running Unit Tests ==="
 	@$(BIN_DIR)/test_lexer
@@ -58,6 +60,7 @@ test: $(BIN_DIR)/unfish
 	@$(BIN_DIR)/test_semantic
 	@$(BIN_DIR)/test_interpreter
 	@$(BIN_DIR)/test_formatter
+	@$(BIN_DIR)/test_debugger
 	@echo "=== Running Stress Tests ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests ==="
@@ -70,6 +73,7 @@ test-asan:
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_semantic.c $(LDFLAGS) -o $(BIN_DIR)/test_semantic
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_interpreter.c $(LDFLAGS) -o $(BIN_DIR)/test_interpreter
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_formatter.c $(LDFLAGS) -o $(BIN_DIR)/test_formatter
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_debugger.c $(LDFLAGS) -o $(BIN_DIR)/test_debugger
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) $(CLI_SRC) $(LDFLAGS) -o $(BIN_DIR)/unfish
 	@echo "=== Running Unit Tests with ASan/UBSan ==="
@@ -78,6 +82,7 @@ test-asan:
 	@$(BIN_DIR)/test_semantic
 	@$(BIN_DIR)/test_interpreter
 	@$(BIN_DIR)/test_formatter
+	@$(BIN_DIR)/test_debugger
 	@echo "=== Running Stress Tests with ASan/UBSan ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests with ASan/UBSan ==="
