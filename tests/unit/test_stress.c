@@ -608,6 +608,61 @@ static void test_try_catch_gc_stress(void) {
     printf("test_try_catch_gc_stress passed! (GC ran %zu times)\n", rt.gc_count);
 }
 
+static void test_module_stress(void) {
+    const char* src =
+        "import math\n"
+        "import strings\n"
+        "let total = 0\n"
+        "let i = 0\n"
+        "while i < 30:\n"
+        "    let s = strings.to_upper(\"step_\" + i)\n"
+        "    let parts = strings.split(s, \"_\")\n"
+        "    total = total + math.sqrt(math.pow(i, 2))\n"
+        "    i = i + 1\n"
+        "say total\n";
+
+    UfArena arena;
+    uf_arena_init(&arena, 8192);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "mod_stress.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "mod_stress.unfish", src, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+    assert(program && !parser.had_error);
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    assert(uf_analyze_program(&sema, program));
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+    rt.next_gc_threshold = 512;
+
+    char* out_buf = NULL;
+    size_t out_len = 0;
+    FILE* mem = open_memstream(&out_buf, &out_len);
+    rt.out_stream = mem;
+
+    UfInterpretResult res = uf_interpret_program(&rt, program);
+    fclose(mem);
+
+    assert(res == UF_INTERPRET_OK);
+    assert(!rt.had_runtime_error);
+    assert(strcmp(out_buf, "435\n") == 0); /* sum(0..29) = 29*30/2 = 435 */
+    assert(rt.gc_count >= 2);
+
+    free(out_buf);
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_module_stress passed! (GC ran %zu times)\n", rt.gc_count);
+}
+
 int main(void) {
     printf("Running comprehensive stress tests...\n");
     test_deeply_nested_closures();
@@ -617,6 +672,7 @@ int main(void) {
     test_nested_arrays_closures_gc_stress();
     test_map_gc_stress();
     test_try_catch_gc_stress();
+    test_module_stress();
     test_deeply_nested_expressions();
     test_recursion_stack_overflow_limit();
     test_step_limit_quota();

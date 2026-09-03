@@ -249,6 +249,26 @@ UfStmt* uf_stmt_try_catch(UfArena* arena, SourceSpan span, UfStmt* try_block, co
     return stmt;
 }
 
+UfStmt* uf_stmt_import(UfArena* arena, SourceSpan span, const char* module_name, const char* alias) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_IMPORT;
+    stmt->span = span;
+    stmt->as.import_stmt.module_name = module_name;
+    stmt->as.import_stmt.alias = alias;
+    return stmt;
+}
+
+UfStmt* uf_stmt_from_import(UfArena* arena, SourceSpan span, const char* module_name, const char** symbols, const char** aliases, size_t count) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_FROM_IMPORT;
+    stmt->span = span;
+    stmt->as.from_import_stmt.module_name = module_name;
+    stmt->as.from_import_stmt.symbols = symbols;
+    stmt->as.from_import_stmt.aliases = aliases;
+    stmt->as.from_import_stmt.count = count;
+    return stmt;
+}
+
 static void print_indent(FILE* out, int indent) {
     for (int i = 0; i < indent; ++i) {
         fprintf(out, "  ");
@@ -468,6 +488,25 @@ void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent) {
             fprintf(out, " catch %s\n", stmt->as.try_catch.catch_var ? stmt->as.try_catch.catch_var : "_");
             uf_ast_print_stmt(stmt->as.try_catch.catch_block, out, indent + 1);
             print_indent(out, indent);
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_IMPORT:
+            fprintf(out, "(import %s", stmt->as.import_stmt.module_name);
+            if (stmt->as.import_stmt.alias) {
+                fprintf(out, " as %s", stmt->as.import_stmt.alias);
+            }
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_FROM_IMPORT:
+            fprintf(out, "(from %s import", stmt->as.from_import_stmt.module_name);
+            for (size_t i = 0; i < stmt->as.from_import_stmt.count; ++i) {
+                fprintf(out, " %s", stmt->as.from_import_stmt.symbols[i]);
+                if (stmt->as.from_import_stmt.aliases && stmt->as.from_import_stmt.aliases[i]) {
+                    fprintf(out, " as %s", stmt->as.from_import_stmt.aliases[i]);
+                }
+            }
             fprintf(out, ")\n");
             break;
     }

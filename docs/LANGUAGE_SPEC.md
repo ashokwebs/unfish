@@ -70,10 +70,12 @@ An identifier begins with an ASCII letter (`a-z`, `A-Z`) or an underscore (`_`),
 
 ### 2.6. Keywords [IMPLEMENTED]
 Reserved keywords:
-and         break       catch       continue    else
-false       function    if          let         not
-null        or          repeat      return      say
-times       true        try         while
+```
+and         as          break       catch       continue
+else        false       from        function    if
+import      let         not         null        or
+repeat      return      say         times       true
+try         while
 ```
 
 ### 2.7. Literals [IMPLEMENTED]
@@ -102,6 +104,8 @@ Statement      = LetStmt
                | FunctionStmt
                | ReturnStmt
                | TryCatchStmt
+               | ImportStmt
+               | FromImportStmt
                | ExprStmt ;
 
 Block          = ":" , NEWLINE , INDENT , { Statement | NEWLINE } , DEDENT ;
@@ -113,6 +117,10 @@ SayStmt        = "say" , Expression , NEWLINE ;
 BreakStmt      = "break" , NEWLINE ;
 ContinueStmt   = "continue" , NEWLINE ;
 ReturnStmt     = "return" , [ Expression ] , NEWLINE ;
+ImportStmt     = "import" , identifier , [ "as" , identifier ] , NEWLINE ;
+FromImportStmt = "from" , identifier , "import" , ImportSpecList , NEWLINE ;
+ImportSpecList = ImportSpec , { "," , ImportSpec } ;
+ImportSpec     = identifier , [ "as" , identifier ] ;
 ExprStmt       = Expression , NEWLINE ;
 
 IfStmt         = "if" , Expression , Block , [ "else" , ( Block | IfStmt ) ] ;

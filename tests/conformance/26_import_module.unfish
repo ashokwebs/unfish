@@ -1,0 +1,24 @@
+# expect: import module test passed
+
+import helper_calc
+import helper_calc as calc
+import math
+import strings
+
+# 1. Custom module functions
+assert(helper_calc.add(10, 20) == 30)
+assert(calc.multiply(6, 7) == 42)
+assert(calc.MULTIPLIER == 10)
+
+# 2. Built-in math module
+assert(math.sqrt(25) == 5)
+assert(math.abs(-42) == 42)
+assert(math.floor(3.9) == 3)
+assert(math.PI > 3.14)
+
+# 3. Built-in strings module
+assert(strings.to_upper("hello") == "HELLO")
+assert(strings.join(["a", "b", "c"], "-") == "a-b-c")
+assert(strings.contains("unfish language", "fish") == true)
+
+say "import module test passed"

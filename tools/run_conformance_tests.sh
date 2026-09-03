@@ -26,6 +26,7 @@ echo "----------------------------------------------------"
 for test_file in "$TESTS_DIR"/*.unfish; do
     [ -f "$test_file" ] || continue
     test_name=$(basename "$test_file")
+    case "$test_name" in helper_*) continue ;; esac
 
     expected_exit=0
     if grep -q "^# expect-exit:" "$test_file"; then

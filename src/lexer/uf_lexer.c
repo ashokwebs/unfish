@@ -200,6 +200,7 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             if (memcmp(word, "if", 2) == 0) return UF_TOK_IF;
             if (memcmp(word, "or", 2) == 0) return UF_TOK_OR;
             if (memcmp(word, "in", 2) == 0) return UF_TOK_IN;
+            if (memcmp(word, "as", 2) == 0) return UF_TOK_AS;
             break;
         case 3:
             if (memcmp(word, "let", 3) == 0) return UF_TOK_LET;
@@ -213,6 +214,7 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             if (memcmp(word, "else", 4) == 0) return UF_TOK_ELSE;
             if (memcmp(word, "true", 4) == 0) return UF_TOK_TRUE;
             if (memcmp(word, "null", 4) == 0) return UF_TOK_NULL;
+            if (memcmp(word, "from", 4) == 0) return UF_TOK_FROM;
             break;
         case 5:
             if (memcmp(word, "while", 5) == 0) return UF_TOK_WHILE;
@@ -224,6 +226,7 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
         case 6:
             if (memcmp(word, "return", 6) == 0) return UF_TOK_RETURN;
             if (memcmp(word, "repeat", 6) == 0) return UF_TOK_REPEAT;
+            if (memcmp(word, "import", 6) == 0) return UF_TOK_IMPORT;
             break;
         case 8:
             if (memcmp(word, "function", 8) == 0) return UF_TOK_FUNCTION;

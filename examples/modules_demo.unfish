@@ -1,0 +1,32 @@
+# Unfish - Modular Programming Showcase
+
+say "=== Testing Module Imports ==="
+
+# 1. Selective import with alias from custom module
+from geometry import circle_area, hypotenuse as pythagoras, circle_circumference
+
+let r = 5
+say "Area of circle with radius " + r + ": " + circle_area(r)
+say "Circumference of circle with radius " + r + ": " + circle_circumference(r)
+
+let a = 3
+let b = 4
+say "Hypotenuse for triangle " + a + ", " + b + ": " + pythagoras(a, b)
+
+say ""
+say "=== Standard Library Modules ==="
+
+import strings
+import math
+
+let words = ["Unfish", "Programming", "Language"]
+let sentence = strings.join(words, " ")
+say "Sentence: " + sentence
+say "Uppercase: " + strings.to_upper(sentence)
+
+let angle = math.PI / 4 # 45 degrees
+say "sin(PI/4): " + math.sin(angle)
+say "cos(PI/4): " + math.cos(angle)
+
+say ""
+say "=== Modules Demo Finished Successfully ==="

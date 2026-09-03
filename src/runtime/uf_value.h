@@ -19,7 +19,8 @@ typedef enum {
     UF_VAL_NATIVE_FN,
     UF_VAL_ARRAY,
     UF_VAL_MAP,
-    UF_VAL_ERROR
+    UF_VAL_ERROR,
+    UF_VAL_MODULE
 } UfValueKind;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
@@ -53,6 +54,7 @@ typedef struct {
 } UfArrayObject;
 
 typedef struct UfMapObject UfMapObject;
+typedef struct UfModuleObject UfModuleObject;
 
 typedef struct {
     UfObj obj;
@@ -73,6 +75,7 @@ struct UfValue {
         UfArrayObject* array;
         UfMapObject* map;
         UfErrorObject* error;
+        UfModuleObject* module;
     } as;
 };
 
@@ -114,6 +117,7 @@ UfValue uf_map_get(UfMapObject* map, UfValue key);
 bool uf_map_has(UfMapObject* map, UfValue key);
 bool uf_map_delete(UfMapObject* map, UfValue key);
 UfValue uf_val_error(UfRuntime* rt, const char* message, const char* kind, SourceSpan span);
+UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

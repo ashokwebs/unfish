@@ -1,6 +1,7 @@
 #include "uf_value.h"
 #include "uf_runtime.h"
 #include "uf_env.h"
+#include "uf_module.h"
 #include <math.h>
 
 UfValue uf_val_null(void) {
@@ -385,6 +386,14 @@ UfValue uf_val_error(UfRuntime* rt, const char* message, const char* kind, Sourc
     return v;
 }
 
+UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod) {
+    UF_UNUSED(rt);
+    UfValue v;
+    v.kind = UF_VAL_MODULE;
+    v.as.module = mod;
+    return v;
+}
+
 bool uf_val_is_truthy(UfValue val) {
     switch (val.kind) {
         case UF_VAL_NULL:
@@ -403,6 +412,7 @@ bool uf_val_is_truthy(UfValue val) {
         case UF_VAL_MAP:
             return val.as.map->count > 0;
         case UF_VAL_ERROR:
+        case UF_VAL_MODULE:
             return true;
     }
     return false;
@@ -449,6 +459,8 @@ bool uf_val_equal(UfValue a, UfValue b) {
         }
         case UF_VAL_ERROR:
             return a.as.error == b.as.error;
+        case UF_VAL_MODULE:
+            return a.as.module == b.as.module;
     }
     return false;
 }
@@ -574,6 +586,12 @@ char* uf_val_to_string(UfValue val) {
                      val.as.error->message ? val.as.error->message->chars : "");
             return strdup(ebuf);
         }
+        case UF_VAL_MODULE: {
+            char mbuf[256];
+            snprintf(mbuf, sizeof(mbuf), "<module '%s'>",
+                     (val.as.module && val.as.module->name) ? val.as.module->name : "anonymous");
+            return strdup(mbuf);
+        }
     }
     return strdup("<unknown>");
 }
@@ -589,6 +607,7 @@ const char* uf_val_type_name(UfValue val) {
         case UF_VAL_ARRAY:     return "array";
         case UF_VAL_MAP:       return "map";
         case UF_VAL_ERROR:     return "error";
+        case UF_VAL_MODULE:    return "module";
     }
     return "<unknown>";
 }

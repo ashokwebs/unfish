@@ -1,5 +1,6 @@
 #include "uf_runtime.h"
 #include "uf_stdlib.h"
+#include "uf_module.h"
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
@@ -539,6 +540,12 @@ void uf_gc_mark_value(UfValue val) {
             if (val.as.error->message) val.as.error->message->obj.marked = true;
             if (val.as.error->kind) val.as.error->kind->obj.marked = true;
         }
+    } else if (val.kind == UF_VAL_MODULE) {
+        if (val.as.module && !val.as.module->obj.marked) {
+            val.as.module->obj.marked = true;
+            uf_gc_mark_env(val.as.module->env);
+            uf_gc_mark_value(val.as.module->exports);
+        }
     }
 }
 
@@ -572,6 +579,14 @@ void uf_gc_collect(UfRuntime* rt) {
 
     uf_gc_mark_value(rt->current_error);
 
+    UfModuleEntry* me = rt->module_cache;
+    while (me) {
+        if (me->module) {
+            uf_gc_mark_value(uf_val_module(rt, me->module));
+        }
+        me = me->next;
+    }
+
     /* 2. Sweep */
     UfObj** curr = &rt->all_objects;
     while (*curr) {
@@ -592,6 +607,14 @@ void uf_gc_collect(UfRuntime* rt) {
                 free(map->entries);
                 free(map->order_keys);
                 free(map);
+            } else if (obj->kind == UF_OBJ_MODULE) {
+                UfModuleObject* mod = (UfModuleObject*)obj;
+                uf_interner_free(&mod->interner);
+                uf_arena_free(&mod->arena);
+                if (mod->source_text) free(mod->source_text);
+                free(mod->name);
+                free(mod->path);
+                free(mod);
             } else {
                 free(obj);
             }
@@ -625,12 +648,15 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
 
     register_builtins(rt);
     uf_stdlib_register_runtime(rt);
+    uf_module_init(rt);
 }
 
 void uf_runtime_free(UfRuntime* rt) {
     rt->global_env = NULL;
     rt->current_env = NULL;
     rt->temp_root_count = 0;
+
+    uf_module_free_all(rt);
 
     UfObj* obj = rt->all_objects;
     while (obj) {
@@ -646,6 +672,14 @@ void uf_runtime_free(UfRuntime* rt) {
             free(map->entries);
             free(map->order_keys);
             free(map);
+        } else if (obj->kind == UF_OBJ_MODULE) {
+            UfModuleObject* mod = (UfModuleObject*)obj;
+            uf_interner_free(&mod->interner);
+            uf_arena_free(&mod->arena);
+            if (mod->source_text) free(mod->source_text);
+            free(mod->name);
+            free(mod->path);
+            free(mod);
         } else {
             free(obj);
         }

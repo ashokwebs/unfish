@@ -89,6 +89,8 @@ static void synchronize(UfParser* parser) {
             case UF_TOK_SAY:
             case UF_TOK_TRY:
             case UF_TOK_CATCH:
+            case UF_TOK_IMPORT:
+            case UF_TOK_FROM:
             case UF_TOK_DEDENT:
                 return;
             default:
@@ -367,6 +369,9 @@ static const ParseRule rules[] = {
     [UF_TOK_CONTINUE]   = { NULL,                 NULL,         PREC_NONE },
     [UF_TOK_TRY]        = { NULL,                 NULL,         PREC_NONE },
     [UF_TOK_CATCH]      = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_IMPORT]     = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_FROM]       = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_AS]         = { NULL,                 NULL,         PREC_NONE },
     [UF_TOK_AND]        = { NULL,                 parse_binary, PREC_AND },
     [UF_TOK_OR]         = { NULL,             parse_binary, PREC_OR },
     [UF_TOK_NOT]        = { parse_unary,      NULL,         PREC_UNARY },
@@ -644,6 +649,59 @@ static UfStmt* parse_try_catch_statement(UfParser* parser) {
     return uf_stmt_try_catch(parser->arena, span, try_block, catch_var, catch_block);
 }
 
+static UfStmt* parse_import_statement(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start; /* 'import' */
+    consume(parser, UF_TOK_IDENTIFIER, "Expected module name after 'import'", "e.g., 'import math'");
+    const char* module_name = parser->previous.as.string_val;
+
+    const char* alias = NULL;
+    if (match(parser, UF_TOK_AS)) {
+        consume(parser, UF_TOK_IDENTIFIER, "Expected alias name after 'as'", "e.g., 'import math as m'");
+        alias = parser->previous.as.string_val;
+    }
+
+    consume(parser, UF_TOK_NEWLINE, "Expected newline after 'import' statement", NULL);
+    SourceSpan span = source_span_make(start, parser->previous.span.end);
+    return uf_stmt_import(parser->arena, span, module_name, alias);
+}
+
+static UfStmt* parse_from_import_statement(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start; /* 'from' */
+    consume(parser, UF_TOK_IDENTIFIER, "Expected module name after 'from'", "e.g., 'from math import sqrt'");
+    const char* module_name = parser->previous.as.string_val;
+
+    consume(parser, UF_TOK_IMPORT, "Expected 'import' after module name in 'from' statement", "Syntax: 'from <module> import <symbols>'");
+
+    const char* symbols[64];
+    const char* aliases[64];
+    size_t count = 0;
+
+    do {
+        if (count >= 64) {
+            error_current(parser, "Exceeded maximum imported symbols limit (64)", NULL);
+            break;
+        }
+        consume(parser, UF_TOK_IDENTIFIER, "Expected symbol name to import", NULL);
+        symbols[count] = parser->previous.as.string_val;
+        aliases[count] = NULL;
+        if (match(parser, UF_TOK_AS)) {
+            consume(parser, UF_TOK_IDENTIFIER, "Expected alias name after 'as'", NULL);
+            aliases[count] = parser->previous.as.string_val;
+        }
+        count++;
+    } while (match(parser, UF_TOK_COMMA));
+
+    consume(parser, UF_TOK_NEWLINE, "Expected newline after 'from ... import' statement", NULL);
+
+    const char** symbols_copy = (const char**)uf_arena_alloc(parser->arena, count * sizeof(const char*));
+    memcpy(symbols_copy, symbols, count * sizeof(const char*));
+    const char** aliases_copy = (const char**)uf_arena_alloc(parser->arena, count * sizeof(const char*));
+    memcpy(aliases_copy, aliases, count * sizeof(const char*));
+
+    SourceSpan span = source_span_make(start, parser->previous.span.end);
+    return uf_stmt_from_import(parser->arena, span, module_name, symbols_copy, aliases_copy, count);
+}
+
 static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_LET))      return parse_let_statement(parser);
     if (match(parser, UF_TOK_SAY))      return parse_say_statement(parser);
@@ -655,6 +713,8 @@ static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_BREAK))    return parse_break_statement(parser);
     if (match(parser, UF_TOK_CONTINUE)) return parse_continue_statement(parser);
     if (match(parser, UF_TOK_TRY))      return parse_try_catch_statement(parser);
+    if (match(parser, UF_TOK_IMPORT))   return parse_import_statement(parser);
+    if (match(parser, UF_TOK_FROM))     return parse_from_import_statement(parser);
     if (match(parser, UF_TOK_FUNCTION)) return parse_function_statement(parser);
 
     return parse_expression_or_assignment_statement(parser);

@@ -49,6 +49,8 @@ struct UfRuntime {
     size_t try_handler_count;
     UfValue current_error;
 
+    struct UfModuleEntry* module_cache;
+
     uint64_t step_count;
     uint64_t max_steps;
 

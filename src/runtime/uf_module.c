@@ -1,0 +1,281 @@
+#include "uf_module.h"
+#include "uf_runtime.h"
+#include "uf_stdlib.h"
+#include "../lexer/uf_lexer.h"
+#include "../parser/uf_parser.h"
+#include "../semantic/uf_semantic.h"
+#include "../interpreter/uf_interpreter.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <math.h>
+
+void uf_module_init(UfRuntime* rt) {
+    rt->module_cache = NULL;
+}
+
+void uf_module_free_all(UfRuntime* rt) {
+    UfModuleEntry* curr = rt->module_cache;
+    while (curr) {
+        UfModuleEntry* next = curr->next;
+        free(curr->name);
+        free(curr);
+        curr = next;
+    }
+    rt->module_cache = NULL;
+}
+
+UfModuleObject* uf_module_create(UfRuntime* rt, const char* name, const char* path) {
+    UfModuleObject* mod = (UfModuleObject*)malloc(sizeof(UfModuleObject));
+    if (!mod) {
+        fprintf(stderr, "Fatal error: Out of memory allocating module\n");
+        abort();
+    }
+    mod->obj.kind = UF_OBJ_MODULE;
+    mod->obj.marked = false;
+    mod->obj.next = NULL;
+    mod->name = strdup(name);
+    mod->path = strdup(path ? path : name);
+    mod->source_text = NULL;
+    mod->state = UF_MOD_UNLOADED;
+    mod->env = NULL;
+    mod->exports = uf_val_null();
+
+    uf_arena_init(&mod->arena, 4096);
+    uf_interner_init(&mod->interner, &mod->arena);
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)mod, sizeof(UfModuleObject));
+        uf_runtime_push_temp_root(rt, uf_val_module(rt, mod));
+    }
+
+    mod->env = uf_env_create(rt, rt->global_env);
+    mod->exports = uf_val_map(rt, 16);
+
+    if (rt) {
+        uf_runtime_pop_temp_root(rt);
+    }
+    return mod;
+}
+
+UfModuleObject* uf_module_find_cached(UfRuntime* rt, const char* name) {
+    UfModuleEntry* curr = rt->module_cache;
+    while (curr) {
+        if (strcmp(curr->name, name) == 0) {
+            return curr->module;
+        }
+        curr = curr->next;
+    }
+    return NULL;
+}
+
+void uf_module_cache_add(UfRuntime* rt, const char* name, UfModuleObject* mod) {
+    UfModuleEntry* entry = (UfModuleEntry*)malloc(sizeof(UfModuleEntry));
+    if (!entry) {
+        fprintf(stderr, "Fatal error: Out of memory allocating module cache entry\n");
+        abort();
+    }
+    entry->name = strdup(name);
+    entry->module = mod;
+    entry->next = rt->module_cache;
+    rt->module_cache = entry;
+}
+
+static char* resolve_module_path(const char* name, SourceSpan span) {
+    char path[1024];
+
+    /* 1. Relative to caller file */
+    if (span.start.file && strcmp(span.start.file, "<stdin>") != 0) {
+        const char* last_slash = strrchr(span.start.file, '/');
+        if (last_slash) {
+            size_t dir_len = (size_t)(last_slash - span.start.file);
+            snprintf(path, sizeof(path), "%.*s/%s.unfish", (int)dir_len, span.start.file, name);
+            if (access(path, R_OK) == 0) return strdup(path);
+
+            snprintf(path, sizeof(path), "%.*s/%s", (int)dir_len, span.start.file, name);
+            if (access(path, R_OK) == 0) return strdup(path);
+        }
+    }
+
+    /* 2. Relative to working directory */
+    snprintf(path, sizeof(path), "%s.unfish", name);
+    if (access(path, R_OK) == 0) return strdup(path);
+
+    snprintf(path, sizeof(path), "%s", name);
+    if (access(path, R_OK) == 0) return strdup(path);
+
+    /* 3. UNFISH_PATH */
+    const char* env_path = getenv("UNFISH_PATH");
+    if (env_path) {
+        char* copy = strdup(env_path);
+        char* token = strtok(copy, ":");
+        while (token) {
+            snprintf(path, sizeof(path), "%s/%s.unfish", token, name);
+            if (access(path, R_OK) == 0) {
+                free(copy);
+                return strdup(path);
+            }
+            token = strtok(NULL, ":");
+        }
+        free(copy);
+    }
+
+    return NULL;
+}
+
+static char* read_file_content(const char* filepath) {
+    FILE* file = fopen(filepath, "rb");
+    if (!file) return NULL;
+
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    if (size < 0) {
+        fclose(file);
+        return NULL;
+    }
+
+    char* buffer = (char*)malloc(size + 1);
+    if (!buffer) {
+        fclose(file);
+        return NULL;
+    }
+
+    size_t read_bytes = fread(buffer, 1, size, file);
+    buffer[read_bytes] = '\0';
+    fclose(file);
+    return buffer;
+}
+
+UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span) {
+    /* 1. Check module cache */
+    UfModuleObject* cached = uf_module_find_cached(rt, name);
+    if (cached) {
+        if (cached->state == UF_MOD_LOADING) {
+            uf_runtime_raise(rt, "CircularImportError", span, "Circular dependency detected while importing module '%s'", name);
+            return NULL;
+        }
+        return cached;
+    }
+
+    /* 2. Built-in modules (lazy initialization) */
+    if (strcmp(name, "math") == 0) {
+        UfModuleObject* math_mod = uf_module_create(rt, "math", "<builtin:math>");
+        uf_runtime_push_temp_root(rt, uf_val_module(rt, math_mod));
+        const char* math_symbols[] = {
+            "abs", "floor", "ceil", "round", "sqrt", "pow", "min", "max",
+            "log", "sin", "cos", "tan", "random", "random_int", "PI", "E", "INFINITY"
+        };
+        for (size_t i = 0; i < sizeof(math_symbols) / sizeof(math_symbols[0]); ++i) {
+            UfValue val;
+            if (uf_env_lookup(rt->global_env, math_symbols[i], &val)) {
+                UfValue k = uf_val_string(rt, math_symbols[i], strlen(math_symbols[i]));
+                uf_map_set(rt, math_mod->exports.as.map, k, val);
+                uf_env_declare(math_mod->env, math_symbols[i], val);
+            }
+        }
+        uf_runtime_pop_temp_root(rt);
+        math_mod->state = UF_MOD_LOADED;
+        uf_module_cache_add(rt, "math", math_mod);
+        return math_mod;
+    }
+
+    if (strcmp(name, "strings") == 0) {
+        UfModuleObject* str_mod = uf_module_create(rt, "strings", "<builtin:strings>");
+        uf_runtime_push_temp_root(rt, uf_val_module(rt, str_mod));
+        const char* str_symbols[] = {
+            "split", "join", "trim", "replace", "to_upper", "to_lower",
+            "contains", "starts_with", "ends_with", "char_at", "to_number",
+            "to_string", "repeat_string", "substring", "index_of"
+        };
+        for (size_t i = 0; i < sizeof(str_symbols) / sizeof(str_symbols[0]); ++i) {
+            UfValue val;
+            if (uf_env_lookup(rt->global_env, str_symbols[i], &val)) {
+                UfValue k = uf_val_string(rt, str_symbols[i], strlen(str_symbols[i]));
+                uf_map_set(rt, str_mod->exports.as.map, k, val);
+                uf_env_declare(str_mod->env, str_symbols[i], val);
+            }
+        }
+        uf_runtime_pop_temp_root(rt);
+        str_mod->state = UF_MOD_LOADED;
+        uf_module_cache_add(rt, "strings", str_mod);
+        return str_mod;
+    }
+
+    /* 3. Resolve module file path */
+    char* resolved_path = resolve_module_path(name, span);
+    if (!resolved_path) {
+        uf_runtime_raise(rt, "ModuleNotFoundError", span, "Module '%s' not found", name);
+        return NULL;
+    }
+
+    /* 4. Read file */
+    char* source = read_file_content(resolved_path);
+    if (!source) {
+        uf_runtime_raise(rt, "ModuleLoadError", span, "Failed to read module file '%s'", resolved_path);
+        free(resolved_path);
+        return NULL;
+    }
+
+    /* 5. Create module object and register as LOADING */
+    UfModuleObject* mod = uf_module_create(rt, name, resolved_path);
+    mod->source_text = source;
+    mod->state = UF_MOD_LOADING;
+    uf_module_cache_add(rt, name, mod);
+    uf_runtime_push_temp_root(rt, uf_val_module(rt, mod));
+    free(resolved_path);
+
+    /* 6. Compile: Lex, Parse, Semantic Analysis */
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, mod->path, mod->source_text);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, mod->path, mod->source_text, &mod->arena, &mod->interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &mod->arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+
+    if (!program || parser.had_error) {
+        mod->state = UF_MOD_ERROR;
+        uf_runtime_pop_temp_roots(rt, 1);
+        uf_runtime_raise(rt, "ModuleLoadError", span, "Syntax error in module '%s'", name);
+        return NULL;
+    }
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &mod->arena, &reporter);
+    bool sema_ok = uf_analyze_program(&sema, program);
+    if (!sema_ok || sema.had_error) {
+        mod->state = UF_MOD_ERROR;
+        uf_runtime_pop_temp_roots(rt, 1);
+        uf_runtime_raise(rt, "ModuleLoadError", span, "Semantic error in module '%s'", name);
+        return NULL;
+    }
+
+    /* 7. Execute in isolated module environment */
+    UfEnv* prev_env = rt->current_env;
+    rt->current_env = mod->env;
+    UfInterpretResult res = uf_interpret_program(rt, program);
+    rt->current_env = prev_env;
+    uf_runtime_pop_temp_roots(rt, 1);
+
+    if (res != UF_INTERPRET_OK || rt->had_runtime_error) {
+        mod->state = UF_MOD_ERROR;
+        return NULL;
+    }
+
+    /* 8. Populate exports map from module environment */
+    for (size_t b = 0; b < mod->env->bucket_count; ++b) {
+        UfEnvBinding* bind = mod->env->buckets[b];
+        while (bind) {
+            UfValue k = uf_val_string(rt, bind->name, strlen(bind->name));
+            uf_map_set(rt, mod->exports.as.map, k, bind->value);
+            bind = bind->next;
+        }
+    }
+
+    mod->state = UF_MOD_LOADED;
+    return mod;
+}

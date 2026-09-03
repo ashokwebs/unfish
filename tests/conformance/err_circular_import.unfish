@@ -1,0 +1,3 @@
+# expect-exit: 3
+# expect-error: Circular dependency detected while importing module 'helper_circ_a'
+import helper_circ_a

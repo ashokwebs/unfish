@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.0-alpha] - 2026-09-04
+
+### Added
+- **Module System Architecture**: Full support for `import <module> [as <alias>]` and selective `from <module> import <symbols>` (ADR 012).
+- **First-Class Module Objects**: Added `UF_OBJ_MODULE` and `UF_VAL_MODULE` (`UfModuleObject`) with namespace dot access (`math.sqrt`, `calc.add`).
+- **Arena-Isolated Module Lifetime**: Each module file owns its own `UfArena` and `UfInterner`, ensuring function bodies, parameter names, and AST nodes safely outlive import execution without memory leaks or use-after-free bugs.
+- **Singleton Module Cache**: Runtime module cache in `UfRuntime` ensuring deterministic single evaluation per module across import graphs.
+- **Circular Dependency Detection**: `CircularImportError` raised if cyclic module dependencies occur during loading, cleanly unwinding runtime frames.
+- **Multi-Source Path Resolution**: Module resolution supporting relative imports relative to caller file (`<caller_dir>/<mod>.unfish`), working directory, and `UNFISH_PATH` environment variable.
+- **Lazy Standard Library Built-in Modules**: On-demand lazy instantiation of built-in `math` and `strings` modules upon import.
+- **Module Conformance & Stress Tests**: Added `26_import_module.unfish`, `27_from_import.unfish`, `err_circular_import.unfish`, `err_module_not_found.unfish`, and `err_import_symbol_not_found.unfish`, expanding conformance suite to 41 passing tests. Added `test_module_stress` to `test_stress` under aggressive GC pressure.
+- **Example Applications**: Added `examples/geometry.unfish` and `examples/modules_demo.unfish` showcasing modular application organization.
+- **Documentation**: Updated ADR 012 in `docs/DECISIONS.md`; updated `docs/LANGUAGE_SPEC.md` and `docs/PROJECT_STATE.md`.
+
+---
+
 ## [0.7.0-alpha] - 2026-09-04
 
 ### Added

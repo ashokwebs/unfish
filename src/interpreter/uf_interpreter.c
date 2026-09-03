@@ -1,4 +1,5 @@
 #include "uf_interpreter.h"
+#include "uf_module.h"
 #include <math.h>
 
 typedef enum {
@@ -416,6 +417,17 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                         result = uf_val_null();
                     }
                 }
+            } else if (target.kind == UF_VAL_MODULE) {
+                if (idx_val.kind != UF_VAL_STRING) {
+                    uf_runtime_error(rt, expr->span, "Module member access expects a string name, got '%s'", uf_val_type_name(idx_val));
+                } else {
+                    result = uf_map_get(target.as.module->exports.as.map, idx_val);
+                    if (result.kind == UF_VAL_NULL && !uf_map_has(target.as.module->exports.as.map, idx_val)) {
+                        uf_runtime_error(rt, expr->span, "Module '%s' has no exported member '%s'",
+                                         (target.as.module && target.as.module->name) ? target.as.module->name : "anonymous",
+                                         idx_val.as.string->chars);
+                    }
+                }
             } else {
                 uf_runtime_error(rt, expr->span, "Cannot index value of type '%s'", uf_val_type_name(target));
             }
@@ -761,6 +773,33 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 return res;
             }
         }
+
+        case UF_STMT_IMPORT: {
+            UfModuleObject* mod = uf_module_load(rt, stmt->as.import_stmt.module_name, stmt->span);
+            if (!mod || rt->had_runtime_error) return exec_error();
+            const char* bound = stmt->as.import_stmt.alias ? stmt->as.import_stmt.alias : stmt->as.import_stmt.module_name;
+            uf_env_declare(env, bound, uf_val_module(rt, mod));
+            return exec_ok();
+        }
+
+        case UF_STMT_FROM_IMPORT: {
+            UfModuleObject* mod = uf_module_load(rt, stmt->as.from_import_stmt.module_name, stmt->span);
+            if (!mod || rt->had_runtime_error) return exec_error();
+            for (size_t i = 0; i < stmt->as.from_import_stmt.count; ++i) {
+                const char* sym = stmt->as.from_import_stmt.symbols[i];
+                UfValue sym_key = uf_val_string(rt, sym, strlen(sym));
+                if (!uf_map_has(mod->exports.as.map, sym_key)) {
+                    uf_runtime_raise(rt, "ImportError", stmt->span, "Cannot import name '%s' from module '%s'", sym, stmt->as.from_import_stmt.module_name);
+                    return exec_error();
+                }
+                UfValue val = uf_map_get(mod->exports.as.map, sym_key);
+                const char* bound = (stmt->as.from_import_stmt.aliases && stmt->as.from_import_stmt.aliases[i])
+                                     ? stmt->as.from_import_stmt.aliases[i]
+                                     : sym;
+                uf_env_declare(env, bound, val);
+            }
+            return exec_ok();
+        }
     }
 
     return exec_ok();
@@ -769,7 +808,8 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
 UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) {
     rt->call_fn = uf_call_value;
     UfEnv* prev_env = rt->current_env;
-    rt->current_env = rt->global_env;
+    UfEnv* exec_env = (rt->current_env != NULL) ? rt->current_env : rt->global_env;
+    rt->current_env = exec_env;
 
     /* Pass 1: Hoist top-level function declarations */
     for (size_t i = 0; i < program->count; ++i) {
@@ -780,8 +820,8 @@ UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) 
                                          stmt->as.function_stmt.params,
                                          stmt->as.function_stmt.param_count,
                                          stmt->as.function_stmt.body,
-                                         rt->global_env);
-            uf_env_declare(rt->global_env, stmt->as.function_stmt.name, fn);
+                                         exec_env);
+            uf_env_declare(exec_env, stmt->as.function_stmt.name, fn);
         }
     }
 
@@ -790,7 +830,7 @@ UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) 
         if (program->stmts[i]->kind == UF_STMT_FUNCTION) {
             continue;
         }
-        ExecResult res = execute_statement(rt, rt->global_env, program->stmts[i]);
+        ExecResult res = execute_statement(rt, exec_env, program->stmts[i]);
         if (res.status == EXEC_ERROR || rt->had_runtime_error) {
             rt->current_env = prev_env;
             return UF_INTERPRET_RUNTIME_ERROR;

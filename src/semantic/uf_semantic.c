@@ -457,6 +457,22 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
             analyze_stmt(analyzer, stmt->as.try_catch.catch_block);
             pop_scope(analyzer);
             break;
+
+        case UF_STMT_IMPORT: {
+            const char* bound_name = stmt->as.import_stmt.alias ? stmt->as.import_stmt.alias : stmt->as.import_stmt.module_name;
+            add_symbol(analyzer, bound_name, UF_SYM_VAR, stmt->span, -1);
+            break;
+        }
+
+        case UF_STMT_FROM_IMPORT: {
+            for (size_t i = 0; i < stmt->as.from_import_stmt.count; ++i) {
+                const char* bound_name = (stmt->as.from_import_stmt.aliases && stmt->as.from_import_stmt.aliases[i])
+                                         ? stmt->as.from_import_stmt.aliases[i]
+                                         : stmt->as.from_import_stmt.symbols[i];
+                add_symbol(analyzer, bound_name, UF_SYM_VAR, stmt->span, -1);
+            }
+            break;
+        }
     }
 }
 

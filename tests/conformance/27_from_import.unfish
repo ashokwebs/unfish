@@ -1,0 +1,22 @@
+# expect: from-import test passed
+
+from helper_calc import add, multiply as mult, MULTIPLIER
+from math import sqrt, PI
+from strings import split, join as str_join, to_upper
+
+# 1. Custom module functions & constants
+assert(add(5, 7) == 12)
+assert(mult(3, 4) == 12)
+assert(MULTIPLIER == 10)
+
+# 2. Math functions & constants
+assert(sqrt(100) == 10)
+assert(PI > 3.14 and PI < 3.15)
+
+# 3. String functions
+let parts = split("foo:bar:baz", ":")
+assert(len(parts) == 3)
+assert(str_join(parts, "/") == "foo/bar/baz")
+assert(to_upper("unfish") == "UNFISH")
+
+say "from-import test passed"

@@ -96,14 +96,27 @@
 * **Consequences**: Novices write clean, sequential code without boilerplate; educational test harnesses can evaluate student code defensively without crashing the test runner; advanced learners learn stack unwinding.
 
 ## ADR 012: Module Resolution, Namespaces, and Singleton Lifecycle
-* **Date**: Milestone 3
-* **Status**: Accepted
+* **Date**: Milestone 3 (Designed), Milestone 8 (Implemented)
+* **Status**: Implemented
 * **Context**: Unfish programs must scale beyond single files while avoiding namespace pollution and cyclic initialization deadlocks.
 * **Decision**:
-  1. **Syntax**: `import <module>` binds module exports into a dedicated namespace object `<module>`. Selective imports `from <module> import a, b` copy exported symbols into the current scope.
-  2. **Resolution Order**: (1) Built-in core modules (`math`, `sys`, `fs`), (2) File-relative path `./<module>.unfish`, (3) Project module path `UNFISH_PATH`.
-  3. **Lifecycle**: Modules are executed once as singletons and cached in `rt->modules`. Circular dependencies transition through states (`UNLOADED` -> `LOADING` -> `LOADED`) and report compile-time `CyclicImportError` if mutually dependent.
-* **Consequences**: Clean separation of namespaces, deterministic single-evaluation semantics, and zero global scope pollution.
+  1. **Syntax**: `import <module> [as <alias>]` binds module exports into a dedicated namespace object `<module>` (`UF_OBJ_MODULE` / `UF_VAL_MODULE`). Selective imports `from <module> import a [as a1], b [as b1]` copy exported symbols into the current scope.
+  2. **Resolution Order**:
+     - Built-in core modules (`math`, `strings`) with on-demand lazy initialization.
+     - Relative path to importing file: `<caller_dir>/<module>.unfish` or `<caller_dir>/<module>`.
+     - Working directory relative path: `./<module>.unfish` or `./<module>`.
+     - Environment variable `UNFISH_PATH` search directories.
+  3. **Lifecycle & State Machine**:
+     - Modules are executed once as singletons and cached in `rt->module_cache`.
+     - Transitions through states: `UNLOADED` -> `LOADING` -> `LOADED` (or `ERROR`).
+     - Circular dependency detection: encountering a module in `LOADING` state during import raises `CircularImportError` with source line traces and zero memory leaks.
+  4. **Memory Model & Isolation**:
+     - Each file module owns its own `UfArena` and `UfInterner`, guaranteeing that function AST bodies and string literals persist safely for the module's lifetime.
+     - Modules execute in an isolated environment (`UfEnv`) whose parent is `rt->global_env`.
+     - Non-internal top-level bindings in the module's environment populate its `exports` map for dot access (`mod.func()`).
+  5. **Garbage Collection Integration**:
+     - `UF_OBJ_MODULE` is tracked by mark-and-sweep GC. All entries in `rt->module_cache` are rooted during GC marking. Module cleanup during GC sweep cleanly frees arena, interner, source text, path, and name.
+* **Consequences**: Clean separation of namespaces, deterministic single-evaluation semantics, safe circular import traps, and zero global scope pollution.
 
 ## ADR 013: Bytecode Virtual Machine Pipeline & Intermediate Representation (IR) Contract
 * **Date**: Milestone 3

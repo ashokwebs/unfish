@@ -1,0 +1,15 @@
+# Geometry library in Unfish
+
+import math
+
+function circle_area(radius):
+    return math.PI * math.pow(radius, 2)
+
+function circle_circumference(radius):
+    return 2 * math.PI * radius
+
+function hypotenuse(a, b):
+    return math.sqrt(math.pow(a, 2) + math.pow(b, 2))
+
+function rectangle_area(width, height):
+    return width * height
