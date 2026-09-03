@@ -416,3 +416,20 @@
      - Integrated `tools/run_differential_tests.sh` testing all 51 conformance tests through both AST interpreter and VM.
      - Verified 100% identical stdout, stderr, and exit codes across the entire suite under ASan and UBSan.
 * **Consequences**: Enables native bytecode execution with the `--vm` flag (`unfish run --vm <file>`, `unfish --vm <file>`), achieving complete behavioral equivalence with the AST interpreter.
+
+## ADR 029: Bytecode Disassembler & VM Debugger Architecture
+* **Date**: Milestone 19 (Phase 5 Part 4)
+* **Status**: Accepted
+* **Context**: Inspecting bytecode generation, diagnosing compiler/VM bugs, and profiling execution dynamics requires a full recursive bytecode disassembler and VM runtime instruction tracer.
+* **Decision**:
+  1. **Recursive Function Disassembler (`uf_disasm_function_tree`)**:
+     - Disassembles bytecode chunks with formatted headers showing arity, upvalue counts, and byte sizes.
+     - Formats offsets, line numbers (with `|` repetitions), opcode mnemonics, constants with decoded values, jump targets with absolute destinations, and `OP_CLOSURE` upvalue capture descriptors.
+     - Recursively traverses constant pools to disassemble all enclosed child function prototypes.
+  2. **CLI Commands (`unfish disasm <file>`, `unfish dis <file>`)**:
+     - Added dedicated disassembly command and shorthand alias to the CLI.
+  3. **VM Instruction Tracing & Execution Profiler (`--debug`)**:
+     - Added `--debug` execution flag (`unfish run --vm --debug <file>`, `unfish --vm --debug <file>`).
+     - Emits real-time visual stack dumps before each instruction execution (`[ 10 ][ 20 ] -> OP_ADD`).
+     - Tracks VM execution metrics: total instruction count, peak evaluation stack depth, and peak call frame depth.
+* **Consequences**: Provides powerful tooling for compiler development, educational inspection of bytecode internals, and VM performance optimization.

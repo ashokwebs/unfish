@@ -176,8 +176,29 @@ size_t uf_disassemble_instruction(const UfChunk* chunk, size_t offset, FILE* out
             return byte_instruction("OP_GET_UPVALUE", chunk, offset, out);
         case OP_SET_UPVALUE:
             return byte_instruction("OP_SET_UPVALUE", chunk, offset, out);
-        case OP_CLOSURE:
-            return constant_instruction("OP_CLOSURE", chunk, offset, out);
+        case OP_CLOSURE: {
+            uint16_t const_idx = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            offset += 3;
+            fprintf(out, "%-18s %4u ", "OP_CLOSURE", const_idx);
+            if (const_idx < chunk->const_count) {
+                UfValue val = chunk->constants[const_idx];
+                char* s = uf_val_to_string(val);
+                fprintf(out, "'%s'\n", s ? s : "function");
+                free(s);
+                if (val.kind == UF_VAL_BYTECODE_FN) {
+                    UfBytecodeFunction* fn = val.as.bytecode_fn;
+                    for (size_t j = 0; j < fn->upvalue_count && offset + 1 < chunk->code_count; ++j) {
+                        uint8_t is_local = chunk->code[offset++];
+                        uint8_t index = chunk->code[offset++];
+                        fprintf(out, "%04zu      |                     %s %d\n",
+                                offset - 2, is_local ? "local" : "upvalue", index);
+                    }
+                }
+            } else {
+                fprintf(out, "<invalid const %u>\n", const_idx);
+            }
+            return offset;
+        }
         case OP_CLOSE_UPVALUE:
             return simple_instruction("OP_CLOSE_UPVALUE", offset, out);
         case OP_ADD:

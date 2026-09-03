@@ -1,4 +1,5 @@
 #include "uf_vm.h"
+#include "uf_disasm.h"
 #include "../runtime/uf_env.h"
 #include "../runtime/uf_module.h"
 #include <stdlib.h>
@@ -12,6 +13,10 @@ void uf_vm_init(UfVM* vm, UfRuntime* rt) {
     vm->handler_count = 0;
     vm->rt = rt;
     vm->had_error = false;
+    vm->trace_execution = false;
+    vm->total_instructions = 0;
+    vm->peak_stack_depth = 0;
+    vm->peak_frame_depth = 0;
     if (rt) {
         rt->active_vm = vm;
         if (!rt->call_fn) {
@@ -29,6 +34,10 @@ void uf_vm_free(UfVM* vm) {
     vm->open_upvalues = NULL;
     vm->handler_count = 0;
     vm->had_error = false;
+    vm->trace_execution = false;
+    vm->total_instructions = 0;
+    vm->peak_stack_depth = 0;
+    vm->peak_frame_depth = 0;
 }
 
 void uf_vm_push(UfVM* vm, UfValue value) {
@@ -165,6 +174,15 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
 #define ERROR_RETURN() do { vm->had_error = true; return uf_val_null(); } while (0)
 
     for (;;) {
+        vm->total_instructions++;
+        size_t cur_stack = (size_t)(vm->stack_top - vm->stack);
+        if (cur_stack > vm->peak_stack_depth) vm->peak_stack_depth = cur_stack;
+        if ((size_t)vm->frame_count > vm->peak_frame_depth) vm->peak_frame_depth = (size_t)vm->frame_count;
+
+        if (vm->trace_execution) {
+            uf_disasm_trace_instruction(vm, (const struct UfVMFrame*)frame, stdout);
+        }
+
         uint8_t instruction = READ_BYTE();
         switch (instruction) {
             case OP_CONSTANT: {

@@ -25,7 +25,7 @@ struct UfClosureObject {
     size_t upvalue_count;
 };
 
-typedef struct {
+typedef struct UfVMFrame {
     UfClosureObject* closure;
     uint8_t* ip;
     UfValue* slots;
@@ -33,7 +33,7 @@ typedef struct {
 
 #define UF_VM_HANDLERS_MAX 64
 
-typedef struct {
+typedef struct UfVMHandler {
     int frame_index;
     uint8_t* catch_ip;
     UfValue* stack_top;
@@ -52,6 +52,11 @@ typedef struct UfVM {
     UfUpvalueCell* open_upvalues;
     UfRuntime* rt;
     bool had_error;
+
+    bool trace_execution;
+    uint64_t total_instructions;
+    size_t peak_stack_depth;
+    size_t peak_frame_depth;
 } UfVM;
 
 void uf_vm_init(UfVM* vm, UfRuntime* rt);

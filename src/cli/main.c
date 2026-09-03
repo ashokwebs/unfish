@@ -15,6 +15,7 @@
 #include "../blocks/uf_blocks.h"
 #include "../compiler/uf_compiler.h"
 #include "../vm/uf_vm.h"
+#include "../vm/uf_disasm.h"
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -48,19 +49,20 @@ static char* read_file(const char* path) {
 static void print_usage(const char* prog) {
     printf("Unfish — Serious Programming Language & Runtime (v%s)\n\n", UF_VERSION_STRING);
     printf("Usage:\n");
-    printf("  %s run [--strict] [--vm] <file.unfish> Execute an Unfish program (AST or VM)\n", prog);
+    printf("  %s run [--strict] [--vm] [--debug] <file.unfish> Execute program (AST or VM)\n", prog);
     printf("  %s check [--strict] <file.unfish> Check program syntax and semantic analysis\n", prog);
     printf("  %s format [-i|--in-place] [--check] <file.unfish> Format source code\n", prog);
     printf("  %s debug <file.unfish>            Run interactive step debugger\n", prog);
     printf("  %s trace <file.unfish>            Emit JSON execution trace\n", prog);
     printf("  %s blocks-export <file.unfish>    Export AST to visual JSON blocks\n", prog);
     printf("  %s blocks-import <file.json>      Import visual JSON blocks to source\n", prog);
-    printf("  %s compile <file.unfish>          Compile program to bytecode and disassemble\n", prog);
+    printf("  %s compile <file.unfish>          Compile program to bytecode\n", prog);
+    printf("  %s disasm <file.unfish>           Disassemble bytecode for file and child functions\n", prog);
     printf("  %s ast <file.unfish>              Dump parsed Abstract Syntax Tree\n", prog);
     printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
     printf("  %s version                        Display version and build information\n", prog);
-    printf("  %s [--strict] [--vm] <file.unfish> Shorthand for 'run <file.unfish>'\n", prog);
+    printf("  %s [--strict] [--vm] [--debug] <file.unfish> Shorthand for 'run <file.unfish>'\n", prog);
 }
 
 static int cmd_tokens(const char* file_path) {
@@ -398,7 +400,7 @@ static int cmd_compile(const char* file_path) {
     UfBytecodeFunction* fn = uf_compile(program, &rt, &reporter);
     int exit_code = 0;
     if (fn) {
-        uf_chunk_disassemble(&fn->chunk, file_path, stdout);
+        uf_disasm_function_tree(fn, stdout);
     } else {
         exit_code = 1;
     }
@@ -410,7 +412,7 @@ static int cmd_compile(const char* file_path) {
     return exit_code;
 }
 
-static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict, bool use_vm) {
+static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict, bool use_vm, bool debug_vm) {
     char* source = read_file(file_path);
     if (!source) {
         fprintf(stderr, "Error: Could not open or read file '%s'\n", file_path);
@@ -461,8 +463,15 @@ static int cmd_run(const char* file_path, int script_argc, char** script_argv, b
         } else {
             UfVM vm;
             uf_vm_init(&vm, &rt);
+            vm.trace_execution = debug_vm;
             UfInterpretResult result = uf_vm_run(&vm, fn);
             exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error && !vm.had_error) ? 0 : 3;
+            if (debug_vm) {
+                printf("=== VM Execution Statistics ===\n");
+                printf("Total instructions executed: %lu\n", (unsigned long)vm.total_instructions);
+                printf("Peak evaluation stack depth: %zu\n", vm.peak_stack_depth);
+                printf("Peak call frame depth: %zu\n", vm.peak_frame_depth);
+            }
             uf_vm_free(&vm);
         }
     } else {
@@ -677,15 +686,16 @@ int main(int argc, char* argv[]) {
         return cmd_blocks_import(argv[arg_idx + 1]);
     }
 
-    if (strcmp(cmd, "compile") == 0) {
+    if (strcmp(cmd, "compile") == 0 || strcmp(cmd, "disasm") == 0 || strcmp(cmd, "dis") == 0) {
         if (arg_idx + 1 >= argc) {
-            fprintf(stderr, "Error: Expected file path for 'compile'\n");
+            fprintf(stderr, "Error: Expected file path for '%s'\n", cmd);
             return 64;
         }
         return cmd_compile(argv[arg_idx + 1]);
     }
 
     if (strcmp(cmd, "run") == 0) {
+        bool debug_vm = false;
         arg_idx++;
         while (arg_idx < argc && argv[arg_idx][0] == '-') {
             if (strcmp(argv[arg_idx], "--strict") == 0) {
@@ -693,6 +703,10 @@ int main(int argc, char* argv[]) {
                 arg_idx++;
             } else if (strcmp(argv[arg_idx], "--vm") == 0) {
                 use_vm = true;
+                arg_idx++;
+            } else if (strcmp(argv[arg_idx], "--debug") == 0) {
+                use_vm = true;
+                debug_vm = true;
                 arg_idx++;
             } else {
                 break;
@@ -702,15 +716,32 @@ int main(int argc, char* argv[]) {
             fprintf(stderr, "Error: Expected file path for 'run'\n");
             return 64;
         }
-        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict, use_vm);
+        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict, use_vm, debug_vm);
     }
 
-    /* Shorthand: unfish [--strict] [--vm] <file.unfish> */
-    if (argv[arg_idx][0] != '-') {
-        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict, use_vm);
+    /* Shorthand: unfish [--strict] [--vm] [--debug] <file.unfish> */
+    bool debug_vm = false;
+    while (arg_idx < argc && argv[arg_idx][0] == '-') {
+        if (strcmp(argv[arg_idx], "--strict") == 0) {
+            strict = true;
+            arg_idx++;
+        } else if (strcmp(argv[arg_idx], "--vm") == 0) {
+            use_vm = true;
+            arg_idx++;
+        } else if (strcmp(argv[arg_idx], "--debug") == 0) {
+            use_vm = true;
+            debug_vm = true;
+            arg_idx++;
+        } else {
+            break;
+        }
     }
 
-    fprintf(stderr, "Error: Unknown command or option '%s'\n", argv[arg_idx]);
+    if (arg_idx < argc && argv[arg_idx][0] != '-') {
+        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict, use_vm, debug_vm);
+    }
+
+    fprintf(stderr, "Error: Unknown command or option '%s'\n", argv[arg_idx < argc ? arg_idx : argc - 1]);
     print_usage("unfish");
     return 64;
 }
