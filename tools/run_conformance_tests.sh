@@ -40,7 +40,7 @@ for test_file in "$TESTS_DIR"/*.unfish; do
 
     # Run unfish
     set +e
-    "$UNFISH_BIN" run $flags "$test_file" > "$TMP_OUT" 2> "$TMP_ERR"
+    "$UNFISH_BIN" run $flags ${EXTRA_FLAGS:-} "$test_file" > "$TMP_OUT" 2> "$TMP_ERR"
     actual_exit=$?
     set -e
 

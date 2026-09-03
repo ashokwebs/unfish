@@ -14,6 +14,7 @@
 #include "../debugger/uf_debugger.h"
 #include "../blocks/uf_blocks.h"
 #include "../compiler/uf_compiler.h"
+#include "../vm/uf_vm.h"
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -47,7 +48,7 @@ static char* read_file(const char* path) {
 static void print_usage(const char* prog) {
     printf("Unfish — Serious Programming Language & Runtime (v%s)\n\n", UF_VERSION_STRING);
     printf("Usage:\n");
-    printf("  %s run [--strict] <file.unfish>   Execute an Unfish program\n", prog);
+    printf("  %s run [--strict] [--vm] <file.unfish> Execute an Unfish program (AST or VM)\n", prog);
     printf("  %s check [--strict] <file.unfish> Check program syntax and semantic analysis\n", prog);
     printf("  %s format [-i|--in-place] [--check] <file.unfish> Format source code\n", prog);
     printf("  %s debug <file.unfish>            Run interactive step debugger\n", prog);
@@ -59,7 +60,7 @@ static void print_usage(const char* prog) {
     printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
     printf("  %s version                        Display version and build information\n", prog);
-    printf("  %s [--strict] <file.unfish>       Shorthand for 'run <file.unfish>'\n", prog);
+    printf("  %s [--strict] [--vm] <file.unfish> Shorthand for 'run <file.unfish>'\n", prog);
 }
 
 static int cmd_tokens(const char* file_path) {
@@ -409,7 +410,7 @@ static int cmd_compile(const char* file_path) {
     return exit_code;
 }
 
-static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict) {
+static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict, bool use_vm) {
     char* source = read_file(file_path);
     if (!source) {
         fprintf(stderr, "Error: Could not open or read file '%s'\n", file_path);
@@ -452,8 +453,22 @@ static int cmd_run(const char* file_path, int script_argc, char** script_argv, b
     uf_runtime_init(&rt, &reporter);
     uf_runtime_set_args(&rt, script_argc, script_argv);
 
-    UfInterpretResult result = uf_interpret_program(&rt, program);
-    int exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error) ? 0 : 3;
+    int exit_code = 0;
+    if (use_vm) {
+        UfBytecodeFunction* fn = uf_compile(program, &rt, &reporter);
+        if (!fn || reporter.error_count > 0 || rt.had_runtime_error) {
+            exit_code = rt.had_runtime_error ? 3 : 1;
+        } else {
+            UfVM vm;
+            uf_vm_init(&vm, &rt);
+            UfInterpretResult result = uf_vm_run(&vm, fn);
+            exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error && !vm.had_error) ? 0 : 3;
+            uf_vm_free(&vm);
+        }
+    } else {
+        UfInterpretResult result = uf_interpret_program(&rt, program);
+        exit_code = (result == UF_INTERPRET_OK && !rt.had_runtime_error) ? 0 : 3;
+    }
 
     uf_runtime_free(&rt);
     uf_interner_free(&interner);
@@ -560,11 +575,19 @@ int main(int argc, char* argv[]) {
     }
 
     bool strict = false;
+    bool use_vm = false;
     int arg_idx = 1;
 
-    if (arg_idx < argc && strcmp(argv[arg_idx], "--strict") == 0) {
-        strict = true;
-        arg_idx++;
+    while (arg_idx < argc && argv[arg_idx][0] == '-') {
+        if (strcmp(argv[arg_idx], "--strict") == 0) {
+            strict = true;
+            arg_idx++;
+        } else if (strcmp(argv[arg_idx], "--vm") == 0) {
+            use_vm = true;
+            arg_idx++;
+        } else {
+            break;
+        }
     }
 
     if (arg_idx >= argc) {
@@ -664,20 +687,27 @@ int main(int argc, char* argv[]) {
 
     if (strcmp(cmd, "run") == 0) {
         arg_idx++;
-        if (arg_idx < argc && strcmp(argv[arg_idx], "--strict") == 0) {
-            strict = true;
-            arg_idx++;
+        while (arg_idx < argc && argv[arg_idx][0] == '-') {
+            if (strcmp(argv[arg_idx], "--strict") == 0) {
+                strict = true;
+                arg_idx++;
+            } else if (strcmp(argv[arg_idx], "--vm") == 0) {
+                use_vm = true;
+                arg_idx++;
+            } else {
+                break;
+            }
         }
         if (arg_idx >= argc) {
             fprintf(stderr, "Error: Expected file path for 'run'\n");
             return 64;
         }
-        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict);
+        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict, use_vm);
     }
 
-    /* Shorthand: unfish [--strict] <file.unfish> */
+    /* Shorthand: unfish [--strict] [--vm] <file.unfish> */
     if (argv[arg_idx][0] != '-') {
-        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict);
+        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict, use_vm);
     }
 
     fprintf(stderr, "Error: Unknown command or option '%s'\n", argv[arg_idx]);

@@ -391,3 +391,28 @@
 
 
 
+
+## ADR 028: Stack-Based Bytecode Virtual Machine Architecture
+* **Date**: Milestone 18 (Phase 5 Part 3)
+* **Status**: Accepted
+* **Context**: High-performance execution requires a stack-based virtual machine executing the 39 bytecode opcodes produced by the Unfish compiler, with complete semantic parity against the AST tree-walk interpreter, proper upvalue cell capture/closing lifecycles, exception handling with stack unwinding, and bi-directional interoperability between AST interpreter and VM.
+* **Decision**:
+  1. **Stack & Call Frame Architecture (`UfVM`)**:
+     - Evaluation stack with up to 4096 value slots and 256 call frames (`UfVMFrame`).
+     - Fixed-size internal footprint (~105 KB) allowing zero dynamic allocations per VM instance and clean unwind under longjmp without heap leaks.
+     - Call frame slots point to contiguous stack base pointers, facilitating fast relative local access (`OP_LOAD_LOCAL`, `OP_STORE_LOCAL`).
+  2. **Upvalue Management**:
+     - Implemented open upvalue linked list sorted by stack address.
+     - Multiple closures referencing the same stack variable share a single `UfUpvalueCell`.
+     - `close_upvalues` moves the stack value into the heap-allocated cell when a local variable exits scope or when a frame returns.
+     - Upvalues and closures are fully integrated into mark-sweep GC roots and traversal.
+  3. **Bi-directional Engine Interoperability**:
+     - AST interpreter functions called from the VM execute via `uf_runtime_call`.
+     - Bytecode closures passed to tree-walk functions (e.g. `run_tests` in stdlib) execute on the thread's active `UfVM` via `uf_vm_run_closure` with zero heap allocation.
+  4. **Exception Handling & Unwinding (`OP_PUSH_TRY` / `OP_POP_TRY`)**:
+     - `OP_PUSH_TRY` registers an exception handler with stack depth, frame index, and catch IP.
+     - Runtime errors trigger stack and frame unwinding, closing any open upvalues above the handler stack top, pushing the caught error, and jumping to the catch block.
+  5. **100% Differential Conformance Verification**:
+     - Integrated `tools/run_differential_tests.sh` testing all 51 conformance tests through both AST interpreter and VM.
+     - Verified 100% identical stdout, stderr, and exit codes across the entire suite under ASan and UBSan.
+* **Consequences**: Enables native bytecode execution with the `--vm` flag (`unfish run --vm <file>`, `unfish --vm <file>`), achieving complete behavioral equivalence with the AST interpreter.

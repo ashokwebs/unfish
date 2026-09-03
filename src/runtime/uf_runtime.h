@@ -79,6 +79,7 @@ struct UfRuntime {
     bool had_runtime_error;
 
     UfCallValueFn call_fn;
+    void* active_vm;
 
     FILE* out_stream;
     FILE* err_stream;

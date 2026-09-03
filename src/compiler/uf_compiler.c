@@ -1,4 +1,6 @@
 #include "uf_compiler.h"
+#include "../runtime/uf_module.h"
+#include "../runtime/uf_env.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -339,6 +341,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                 emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
                 emit_u16(c, g_idx, line);
             }
+            emit_byte(c, (uint8_t)OP_POP, line);
             break;
         }
         case UF_STMT_INDEX_ASSIGN: {
@@ -505,7 +508,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             emit_u16(c, (uint16_t)iter_slot, line);
             emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
             emit_u16(c, (uint16_t)idx_slot, line);
-            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+            emit_byte(c, (uint8_t)OP_ITER_GET, line);
             add_local(c, stmt->as.for_stmt.var_name, line);
             mark_initialized(c);
 
@@ -621,11 +624,36 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             end_scope(c, line);
             break;
         }
+        case UF_STMT_TRY_CATCH: {
+            int catch_jump = emit_jump(c, (uint8_t)OP_PUSH_TRY, line);
+
+            compile_stmt(c, stmt->as.try_catch.try_block);
+
+            emit_byte(c, (uint8_t)OP_POP_TRY, line);
+            int end_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
+
+            patch_jump(c, catch_jump);
+
+            begin_scope(c);
+            if (stmt->as.try_catch.catch_var) {
+                add_local(c, stmt->as.try_catch.catch_var, line);
+                mark_initialized(c);
+            } else {
+                emit_byte(c, (uint8_t)OP_POP, line);
+            }
+
+            compile_stmt(c, stmt->as.try_catch.catch_block);
+            end_scope(c, line);
+
+            patch_jump(c, end_jump);
+            break;
+        }
         case UF_STMT_STRUCT: {
             UfValue sval = uf_val_struct_def(c->rt, stmt->as.struct_stmt.name,
                                              stmt->as.struct_stmt.field_names,
                                              stmt->as.struct_stmt.field_types,
                                              stmt->as.struct_stmt.field_count);
+            uf_env_declare(c->rt->global_env, stmt->as.struct_stmt.name, sval);
             size_t c_idx = make_constant(c, sval);
             emit_byte(c, (uint8_t)OP_STRUCT_DEF, line);
             emit_u16(c, (uint16_t)c_idx, line);
@@ -634,6 +662,135 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                 emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
                 emit_u16(c, g_idx, line);
             }
+            break;
+        }
+        case UF_STMT_IMPORT: {
+            UfModuleObject* mod = uf_module_load(c->rt, stmt->as.import_stmt.module_name, stmt->span);
+            if (!mod || c->rt->had_runtime_error) {
+                c->had_error = true;
+                return;
+            }
+            const char* bound = stmt->as.import_stmt.alias ? stmt->as.import_stmt.alias : stmt->as.import_stmt.module_name;
+            uf_env_declare(c->rt->global_env, bound, uf_val_module(c->rt, mod));
+            break;
+        }
+        case UF_STMT_FROM_IMPORT: {
+            UfModuleObject* mod = uf_module_load(c->rt, stmt->as.from_import_stmt.module_name, stmt->span);
+            if (!mod || c->rt->had_runtime_error) {
+                c->had_error = true;
+                return;
+            }
+            for (size_t i = 0; i < stmt->as.from_import_stmt.count; ++i) {
+                const char* sym = stmt->as.from_import_stmt.symbols[i];
+                UfValue sym_key = uf_val_string(c->rt, sym, strlen(sym));
+                if (!uf_map_has(mod->exports.as.map, sym_key)) {
+                    uf_runtime_raise(c->rt, "ImportError", stmt->span, "Cannot import name '%s' from module '%s'", sym, stmt->as.from_import_stmt.module_name);
+                    c->had_error = true;
+                    return;
+                }
+                UfValue val = uf_map_get(mod->exports.as.map, sym_key);
+                const char* bound = (stmt->as.from_import_stmt.aliases && stmt->as.from_import_stmt.aliases[i])
+                                     ? stmt->as.from_import_stmt.aliases[i]
+                                     : sym;
+                uf_env_declare(c->rt->global_env, bound, val);
+            }
+            break;
+        }
+        case UF_STMT_MATCH: {
+            begin_scope(c);
+            compile_expr(c, stmt->as.match_stmt.expr);
+            int match_val_slot = add_local(c, "_match_target", line);
+            mark_initialized(c);
+
+            int* end_jumps = (int*)malloc(sizeof(int) * (stmt->as.match_stmt.arm_count + 1));
+            size_t end_jump_count = 0;
+
+            for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
+                UfMatchArm* arm = &stmt->as.match_stmt.arms[i];
+                int fail_jumps[16];
+                size_t fail_jump_count = 0;
+
+                begin_scope(c);
+
+                if (arm->pattern->kind == UF_PAT_LITERAL) {
+                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                    emit_u16(c, (uint16_t)match_val_slot, line);
+                    compile_expr(c, arm->pattern->as.literal);
+                    emit_byte(c, (uint8_t)OP_EQ, line);
+                    fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    emit_byte(c, (uint8_t)OP_POP, line);
+                } else if (arm->pattern->kind == UF_PAT_VARIABLE) {
+                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                    emit_u16(c, (uint16_t)match_val_slot, line);
+                    add_local(c, arm->pattern->as.var_name, line);
+                    mark_initialized(c);
+                } else if (arm->pattern->kind == UF_PAT_WILDCARD) {
+                    /* Matches unconditionally */
+                } else if (arm->pattern->kind == UF_PAT_STRUCT) {
+                    uint16_t s_idx = identifier_constant(c, arm->pattern->as.struct_pat.struct_name);
+                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                    emit_u16(c, (uint16_t)match_val_slot, line);
+                    emit_byte(c, (uint8_t)OP_INSTANCE, line);
+                    emit_u16(c, s_idx, line);
+                    fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    emit_byte(c, (uint8_t)OP_POP, line);
+
+                    UfStructDefObject* sdef = NULL;
+                    UfValue sdef_val;
+                    if (uf_env_lookup(c->rt->global_env, arm->pattern->as.struct_pat.struct_name, &sdef_val) &&
+                        sdef_val.kind == UF_VAL_STRUCT_DEF) {
+                        sdef = sdef_val.as.struct_def;
+                    }
+
+                    for (size_t f = 0; f < arm->pattern->as.struct_pat.field_count; ++f) {
+                        UfPattern* fp = arm->pattern->as.struct_pat.field_patterns[f];
+                        const char* fname = (sdef && f < sdef->field_count) ? sdef->field_names[f] : "";
+                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                        emit_u16(c, (uint16_t)match_val_slot, line);
+                        emit_constant(c, uf_val_string_cstr(c->rt, fname), line);
+                        emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+
+                        if (fp->kind == UF_PAT_VARIABLE) {
+                            add_local(c, fp->as.var_name, line);
+                            mark_initialized(c);
+                        } else if (fp->kind == UF_PAT_LITERAL) {
+                            compile_expr(c, fp->as.literal);
+                            emit_byte(c, (uint8_t)OP_EQ, line);
+                            fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    }
+                }
+
+                if (arm->guard) {
+                    compile_expr(c, arm->guard);
+                    fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    emit_byte(c, (uint8_t)OP_POP, line);
+                }
+
+                compile_stmt(c, arm->body);
+                end_scope(c, line);
+
+                end_jumps[end_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP, line);
+
+                for (size_t fj = 0; fj < fail_jump_count; ++fj) {
+                    patch_jump(c, fail_jumps[fj]);
+                }
+                if (fail_jump_count > 0) {
+                    emit_byte(c, (uint8_t)OP_POP, line);
+                }
+            }
+
+            if (stmt->as.match_stmt.else_branch) {
+                compile_stmt(c, stmt->as.match_stmt.else_branch);
+            }
+
+            for (size_t j = 0; j < end_jump_count; ++j) {
+                patch_jump(c, end_jumps[j]);
+            }
+            free(end_jumps);
+
+            end_scope(c, line);
             break;
         }
         default:
@@ -647,9 +804,22 @@ UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagno
     UfCompiler compiler;
     compiler_init(&compiler, NULL, TYPE_SCRIPT, "<script>", 0, rt, reporter);
 
+    /* Pass 1: Hoisted definitions (functions, structs, imports) */
     for (size_t i = 0; i < program->count; ++i) {
-        compile_stmt(&compiler, program->stmts[i]);
-        if (compiler.had_error) break;
+        UfStmtKind k = program->stmts[i]->kind;
+        if (k == UF_STMT_FUNCTION || k == UF_STMT_STRUCT || k == UF_STMT_IMPORT || k == UF_STMT_FROM_IMPORT) {
+            compile_stmt(&compiler, program->stmts[i]);
+            if (compiler.had_error) break;
+        }
+    }
+
+    /* Pass 2: Executable statements */
+    for (size_t i = 0; i < program->count; ++i) {
+        UfStmtKind k = program->stmts[i]->kind;
+        if (k != UF_STMT_FUNCTION && k != UF_STMT_STRUCT && k != UF_STMT_IMPORT && k != UF_STMT_FROM_IMPORT) {
+            compile_stmt(&compiler, program->stmts[i]);
+            if (compiler.had_error) break;
+        }
     }
 
     emit_byte(&compiler, (uint8_t)OP_NULL, 0);

@@ -1,5 +1,6 @@
 #include "uf_interpreter.h"
 #include "uf_module.h"
+#include "../vm/uf_vm.h"
 #include <math.h>
 
 typedef enum {
@@ -128,6 +129,16 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
                              sdef->name, sdef->field_count, sdef->field_count == 1 ? "" : "s", argc);
         } else {
             result = uf_val_instance(rt, sdef, args, argc);
+        }
+    } else if (callee.kind == UF_VAL_CLOSURE) {
+        UfClosureObject* cl = callee.as.closure;
+        if (cl->function->arity != argc) {
+            uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
+                             cl->function->name ? cl->function->name : "anonymous", cl->function->arity, argc);
+        } else if (rt->active_vm) {
+            result = uf_vm_run_closure((UfVM*)rt->active_vm, cl, argc, args);
+        } else {
+            uf_runtime_error(rt, span, "Cannot call bytecode closure without active VM");
         }
     } else {
         uf_runtime_error(rt, span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));

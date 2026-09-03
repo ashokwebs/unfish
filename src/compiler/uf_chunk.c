@@ -42,9 +42,12 @@ const char* uf_opcode_name(UfOpcode op) {
         case OP_BUILD_MAP: return "OP_BUILD_MAP";
         case OP_INDEX_GET: return "OP_INDEX_GET";
         case OP_INDEX_SET: return "OP_INDEX_SET";
+        case OP_ITER_GET: return "OP_ITER_GET";
         case OP_SAY: return "OP_SAY";
         case OP_STRUCT_DEF: return "OP_STRUCT_DEF";
         case OP_INSTANCE: return "OP_INSTANCE";
+        case OP_PUSH_TRY: return "OP_PUSH_TRY";
+        case OP_POP_TRY: return "OP_POP_TRY";
         default: return "OP_UNKNOWN";
     }
 }
@@ -221,16 +224,18 @@ size_t uf_disassemble_instruction(const UfChunk* chunk, size_t offset, FILE* out
             return simple_instruction("OP_INDEX_GET", offset, out);
         case OP_INDEX_SET:
             return simple_instruction("OP_INDEX_SET", offset, out);
+        case OP_ITER_GET:
+            return simple_instruction("OP_ITER_GET", offset, out);
         case OP_SAY:
             return simple_instruction("OP_SAY", offset, out);
         case OP_STRUCT_DEF:
             return constant_instruction("OP_STRUCT_DEF", chunk, offset, out);
-        case OP_INSTANCE: {
-            uint16_t sidx = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            uint8_t argc = chunk->code[offset + 3];
-            fprintf(out, "%-18s const %u, argc %u\n", "OP_INSTANCE", sidx, argc);
-            return offset + 4;
-        }
+        case OP_INSTANCE:
+            return constant_instruction("OP_INSTANCE", chunk, offset, out);
+        case OP_PUSH_TRY:
+            return jump_instruction("OP_PUSH_TRY", 1, chunk, offset, out);
+        case OP_POP_TRY:
+            return simple_instruction("OP_POP_TRY", offset, out);
         default:
             fprintf(out, "Unknown opcode %d\n", instruction);
             return offset + 1;

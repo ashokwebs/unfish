@@ -2,6 +2,7 @@
 #include "uf_stdlib.h"
 #include "uf_module.h"
 #include "../compiler/uf_chunk.h"
+#include "../vm/uf_vm.h"
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
@@ -568,6 +569,26 @@ void uf_gc_mark_value(UfValue val) {
                 uf_gc_mark_value(val.as.bytecode_fn->chunk.constants[i]);
             }
         }
+    } else if (val.kind == UF_VAL_CLOSURE) {
+        UfClosureObject* cl = val.as.closure;
+        if (cl && !cl->obj.marked) {
+            cl->obj.marked = true;
+            if (cl->function && !cl->function->obj.marked) {
+                cl->function->obj.marked = true;
+                for (size_t i = 0; i < cl->function->chunk.const_count; ++i) {
+                    uf_gc_mark_value(cl->function->chunk.constants[i]);
+                }
+            }
+            for (size_t i = 0; i < cl->upvalue_count; ++i) {
+                UfUpvalueCell* cell = cl->upvalues[i];
+                if (cell && !cell->obj.marked) {
+                    cell->obj.marked = true;
+                    if (cell->location) {
+                        uf_gc_mark_value(*cell->location);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -656,6 +677,12 @@ void uf_gc_collect(UfRuntime* rt) {
                 UfBytecodeFunction* bfn = (UfBytecodeFunction*)obj;
                 uf_chunk_free(&bfn->chunk);
                 free(bfn);
+            } else if (obj->kind == UF_OBJ_CLOSURE) {
+                UfClosureObject* cl = (UfClosureObject*)obj;
+                if (cl->upvalues) free(cl->upvalues);
+                free(cl);
+            } else if (obj->kind == UF_OBJ_UPVALUE) {
+                free(obj);
             } else {
                 free(obj);
             }
@@ -697,6 +724,7 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->try_handler_count = 0;
     rt->current_error = uf_val_null();
     rt->call_fn = NULL;
+    rt->active_vm = NULL;
     rt->out_stream = stdout;
     rt->err_stream = stderr;
     rt->reporter = reporter;
@@ -755,6 +783,12 @@ void uf_runtime_free(UfRuntime* rt) {
             UfBytecodeFunction* bfn = (UfBytecodeFunction*)obj;
             uf_chunk_free(&bfn->chunk);
             free(bfn);
+        } else if (obj->kind == UF_OBJ_CLOSURE) {
+            UfClosureObject* cl = (UfClosureObject*)obj;
+            if (cl->upvalues) free(cl->upvalues);
+            free(cl);
+        } else if (obj->kind == UF_OBJ_UPVALUE) {
+            free(obj);
         } else {
             free(obj);
         }

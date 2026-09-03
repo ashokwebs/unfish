@@ -3,6 +3,7 @@
 #include "uf_env.h"
 #include "uf_module.h"
 #include "../compiler/uf_chunk.h"
+#include "../vm/uf_vm.h"
 #include <math.h>
 
 UfValue uf_val_null(void) {
@@ -474,6 +475,7 @@ bool uf_val_is_truthy(UfValue val) {
         case UF_VAL_STRUCT_DEF:
         case UF_VAL_INSTANCE:
         case UF_VAL_BYTECODE_FN:
+        case UF_VAL_CLOSURE:
             return true;
     }
     return false;
@@ -536,6 +538,8 @@ bool uf_val_equal(UfValue a, UfValue b) {
         }
         case UF_VAL_BYTECODE_FN:
             return a.as.bytecode_fn == b.as.bytecode_fn;
+        case UF_VAL_CLOSURE:
+            return a.as.closure == b.as.closure;
     }
     return false;
 }
@@ -716,6 +720,13 @@ char* uf_val_to_string(UfValue val) {
                      (val.as.bytecode_fn && val.as.bytecode_fn->name) ? val.as.bytecode_fn->name : "anonymous");
             return strdup(fbuf);
         }
+        case UF_VAL_CLOSURE: {
+            char fbuf[128];
+            const char* fname = (val.as.closure && val.as.closure->function && val.as.closure->function->name)
+                                    ? val.as.closure->function->name : "anonymous";
+            snprintf(fbuf, sizeof(fbuf), "<fn %s>", fname);
+            return strdup(fbuf);
+        }
     }
     return strdup("<unknown>");
 }
@@ -729,6 +740,7 @@ const char* uf_val_type_name(UfValue val) {
         case UF_VAL_FUNCTION:    return "function";
         case UF_VAL_NATIVE_FN:   return "function";
         case UF_VAL_BYTECODE_FN: return "function";
+        case UF_VAL_CLOSURE:     return "function";
         case UF_VAL_ARRAY:       return "array";
         case UF_VAL_MAP:         return "map";
         case UF_VAL_ERROR:       return "error";
@@ -744,6 +756,32 @@ UfValue uf_val_bytecode_fn(UfRuntime* rt, UfBytecodeFunction* fn) {
     UfValue v;
     v.kind = UF_VAL_BYTECODE_FN;
     v.as.bytecode_fn = fn;
+    return v;
+}
+
+UfClosureObject* uf_closure_new(UfRuntime* rt, UfBytecodeFunction* function) {
+    UfClosureObject* cl = (UfClosureObject*)malloc(sizeof(UfClosureObject));
+    if (!cl) return NULL;
+    cl->obj.kind = UF_OBJ_CLOSURE;
+    cl->obj.marked = false;
+    cl->obj.next = NULL;
+    cl->function = function;
+    cl->upvalue_count = function ? function->upvalue_count : 0;
+    cl->upvalues = NULL;
+    if (cl->upvalue_count > 0) {
+        cl->upvalues = (UfUpvalueCell**)calloc(cl->upvalue_count, sizeof(UfUpvalueCell*));
+    }
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)cl, sizeof(UfClosureObject) + cl->upvalue_count * sizeof(UfUpvalueCell*));
+    }
+    return cl;
+}
+
+UfValue uf_val_closure(UfRuntime* rt, UfClosureObject* closure) {
+    (void)rt;
+    UfValue v;
+    v.kind = UF_VAL_CLOSURE;
+    v.as.closure = closure;
     return v;
 }
 

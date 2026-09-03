@@ -62,13 +62,18 @@ typedef enum {
     OP_BUILD_MAP,       /* [u16 pair_count] */
     OP_INDEX_GET,
     OP_INDEX_SET,
+    OP_ITER_GET,
 
     /* Statements */
     OP_SAY,
 
     /* Structs */
     OP_STRUCT_DEF,      /* [u16 const_sdef_idx] */
-    OP_INSTANCE         /* [u16 const_sdef_idx, u8 argc] */
+    OP_INSTANCE,        /* [u16 const_sdef_idx] */
+
+    /* Exception Handling */
+    OP_PUSH_TRY,        /* [u16 catch_offset] */
+    OP_POP_TRY
 } UfOpcode;
 
 const char* uf_opcode_name(UfOpcode op);

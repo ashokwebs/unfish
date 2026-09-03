@@ -23,11 +23,16 @@ typedef enum {
     UF_VAL_MODULE,
     UF_VAL_STRUCT_DEF,
     UF_VAL_INSTANCE,
-    UF_VAL_BYTECODE_FN
+    UF_VAL_BYTECODE_FN,
+    UF_VAL_CLOSURE
 } UfValueKind;
 
 struct UfBytecodeFunction;
 typedef struct UfBytecodeFunction UfBytecodeFunction;
+struct UfClosureObject;
+typedef struct UfClosureObject UfClosureObject;
+struct UfUpvalueCell;
+typedef struct UfUpvalueCell UfUpvalueCell;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
 
@@ -100,6 +105,7 @@ struct UfValue {
         UfStructDefObject* struct_def;
         UfInstanceObject* instance;
         UfBytecodeFunction* bytecode_fn;
+        UfClosureObject* closure;
     } as;
 };
 
