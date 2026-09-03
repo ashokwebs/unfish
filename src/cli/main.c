@@ -12,6 +12,7 @@
 #include "../interpreter/uf_interpreter.h"
 #include "../formatter/uf_formatter.h"
 #include "../debugger/uf_debugger.h"
+#include "../blocks/uf_blocks.h"
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -50,6 +51,8 @@ static void print_usage(const char* prog) {
     printf("  %s format [-i|--in-place] [--check] <file.unfish> Format source code\n", prog);
     printf("  %s debug <file.unfish>            Run interactive step debugger\n", prog);
     printf("  %s trace <file.unfish>            Emit JSON execution trace\n", prog);
+    printf("  %s blocks-export <file.unfish>    Export AST to visual JSON blocks\n", prog);
+    printf("  %s blocks-import <file.json>      Import visual JSON blocks to source\n", prog);
     printf("  %s ast <file.unfish>              Dump parsed Abstract Syntax Tree\n", prog);
     printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
@@ -293,6 +296,66 @@ static int cmd_debug(const char* file_path) {
     return exit_code;
 }
 
+static int cmd_blocks_export(const char* file_path) {
+    char* source = read_file(file_path);
+    if (!source) return 1;
+
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, file_path, source);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, file_path, source, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+
+    if (parser.had_error || !program) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    uf_blocks_export_stream(program, stdout);
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    free(source);
+    return 0;
+}
+
+static int cmd_blocks_import(const char* file_path) {
+    char* source = read_file(file_path);
+    if (!source) return 1;
+
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, file_path, source);
+
+    UfProgram* program = uf_blocks_import_string(source, &arena, &interner, &reporter);
+    if (!program) {
+        fprintf(stderr, "Error: Failed to import blocks JSON from '%s'\n", file_path);
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    uf_format_program_stream(program, stdout);
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    free(source);
+    return 0;
+}
+
 static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict) {
     char* source = read_file(file_path);
     if (!source) {
@@ -520,6 +583,22 @@ int main(int argc, char* argv[]) {
             return 64;
         }
         return cmd_debug(argv[arg_idx + 1]);
+    }
+
+    if (strcmp(cmd, "blocks-export") == 0) {
+        if (arg_idx + 1 >= argc) {
+            fprintf(stderr, "Error: Expected file path for 'blocks-export'\n");
+            return 64;
+        }
+        return cmd_blocks_export(argv[arg_idx + 1]);
+    }
+
+    if (strcmp(cmd, "blocks-import") == 0) {
+        if (arg_idx + 1 >= argc) {
+            fprintf(stderr, "Error: Expected file path for 'blocks-import'\n");
+            return 64;
+        }
+        return cmd_blocks_import(argv[arg_idx + 1]);
     }
 
     if (strcmp(cmd, "run") == 0) {

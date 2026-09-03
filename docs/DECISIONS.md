@@ -327,6 +327,24 @@
      Provides an interactive REPL (`ufdb`) with breakpoints (`b <line>`), single-stepping (`s`), step-over (`n`), continue (`c`), backtraces (`stack`), and scope inspection (`p <var>`, `env`, `heap`).
 * **Consequences**: First-class developer tooling embedded directly into the core runtime without third-party dependencies.
 
+## ADR 025: Visual Block <-> AST <-> Text Round-Tripping (`blocks-export` / `blocks-import`)
+* **Date**: Milestone 15 (Phase 4 Part 8)
+* **Status**: Accepted
+* **Context**: Educational programming environments (such as Blockly, Scratch, and visual block IDEs) require bidirectional translation between graphical node representations and textual source code without syntactic or semantic information loss.
+* **Decision**:
+  1. **Canonical JSON Block Schema (`unfish_blocks_v1`)**:
+     A declarative JSON schema representing 100% of Unfish AST nodes:
+     - Statements: `let`, `assign`, `index_assign`, `say`, `expr`, `if`, `while`, `repeat`, `for_in`, `break`, `continue`, `function`, `return`, `block`, `try_catch`, `import`, `from_import`, `struct`, `match`.
+     - Expressions: `literal_null`, `literal_bool`, `literal_number`, `literal_string`, `identifier`, `unary`, `binary`, `grouping`, `call`, `array`, `index`, `map`, `function`.
+     - Match Patterns: `pattern_literal`, `pattern_variable`, `pattern_wildcard`, `pattern_struct`.
+  2. **Bi-Directional Tooling**:
+     - `unfish blocks-export <file.unfish>`: Parses Unfish textual source into AST and emits canonical JSON blocks.
+     - `unfish blocks-import <file.json>`: Deserializes JSON blocks directly into typed AST nodes and canonicalizes back to Unfish source code via `uf_format_program`.
+  3. **Lossless Round-Trip Guarantee**:
+     Formally verified: `Text -> AST -> JSON -> AST -> Text == original` across the entire language conformance test suite including structs, pattern matching, closures, and collections.
+* **Consequences**: Enables seamless visual block IDE integration, visual code editors, and automated code transformations with zero external dependencies.
+
+
 
 
 
