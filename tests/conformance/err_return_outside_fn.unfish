@@ -1,0 +1,3 @@
+# expect-exit: 2
+# expect-error: Semantic Error: 'return' statement outside of function
+return 42

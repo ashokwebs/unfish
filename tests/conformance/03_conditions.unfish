@@ -1,0 +1,13 @@
+# expect: greater
+# expect: equal
+let x = 15
+
+if x > 20:
+    say "huge"
+else if x > 10:
+    say "greater"
+else:
+    say "smaller"
+
+if x == 15:
+    say "equal"

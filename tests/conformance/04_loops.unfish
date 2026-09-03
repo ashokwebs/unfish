@@ -1,0 +1,10 @@
+# expect: 3
+# expect: 0
+let r = 0
+repeat 3 times:
+    r = r + 1
+say r
+
+while r > 0:
+    r = r - 1
+say r

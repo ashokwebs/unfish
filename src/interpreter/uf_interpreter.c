@@ -1,0 +1,410 @@
+#include "uf_interpreter.h"
+#include <math.h>
+
+typedef enum {
+    EXEC_OK,
+    EXEC_RETURN,
+    EXEC_ERROR
+} ExecStatus;
+
+typedef struct {
+    ExecStatus status;
+    UfValue value;
+} ExecResult;
+
+static ExecResult exec_ok(void) {
+    ExecResult r;
+    r.status = EXEC_OK;
+    r.value = uf_val_null();
+    return r;
+}
+
+static ExecResult exec_return(UfValue val) {
+    ExecResult r;
+    r.status = EXEC_RETURN;
+    r.value = val;
+    return r;
+}
+
+static ExecResult exec_error(void) {
+    ExecResult r;
+    r.status = EXEC_ERROR;
+    r.value = uf_val_null();
+    return r;
+}
+
+static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stmt);
+static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_stmt);
+
+static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
+    UfValue callee = uf_evaluate_expression(rt, env, expr->as.call.callee);
+    if (rt->had_runtime_error) {
+        return uf_val_null();
+    }
+
+    size_t argc = expr->as.call.argc;
+    UfValue args[64];
+    for (size_t i = 0; i < argc; ++i) {
+        args[i] = uf_evaluate_expression(rt, env, expr->as.call.args[i]);
+        if (rt->had_runtime_error) {
+            return uf_val_null();
+        }
+    }
+
+    UfValue result = uf_val_null();
+
+    if (callee.kind == UF_VAL_FUNCTION) {
+        UfFunctionObject* fn = callee.as.function;
+        if (fn->param_count != argc) {
+            uf_runtime_error(rt, expr->span, "Function '%s' expects %zu arguments, but %zu provided",
+                             fn->name ? fn->name : "anonymous", fn->param_count, argc);
+        } else {
+            UfEnv* call_env = uf_env_create(rt, fn->closure_env);
+            if (uf_runtime_push_frame(rt, fn->name ? fn->name : "<anonymous>", expr->span, call_env)) {
+                for (size_t i = 0; i < argc; ++i) {
+                    uf_env_declare(call_env, fn->params[i], args[i]);
+                }
+
+                ExecResult body_res = execute_statement(rt, call_env, fn->body);
+                uf_runtime_pop_frame(rt);
+
+                if (body_res.status == EXEC_RETURN) {
+                    result = body_res.value;
+                } else {
+                    result = uf_val_null();
+                }
+            }
+        }
+    } else if (callee.kind == UF_VAL_NATIVE_FN) {
+        UfNativeObject* nat = &callee.as.native_fn;
+        if (nat->arity >= 0 && (int)argc != nat->arity) {
+            uf_runtime_error(rt, expr->span, "Native function '%s' expects %d arguments, but %zu provided",
+                             nat->name, nat->arity, argc);
+        } else if (uf_runtime_push_frame(rt, nat->name, expr->span, env)) {
+            result = nat->fn(rt, (int)argc, args);
+            uf_runtime_pop_frame(rt);
+        }
+    } else {
+        uf_runtime_error(rt, expr->span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));
+    }
+
+    return result;
+}
+
+UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
+    if (!expr || rt->had_runtime_error) {
+        return uf_val_null();
+    }
+
+    switch (expr->kind) {
+        case UF_EXPR_LITERAL_NULL:
+            return uf_val_null();
+
+        case UF_EXPR_LITERAL_BOOL:
+            return uf_val_bool(expr->as.bool_val);
+
+        case UF_EXPR_LITERAL_NUMBER:
+            return uf_val_number(expr->as.number_val);
+
+        case UF_EXPR_LITERAL_STRING:
+            return uf_val_string_cstr(rt, expr->as.string_val);
+
+        case UF_EXPR_IDENTIFIER: {
+            UfValue val;
+            if (uf_env_lookup(env, expr->as.identifier_name, &val)) {
+                return val;
+            }
+            uf_runtime_error(rt, expr->span, "Undefined identifier '%s'", expr->as.identifier_name);
+            return uf_val_null();
+        }
+
+        case UF_EXPR_GROUPING:
+            return uf_evaluate_expression(rt, env, expr->as.grouping.inner);
+
+        case UF_EXPR_UNARY: {
+            UfValue operand = uf_evaluate_expression(rt, env, expr->as.unary.operand);
+            if (rt->had_runtime_error) return operand;
+
+            if (expr->as.unary.op == UF_TOK_MINUS) {
+                if (operand.kind != UF_VAL_NUMBER) {
+                    uf_runtime_error(rt, expr->span, "Operand to unary '-' must be a number, got '%s'", uf_val_type_name(operand));
+                    return uf_val_null();
+                }
+                return uf_val_number(-operand.as.number);
+            } else if (expr->as.unary.op == UF_TOK_NOT) {
+                return uf_val_bool(!uf_val_is_truthy(operand));
+            }
+            return uf_val_null();
+        }
+
+        case UF_EXPR_BINARY: {
+            /* Short-circuit logical operators */
+            if (expr->as.binary.op == UF_TOK_AND) {
+                UfValue left = uf_evaluate_expression(rt, env, expr->as.binary.left);
+                if (rt->had_runtime_error) return left;
+                if (!uf_val_is_truthy(left)) {
+                    return left;
+                }
+                return uf_evaluate_expression(rt, env, expr->as.binary.right);
+            }
+
+            if (expr->as.binary.op == UF_TOK_OR) {
+                UfValue left = uf_evaluate_expression(rt, env, expr->as.binary.left);
+                if (rt->had_runtime_error) return left;
+                if (uf_val_is_truthy(left)) {
+                    return left;
+                }
+                return uf_evaluate_expression(rt, env, expr->as.binary.right);
+            }
+
+            UfValue left = uf_evaluate_expression(rt, env, expr->as.binary.left);
+            if (rt->had_runtime_error) return left;
+            UfValue right = uf_evaluate_expression(rt, env, expr->as.binary.right);
+            if (rt->had_runtime_error) return right;
+
+            switch (expr->as.binary.op) {
+                case UF_TOK_PLUS: {
+                    if (left.kind == UF_VAL_STRING || right.kind == UF_VAL_STRING) {
+                        char* s1 = uf_val_to_string(left);
+                        char* s2 = uf_val_to_string(right);
+                        size_t l1 = strlen(s1);
+                        size_t l2 = strlen(s2);
+                        char* combined = (char*)malloc(l1 + l2 + 1);
+                        memcpy(combined, s1, l1);
+                        memcpy(combined + l1, s2, l2);
+                        combined[l1 + l2] = '\0';
+                        free(s1);
+                        free(s2);
+                        return uf_val_string_take(rt, combined, l1 + l2);
+                    }
+                    if (left.kind == UF_VAL_NUMBER && right.kind == UF_VAL_NUMBER) {
+                        return uf_val_number(left.as.number + right.as.number);
+                    }
+                    uf_runtime_error(rt, expr->span, "Operands of '+' must be two numbers or at least one string, got '%s' and '%s'",
+                                     uf_val_type_name(left), uf_val_type_name(right));
+                    return uf_val_null();
+                }
+
+                case UF_TOK_MINUS:
+                case UF_TOK_STAR:
+                case UF_TOK_SLASH:
+                case UF_TOK_PERCENT: {
+                    if (left.kind != UF_VAL_NUMBER || right.kind != UF_VAL_NUMBER) {
+                        uf_runtime_error(rt, expr->span, "Arithmetic operands must be numbers, got '%s' and '%s'",
+                                         uf_val_type_name(left), uf_val_type_name(right));
+                        return uf_val_null();
+                    }
+
+                    double n1 = left.as.number;
+                    double n2 = right.as.number;
+
+                    if (expr->as.binary.op == UF_TOK_SLASH) {
+                        if (n2 == 0.0) {
+                            uf_runtime_error(rt, expr->span, "Division by zero");
+                            return uf_val_null();
+                        }
+                        return uf_val_number(n1 / n2);
+                    } else if (expr->as.binary.op == UF_TOK_PERCENT) {
+                        if (n2 == 0.0) {
+                            uf_runtime_error(rt, expr->span, "Modulo by zero");
+                            return uf_val_null();
+                        }
+                        return uf_val_number(fmod(n1, n2));
+                    } else if (expr->as.binary.op == UF_TOK_MINUS) {
+                        return uf_val_number(n1 - n2);
+                    } else {
+                        return uf_val_number(n1 * n2);
+                    }
+                }
+
+                case UF_TOK_EQEQ:
+                    return uf_val_bool(uf_val_equal(left, right));
+
+                case UF_TOK_BANGEQ:
+                    return uf_val_bool(!uf_val_equal(left, right));
+
+                case UF_TOK_LT:
+                case UF_TOK_LTEQ:
+                case UF_TOK_GT:
+                case UF_TOK_GTEQ: {
+                    if (left.kind != UF_VAL_NUMBER || right.kind != UF_VAL_NUMBER) {
+                        uf_runtime_error(rt, expr->span, "Comparison operands must be numbers, got '%s' and '%s'",
+                                         uf_val_type_name(left), uf_val_type_name(right));
+                        return uf_val_null();
+                    }
+                    double a = left.as.number;
+                    double b = right.as.number;
+
+                    if (expr->as.binary.op == UF_TOK_LT)   return uf_val_bool(a < b);
+                    if (expr->as.binary.op == UF_TOK_LTEQ) return uf_val_bool(a <= b);
+                    if (expr->as.binary.op == UF_TOK_GT)   return uf_val_bool(a > b);
+                    if (expr->as.binary.op == UF_TOK_GTEQ) return uf_val_bool(a >= b);
+                    break;
+                }
+
+                default:
+                    break;
+            }
+
+            return uf_val_null();
+        }
+
+        case UF_EXPR_CALL:
+            return evaluate_call(rt, env, expr);
+    }
+
+    return uf_val_null();
+}
+
+static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_stmt) {
+    for (size_t i = 0; i < block_stmt->as.block.count; ++i) {
+        ExecResult res = execute_statement(rt, env, block_stmt->as.block.stmts[i]);
+        if (res.status != EXEC_OK) {
+            return res;
+        }
+    }
+    return exec_ok();
+}
+
+static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
+    if (!stmt || rt->had_runtime_error) {
+        return exec_error();
+    }
+
+    /* Execution quota check */
+    if (rt->max_steps > 0 && ++rt->step_count > rt->max_steps) {
+        uf_runtime_error(rt, stmt->span, "ExecutionQuotaExceeded: Program exceeded maximum step quota (%llu steps)", (unsigned long long)rt->max_steps);
+        return exec_error();
+    }
+
+    switch (stmt->kind) {
+        case UF_STMT_LET: {
+            UfValue init_val = uf_val_null();
+            if (stmt->as.let_stmt.init) {
+                init_val = uf_evaluate_expression(rt, env, stmt->as.let_stmt.init);
+                if (rt->had_runtime_error) return exec_error();
+            }
+            uf_env_declare(env, stmt->as.let_stmt.name, init_val);
+            return exec_ok();
+        }
+
+        case UF_STMT_ASSIGN: {
+            UfValue val = uf_evaluate_expression(rt, env, stmt->as.assign_stmt.value);
+            if (rt->had_runtime_error) return exec_error();
+            if (!uf_env_assign(env, stmt->as.assign_stmt.name, val)) {
+                uf_runtime_error(rt, stmt->span, "Cannot assign to undefined identifier '%s'", stmt->as.assign_stmt.name);
+                return exec_error();
+            }
+            return exec_ok();
+        }
+
+        case UF_STMT_SAY: {
+            UfValue val = uf_evaluate_expression(rt, env, stmt->as.say_stmt.expr);
+            if (rt->had_runtime_error) return exec_error();
+            char* s = uf_val_to_string(val);
+            fprintf(rt->out_stream, "%s\n", s);
+            fflush(rt->out_stream);
+            free(s);
+            return exec_ok();
+        }
+
+        case UF_STMT_EXPR: {
+            uf_evaluate_expression(rt, env, stmt->as.expr_stmt.expr);
+            if (rt->had_runtime_error) return exec_error();
+            return exec_ok();
+        }
+
+        case UF_STMT_IF: {
+            UfValue cond = uf_evaluate_expression(rt, env, stmt->as.if_stmt.condition);
+            if (rt->had_runtime_error) return exec_error();
+            bool truthy = uf_val_is_truthy(cond);
+
+            if (truthy) {
+                UfEnv* block_env = uf_env_create(rt, env);
+                return execute_statement(rt, block_env, stmt->as.if_stmt.then_branch);
+            } else if (stmt->as.if_stmt.else_branch) {
+                if (stmt->as.if_stmt.else_branch->kind == UF_STMT_IF) {
+                    return execute_statement(rt, env, stmt->as.if_stmt.else_branch);
+                } else {
+                    UfEnv* block_env = uf_env_create(rt, env);
+                    return execute_statement(rt, block_env, stmt->as.if_stmt.else_branch);
+                }
+            }
+            return exec_ok();
+        }
+
+        case UF_STMT_WHILE: {
+            for (;;) {
+                UfValue cond = uf_evaluate_expression(rt, env, stmt->as.while_stmt.condition);
+                if (rt->had_runtime_error) return exec_error();
+                if (!uf_val_is_truthy(cond)) break;
+
+                UfEnv* block_env = uf_env_create(rt, env);
+                ExecResult res = execute_statement(rt, block_env, stmt->as.while_stmt.body);
+
+                if (res.status != EXEC_OK) {
+                    return res;
+                }
+            }
+            return exec_ok();
+        }
+
+        case UF_STMT_REPEAT: {
+            UfValue count_val = uf_evaluate_expression(rt, env, stmt->as.repeat_stmt.count_expr);
+            if (rt->had_runtime_error) return exec_error();
+            if (count_val.kind != UF_VAL_NUMBER) {
+                uf_runtime_error(rt, stmt->span, "Repeat count must be a number, got '%s'", uf_val_type_name(count_val));
+                return exec_error();
+            }
+            int64_t count = (int64_t)count_val.as.number;
+
+            for (int64_t i = 0; i < count; ++i) {
+                UfEnv* block_env = uf_env_create(rt, env);
+                ExecResult res = execute_statement(rt, block_env, stmt->as.repeat_stmt.body);
+
+                if (res.status != EXEC_OK) {
+                    return res;
+                }
+            }
+            return exec_ok();
+        }
+
+        case UF_STMT_FUNCTION: {
+            UfValue fn = uf_val_function(rt,
+                                         stmt->as.function_stmt.name,
+                                         stmt->as.function_stmt.params,
+                                         stmt->as.function_stmt.param_count,
+                                         stmt->as.function_stmt.body,
+                                         env);
+            uf_env_declare(env, stmt->as.function_stmt.name, fn);
+            return exec_ok();
+        }
+
+        case UF_STMT_RETURN: {
+            UfValue val = uf_val_null();
+            if (stmt->as.return_stmt.value) {
+                val = uf_evaluate_expression(rt, env, stmt->as.return_stmt.value);
+                if (rt->had_runtime_error) return exec_error();
+            }
+            return exec_return(val);
+        }
+
+        case UF_STMT_BLOCK:
+            return execute_block(rt, env, stmt);
+    }
+
+    return exec_ok();
+}
+
+UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) {
+    for (size_t i = 0; i < program->count; ++i) {
+        ExecResult res = execute_statement(rt, rt->global_env, program->stmts[i]);
+        if (res.status == EXEC_ERROR || rt->had_runtime_error) {
+            return UF_INTERPRET_RUNTIME_ERROR;
+        }
+        if (res.status == EXEC_RETURN) {
+            return UF_INTERPRET_OK;
+        }
+    }
+    return UF_INTERPRET_OK;
+}

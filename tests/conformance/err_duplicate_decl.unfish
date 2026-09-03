@@ -1,0 +1,4 @@
+# expect-exit: 2
+# expect-error: Semantic Error: Identifier 'x' has already been declared
+let x = 1
+let x = 2

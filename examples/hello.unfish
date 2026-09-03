@@ -1,0 +1,7 @@
+# First vertical slice program in Unfish
+let name = "World"
+
+function greet(person):
+    say "Hello, " + person
+
+greet(name)

@@ -1,0 +1,8 @@
+# expect: string
+# expect: number
+# expect: boolean
+# expect: 5
+say type_of("Hello")
+say type_of(42)
+say type_of(true)
+say len("Unfish") - 1

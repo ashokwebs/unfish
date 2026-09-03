@@ -1,0 +1,6 @@
+# expect-exit: 2
+# expect-error: Semantic Error: Function 'add' expects 2 arguments
+function add(a, b):
+    return a + b
+
+add(1)

@@ -1,0 +1,6 @@
+# expect: short_circuit_or
+# expect: short_circuit_and
+# expect: inverted_not
+say "short_circuit_or" or "unreached"
+say false or "short_circuit_and"
+say not false and "inverted_not"

@@ -1,0 +1,3 @@
+# expect-exit: 2
+# expect-error: Semantic Error: 'score' has not been defined
+say score

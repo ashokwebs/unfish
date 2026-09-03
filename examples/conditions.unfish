@@ -1,0 +1,9 @@
+# Conditionals in Unfish
+let age = 18
+
+if age >= 21:
+    say "Adult (Full access)"
+else if age >= 18:
+    say "Young adult"
+else:
+    say "Minor"

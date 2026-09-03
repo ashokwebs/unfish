@@ -1,0 +1,10 @@
+# expect: 30
+# expect: 50
+function make_scaler(multiplier):
+    function scale(val):
+        return val * multiplier
+    return scale
+
+let scale10 = make_scaler(10)
+say scale10(3)
+say scale10(5)

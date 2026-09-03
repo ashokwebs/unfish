@@ -1,0 +1,9 @@
+# expect: 30
+# expect: 50
+let a = 10
+let b = 20
+let c = a + b
+say c
+
+c = c + 20
+say c

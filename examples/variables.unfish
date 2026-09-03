@@ -1,0 +1,10 @@
+# Variables and arithmetic expressions
+let a = 10
+let b = 25
+let total = a + b * 2
+
+say "Total: " + total
+
+# Variable assignment
+total = total + 5
+say "Updated Total: " + total
