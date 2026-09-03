@@ -130,6 +130,7 @@ static void register_builtins(UfSemanticAnalyzer* analyzer) {
     add_symbol(analyzer, "len",     UF_SYM_BUILTIN, span, 1);
     add_symbol(analyzer, "push",    UF_SYM_BUILTIN, span, 2);
     add_symbol(analyzer, "pop",     UF_SYM_BUILTIN, span, 1);
+    add_symbol(analyzer, "range",   UF_SYM_BUILTIN, span, -1);
     add_symbol(analyzer, "clock",   UF_SYM_BUILTIN, span, 0);
     add_symbol(analyzer, "assert",  UF_SYM_BUILTIN, span, -1);
 }
@@ -142,6 +143,7 @@ void uf_semantic_init(UfSemanticAnalyzer* analyzer,
     analyzer->current_scope = NULL;
     analyzer->global_scope = NULL;
     analyzer->function_depth = 0;
+    analyzer->loop_depth = 0;
     analyzer->had_error = false;
 
     /* Create global scope and register built-in symbols */
@@ -307,15 +309,47 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
         case UF_STMT_WHILE:
             analyze_expr(analyzer, stmt->as.while_stmt.condition);
             push_scope(analyzer, false);
+            analyzer->loop_depth++;
             analyze_stmt(analyzer, stmt->as.while_stmt.body);
+            analyzer->loop_depth--;
             pop_scope(analyzer);
             break;
 
         case UF_STMT_REPEAT:
             analyze_expr(analyzer, stmt->as.repeat_stmt.count_expr);
             push_scope(analyzer, false);
+            analyzer->loop_depth++;
             analyze_stmt(analyzer, stmt->as.repeat_stmt.body);
+            analyzer->loop_depth--;
             pop_scope(analyzer);
+            break;
+
+        case UF_STMT_FOR:
+            analyze_expr(analyzer, stmt->as.for_stmt.iterable);
+            push_scope(analyzer, false);
+            add_symbol(analyzer, stmt->as.for_stmt.var_name, UF_SYM_VAR, stmt->span, -1);
+            analyzer->loop_depth++;
+            analyze_stmt(analyzer, stmt->as.for_stmt.body);
+            analyzer->loop_depth--;
+            pop_scope(analyzer);
+            break;
+
+        case UF_STMT_BREAK:
+            if (analyzer->loop_depth == 0) {
+                analyzer->had_error = true;
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span,
+                               "'break' outside of loop",
+                               "'break' can only be used inside a 'while', 'repeat', or 'for' loop");
+            }
+            break;
+
+        case UF_STMT_CONTINUE:
+            if (analyzer->loop_depth == 0) {
+                analyzer->had_error = true;
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span,
+                               "'continue' outside of loop",
+                               "'continue' can only be used inside a 'while', 'repeat', or 'for' loop");
+            }
             break;
 
         case UF_STMT_FUNCTION: {

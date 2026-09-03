@@ -166,6 +166,30 @@ UfStmt* uf_stmt_repeat(UfArena* arena, SourceSpan span, UfExpr* count_expr, UfSt
     return stmt;
 }
 
+UfStmt* uf_stmt_for(UfArena* arena, SourceSpan span, const char* var_name, UfExpr* iterable, UfStmt* body) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_FOR;
+    stmt->span = span;
+    stmt->as.for_stmt.var_name = var_name;
+    stmt->as.for_stmt.iterable = iterable;
+    stmt->as.for_stmt.body = body;
+    return stmt;
+}
+
+UfStmt* uf_stmt_break(UfArena* arena, SourceSpan span) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_BREAK;
+    stmt->span = span;
+    return stmt;
+}
+
+UfStmt* uf_stmt_continue(UfArena* arena, SourceSpan span) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_CONTINUE;
+    stmt->span = span;
+    return stmt;
+}
+
 UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body) {
     UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
     stmt->kind = UF_STMT_FUNCTION;
@@ -337,6 +361,23 @@ void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent) {
             uf_ast_print_stmt(stmt->as.repeat_stmt.body, out, indent + 1);
             print_indent(out, indent);
             fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_FOR:
+            fprintf(out, "(for %s in ", stmt->as.for_stmt.var_name);
+            uf_ast_print_expr(stmt->as.for_stmt.iterable, out);
+            fprintf(out, "\n");
+            uf_ast_print_stmt(stmt->as.for_stmt.body, out, indent + 1);
+            print_indent(out, indent);
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_BREAK:
+            fprintf(out, "(break)\n");
+            break;
+
+        case UF_STMT_CONTINUE:
+            fprintf(out, "(continue)\n");
             break;
 
         case UF_STMT_FUNCTION:

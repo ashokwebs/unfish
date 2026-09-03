@@ -1,6 +1,7 @@
 #include "uf_runtime.h"
 #include <stdarg.h>
 #include <time.h>
+#include <math.h>
 
 /* --- Built-in Native Functions --- */
 
@@ -68,6 +69,63 @@ static UfValue native_pop(UfRuntime* rt, int argc, UfValue* args) {
     return uf_array_pop(args[0].as.array);
 }
 
+static UfValue native_range(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc == 0) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'range()' expects at least 1 argument");
+        return uf_val_null();
+    }
+    double start = 0;
+    double end = 0;
+    double step = 1;
+
+    if (argc == 1) {
+        if (args[0].kind != UF_VAL_NUMBER) {
+            SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+            uf_runtime_error(rt, source_span_make(loc, loc), "'range()' argument must be a number");
+            return uf_val_null();
+        }
+        end = args[0].as.number;
+    } else {
+        if (args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+            SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+            uf_runtime_error(rt, source_span_make(loc, loc), "'range()' arguments must be numbers");
+            return uf_val_null();
+        }
+        start = args[0].as.number;
+        end = args[1].as.number;
+        if (argc >= 3) {
+            if (args[2].kind != UF_VAL_NUMBER || args[2].as.number == 0) {
+                SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+                uf_runtime_error(rt, source_span_make(loc, loc), "'range()' step must be a non-zero number");
+                return uf_val_null();
+            }
+            step = args[2].as.number;
+        }
+    }
+
+    size_t count = 0;
+    if (step > 0 && start < end) {
+        count = (size_t)ceil((end - start) / step);
+    } else if (step < 0 && start > end) {
+        count = (size_t)ceil((start - end) / (-step));
+    }
+
+    if (count > 1000000) count = 1000000;
+
+    UfValue arr = uf_val_array(rt, count);
+    uf_runtime_push_temp_root(rt, arr);
+
+    double current = start;
+    for (size_t i = 0; i < count; ++i) {
+        uf_array_push(rt, arr.as.array, uf_val_number(current));
+        current += step;
+    }
+
+    uf_runtime_pop_temp_roots(rt, 1);
+    return arr;
+}
+
 static UfValue native_clock(UfRuntime* rt, int argc, UfValue* args) {
     UF_UNUSED(rt);
     UF_UNUSED(argc);
@@ -100,6 +158,7 @@ static void register_builtins(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "len",     uf_val_native("len",     native_len,     1));
     uf_env_declare(rt->global_env, "push",    uf_val_native("push",    native_push,    2));
     uf_env_declare(rt->global_env, "pop",     uf_val_native("pop",     native_pop,     1));
+    uf_env_declare(rt->global_env, "range",   uf_val_native("range",   native_range,   -1));
     uf_env_declare(rt->global_env, "clock",   uf_val_native("clock",   native_clock,   0));
     uf_env_declare(rt->global_env, "assert",  uf_val_native("assert",  native_assert,  -1));
 }

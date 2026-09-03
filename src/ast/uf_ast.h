@@ -79,6 +79,9 @@ typedef enum {
     UF_STMT_IF,
     UF_STMT_WHILE,
     UF_STMT_REPEAT,
+    UF_STMT_FOR,
+    UF_STMT_BREAK,
+    UF_STMT_CONTINUE,
     UF_STMT_FUNCTION,
     UF_STMT_RETURN,
     UF_STMT_BLOCK
@@ -129,6 +132,12 @@ struct UfStmt {
         } repeat_stmt;
 
         struct {
+            const char* var_name;
+            UfExpr* iterable;
+            UfStmt* body;
+        } for_stmt;
+
+        struct {
             const char* name;
             const char** params;
             size_t param_count;
@@ -175,6 +184,9 @@ UfStmt* uf_stmt_expr(UfArena* arena, SourceSpan span, UfExpr* expr);
 UfStmt* uf_stmt_if(UfArena* arena, SourceSpan span, UfExpr* condition, UfStmt* then_branch, UfStmt* else_branch);
 UfStmt* uf_stmt_while(UfArena* arena, SourceSpan span, UfExpr* condition, UfStmt* body);
 UfStmt* uf_stmt_repeat(UfArena* arena, SourceSpan span, UfExpr* count_expr, UfStmt* body);
+UfStmt* uf_stmt_for(UfArena* arena, SourceSpan span, const char* var_name, UfExpr* iterable, UfStmt* body);
+UfStmt* uf_stmt_break(UfArena* arena, SourceSpan span);
+UfStmt* uf_stmt_continue(UfArena* arena, SourceSpan span);
 UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body);
 UfStmt* uf_stmt_return(UfArena* arena, SourceSpan span, UfExpr* value);
 UfStmt* uf_stmt_block(UfArena* arena, SourceSpan span, UfStmt** stmts, size_t count);

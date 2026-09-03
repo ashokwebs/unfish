@@ -31,6 +31,7 @@ typedef struct {
     UfScope* current_scope;
     UfScope* global_scope;
     int function_depth;
+    int loop_depth;
     bool had_error;
 
     UfArena* arena;

@@ -1,0 +1,3 @@
+# expect-exit: 2
+# expect-error: Semantic Error: 'break' outside of loop
+break

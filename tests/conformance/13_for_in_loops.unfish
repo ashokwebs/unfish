@@ -1,0 +1,29 @@
+# expect: apple
+# expect: banana
+# expect: cherry
+# expect: a
+# expect: b
+# expect: c
+# expect: 0
+# expect: 1
+# expect: 2
+# expect: 10
+# expect: 12
+# expect: 14
+
+# 1. Iterate over array
+let fruits = ["apple", "banana", "cherry"]
+for f in fruits:
+    say f
+
+# 2. Iterate over string
+for ch in "abc":
+    say ch
+
+# 3. Iterate over range(3)
+for i in range(3):
+    say i
+
+# 4. Iterate over range(10, 15, 2)
+for n in range(10, 15, 2):
+    say n

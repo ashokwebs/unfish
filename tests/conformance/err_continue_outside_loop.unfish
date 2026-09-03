@@ -1,0 +1,3 @@
+# expect-exit: 2
+# expect-error: Semantic Error: 'continue' outside of loop
+continue

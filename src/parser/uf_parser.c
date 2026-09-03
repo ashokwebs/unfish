@@ -224,6 +224,10 @@ static const ParseRule rules[] = {
     [UF_TOK_WHILE]      = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_REPEAT]     = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_TIMES]      = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_FOR]        = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_IN]         = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_BREAK]      = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_CONTINUE]   = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_AND]        = { NULL,             parse_binary, PREC_AND },
     [UF_TOK_OR]         = { NULL,             parse_binary, PREC_OR },
     [UF_TOK_NOT]        = { parse_unary,      NULL,         PREC_UNARY },
@@ -388,6 +392,31 @@ static UfStmt* parse_repeat_statement(UfParser* parser) {
     return uf_stmt_repeat(parser->arena, span, count_expr, body);
 }
 
+static UfStmt* parse_for_statement(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start;
+    consume(parser, UF_TOK_IDENTIFIER, "Expected loop variable name after 'for'", "Syntax: 'for <item> in <collection>:'");
+    const char* var_name = parser->previous.as.string_val;
+
+    consume(parser, UF_TOK_IN, "Expected 'in' after loop variable", "Syntax: 'for <item> in <collection>:'");
+    UfExpr* iterable = uf_parse_expression(parser);
+
+    UfStmt* body = parse_block(parser);
+    SourceSpan span = source_span_make(start, parser->previous.span.end);
+    return uf_stmt_for(parser->arena, span, var_name, iterable, body);
+}
+
+static UfStmt* parse_break_statement(UfParser* parser) {
+    SourceSpan span = parser->previous.span;
+    consume(parser, UF_TOK_NEWLINE, "Expected newline after 'break'", NULL);
+    return uf_stmt_break(parser->arena, span);
+}
+
+static UfStmt* parse_continue_statement(UfParser* parser) {
+    SourceSpan span = parser->previous.span;
+    consume(parser, UF_TOK_NEWLINE, "Expected newline after 'continue'", NULL);
+    return uf_stmt_continue(parser->arena, span);
+}
+
 static UfStmt* parse_function_statement(UfParser* parser) {
     SourceLoc start = parser->previous.span.start;
     consume(parser, UF_TOK_IDENTIFIER, "Expected function name", "Syntax: 'function <name>(<parameters>):'");
@@ -456,6 +485,9 @@ static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_IF))       return parse_if_statement(parser);
     if (match(parser, UF_TOK_WHILE))    return parse_while_statement(parser);
     if (match(parser, UF_TOK_REPEAT))   return parse_repeat_statement(parser);
+    if (match(parser, UF_TOK_FOR))      return parse_for_statement(parser);
+    if (match(parser, UF_TOK_BREAK))    return parse_break_statement(parser);
+    if (match(parser, UF_TOK_CONTINUE)) return parse_continue_statement(parser);
     if (match(parser, UF_TOK_FUNCTION)) return parse_function_statement(parser);
 
     return parse_expression_or_assignment_statement(parser);

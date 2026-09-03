@@ -4,6 +4,8 @@
 typedef enum {
     EXEC_OK,
     EXEC_RETURN,
+    EXEC_BREAK,
+    EXEC_CONTINUE,
     EXEC_ERROR
 } ExecStatus;
 
@@ -23,6 +25,20 @@ static ExecResult exec_return(UfValue val) {
     ExecResult r;
     r.status = EXEC_RETURN;
     r.value = val;
+    return r;
+}
+
+static ExecResult exec_break(void) {
+    ExecResult r;
+    r.status = EXEC_BREAK;
+    r.value = uf_val_null();
+    return r;
+}
+
+static ExecResult exec_continue(void) {
+    ExecResult r;
+    r.status = EXEC_CONTINUE;
+    r.value = uf_val_null();
     return r;
 }
 
@@ -481,9 +497,13 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 ExecResult res = execute_statement(rt, block_env, stmt->as.while_stmt.body);
                 rt->current_env = prev_env;
 
-                if (res.status != EXEC_OK) {
+                if (res.status == EXEC_RETURN || res.status == EXEC_ERROR) {
                     return res;
                 }
+                if (res.status == EXEC_BREAK) {
+                    break;
+                }
+                /* EXEC_CONTINUE proceeds to next iteration */
             }
             return exec_ok();
         }
@@ -504,12 +524,73 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 ExecResult res = execute_statement(rt, block_env, stmt->as.repeat_stmt.body);
                 rt->current_env = prev_env;
 
-                if (res.status != EXEC_OK) {
+                if (res.status == EXEC_RETURN || res.status == EXEC_ERROR) {
                     return res;
                 }
+                if (res.status == EXEC_BREAK) {
+                    break;
+                }
+                /* EXEC_CONTINUE proceeds to next iteration */
             }
             return exec_ok();
         }
+
+        case UF_STMT_FOR: {
+            UfValue iter_val = uf_evaluate_expression(rt, env, stmt->as.for_stmt.iterable);
+            if (rt->had_runtime_error) return exec_error();
+            uf_runtime_push_temp_root(rt, iter_val);
+
+            if (iter_val.kind == UF_VAL_ARRAY) {
+                UfArrayObject* arr = iter_val.as.array;
+                for (size_t i = 0; i < arr->count; ++i) {
+                    UfEnv* loop_env = uf_env_create(rt, env);
+                    uf_env_declare(loop_env, stmt->as.for_stmt.var_name, arr->elements[i]);
+
+                    UfEnv* prev_env = rt->current_env;
+                    rt->current_env = loop_env;
+                    ExecResult res = execute_statement(rt, loop_env, stmt->as.for_stmt.body);
+                    rt->current_env = prev_env;
+
+                    if (res.status == EXEC_RETURN || res.status == EXEC_ERROR) {
+                        uf_runtime_pop_temp_root(rt);
+                        return res;
+                    }
+                    if (res.status == EXEC_BREAK) break;
+                }
+            } else if (iter_val.kind == UF_VAL_STRING) {
+                UfStringObject* str = iter_val.as.string;
+                for (size_t i = 0; i < str->length; ++i) {
+                    UfEnv* loop_env = uf_env_create(rt, env);
+                    char ch[2] = { str->chars[i], '\0' };
+                    UfValue char_val = uf_val_string(rt, ch, 1);
+                    uf_env_declare(loop_env, stmt->as.for_stmt.var_name, char_val);
+
+                    UfEnv* prev_env = rt->current_env;
+                    rt->current_env = loop_env;
+                    ExecResult res = execute_statement(rt, loop_env, stmt->as.for_stmt.body);
+                    rt->current_env = prev_env;
+
+                    if (res.status == EXEC_RETURN || res.status == EXEC_ERROR) {
+                        uf_runtime_pop_temp_root(rt);
+                        return res;
+                    }
+                    if (res.status == EXEC_BREAK) break;
+                }
+            } else {
+                uf_runtime_error(rt, stmt->span, "'for' loop expects iterable (array or string), got '%s'", uf_val_type_name(iter_val));
+                uf_runtime_pop_temp_root(rt);
+                return exec_error();
+            }
+
+            uf_runtime_pop_temp_root(rt);
+            return exec_ok();
+        }
+
+        case UF_STMT_BREAK:
+            return exec_break();
+
+        case UF_STMT_CONTINUE:
+            return exec_continue();
 
         case UF_STMT_FUNCTION: {
             UfValue fn = uf_val_function(rt,

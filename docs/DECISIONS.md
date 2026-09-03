@@ -73,3 +73,45 @@
   5. Introduce `UF_STMT_INDEX_ASSIGN` allowing in-place assignment (`arr[i] = val`).
   6. Extend `len()`, `push()`, and `pop()` built-ins.
 * **Consequences**: Enables implementing standard algorithms (e.g. `bubble_sort`, search) natively in Unfish, fully integrated with garbage collection and memory safety under ASan.
+
+## ADR 010: Control Flow Primitives: break, continue, for-in Loops, and range()
+* **Date**: Milestone 3
+* **Status**: Accepted
+* **Context**: Algorithmic code requires fine-grained loop control (early loop termination, skipping iterations) and high-level collection traversal without manual index bookkeeping.
+* **Decision**:
+  1. Add `break` and `continue` keywords and statement AST nodes (`UF_STMT_BREAK`, `UF_STMT_CONTINUE`).
+  2. Enforce compile-time semantic validation: using `break` or `continue` outside of a loop produces a semantic error.
+  3. Add `for <item> in <iterable>:` syntax (`UF_STMT_FOR`), supporting native traversal over arrays and UTF-8 strings.
+  4. Implement `range([start,] end[, step])` built-in native function returning an array of numbers.
+* **Consequences**: Unifies counting loops, range iterations, and collection traversals under a consistent, beginner-friendly yet expressive syntax.
+
+## ADR 011: Language-Level Error Handling Architecture: Gradual Two-Tier Model
+* **Date**: Milestone 3
+* **Status**: Accepted
+* **Context**: Unfish needs an error handling model suited for learners transitioning from beginner scripts to systems programming. Exceptions often cause hidden control-flow jumps, while strict Result types can introduce excessive syntactic overhead for introductory programming.
+* **Decision**:
+  1. **Tier 1 (Value-based failure)**: Standard library query functions return `null` or boolean indicators for expected conditions (e.g. missing map key, EOF), encouraging explicit checks.
+  2. **Tier 2 (Structured catchable runtime errors)**: Exceptional situations (e.g. `IndexOutOfBounds`, `DivisionByZero`, `StackOverflowError`, `AssertionFailed`) throw structured runtime errors that can be captured via `try: ... catch err:` blocks.
+  3. Custom user errors are raised via `panic(msg)` or `error(msg)`.
+* **Consequences**: Novices write clean, sequential code without boilerplate; educational test harnesses can evaluate student code defensively without crashing the test runner; advanced learners learn stack unwinding.
+
+## ADR 012: Module Resolution, Namespaces, and Singleton Lifecycle
+* **Date**: Milestone 3
+* **Status**: Accepted
+* **Context**: Unfish programs must scale beyond single files while avoiding namespace pollution and cyclic initialization deadlocks.
+* **Decision**:
+  1. **Syntax**: `import <module>` binds module exports into a dedicated namespace object `<module>`. Selective imports `from <module> import a, b` copy exported symbols into the current scope.
+  2. **Resolution Order**: (1) Built-in core modules (`math`, `sys`, `fs`), (2) File-relative path `./<module>.unfish`, (3) Project module path `UNFISH_PATH`.
+  3. **Lifecycle**: Modules are executed once as singletons and cached in `rt->modules`. Circular dependencies transition through states (`UNLOADED` -> `LOADING` -> `LOADED`) and report compile-time `CyclicImportError` if mutually dependent.
+* **Consequences**: Clean separation of namespaces, deterministic single-evaluation semantics, and zero global scope pollution.
+
+## ADR 013: Bytecode Virtual Machine Pipeline & Intermediate Representation (IR) Contract
+* **Date**: Milestone 3
+* **Status**: Accepted
+* **Context**: The tree-walking interpreter serves as the semantic reference. To achieve high performance, serialization, and compilation to web/native, Unfish requires a bytecode VM pipeline (`AST -> IR -> Bytecode -> VM`).
+* **Decision**:
+  1. Maintain identical semantic contracts between the tree-walking interpreter and the future VM; both must pass the exact same conformance suite.
+  2. Define a stack-based instruction set architecture with 1-byte opcodes and 2-byte operand indices.
+  3. Opcodes are partitioned into: Literal loading, Local/Global variable access, Closure/Upvalue capture, Binary/Unary operations, Conditional/Unconditional jumps, Collection construction/indexing, and Function call/return.
+  4. Bytecode chunks bundle bytecode arrays, constant pools (`UfValue`), and debug line-mapping tables.
+* **Consequences**: Establishes a concrete contract for Phase 7 VM implementation without breaking the current AST interpreter.

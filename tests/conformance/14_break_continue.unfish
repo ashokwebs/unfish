@@ -1,0 +1,32 @@
+# expect: 0
+# expect: 1
+# expect: 2
+# expect: loop finished
+# expect: 1
+# expect: 3
+# expect: 5
+# expect: found cherry
+
+# 1. break in while
+let x = 0
+while true:
+    if x == 3:
+        break
+    say x
+    x = x + 1
+say "loop finished"
+
+# 2. continue in while (print odd numbers under 6)
+let y = 0
+while y < 6:
+    y = y + 1
+    if y % 2 == 0:
+        continue
+    say y
+
+# 3. break in for-in
+let items = ["apple", "banana", "cherry", "date"]
+for item in items:
+    if item == "cherry":
+        say "found cherry"
+        break

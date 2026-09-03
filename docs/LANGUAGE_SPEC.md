@@ -92,10 +92,14 @@ Program        = { Statement | NEWLINE } , EOF ;
 
 Statement      = LetStmt
                | AssignStmt
+               | IndexAssignStmt
                | SayStmt
                | IfStmt
                | WhileStmt
                | RepeatStmt
+               | ForStmt
+               | BreakStmt
+               | ContinueStmt
                | FunctionStmt
                | ReturnStmt
                | ExprStmt ;
@@ -104,13 +108,17 @@ Block          = ":" , NEWLINE , INDENT , { Statement | NEWLINE } , DEDENT ;
 
 LetStmt        = "let" , identifier , [ "=" , Expression ] , NEWLINE ;
 AssignStmt     = identifier , "=" , Expression , NEWLINE ;
+IndexAssignStmt= Expression , "[" , Expression , "]" , "=" , Expression , NEWLINE ;
 SayStmt        = "say" , Expression , NEWLINE ;
+BreakStmt      = "break" , NEWLINE ;
+ContinueStmt   = "continue" , NEWLINE ;
 ReturnStmt     = "return" , [ Expression ] , NEWLINE ;
 ExprStmt       = Expression , NEWLINE ;
 
 IfStmt         = "if" , Expression , Block , [ "else" , ( Block | IfStmt ) ] ;
 WhileStmt      = "while" , Expression , Block ;
 RepeatStmt     = "repeat" , Expression , "times" , Block ;
+ForStmt        = "for" , identifier , "in" , Expression , Block ;
 FunctionStmt   = "function" , identifier , "(" , [ ParamList ] , ")" , Block ;
 
 ParamList      = identifier , { "," , identifier } ;
@@ -123,8 +131,8 @@ Equality       = Comparison , { ( "==" | "!=" ) , Comparison } ;
 Comparison     = Term , { ( "<" | "<=" | ">" | ">=" ) , Term } ;
 Term           = Factor , { ( "+" | "-" ) , Factor } ;
 Factor         = Unary , { ( "*" | "/" | "%" ) , Unary } ;
-Unary          = ( "-" | "not" ) , Unary | Call ;
-Call           = Primary , { "(" , [ ArgList ] , ")" } ;
+Unary          = ( "-" | "not" ) , Unary | Postfix ;
+Postfix        = Primary , { ( "(" , [ ArgList ] , ")" ) | ( "[" , Expression , "]" ) } ;
 
 Primary        = number_literal
                | string_literal
@@ -132,7 +140,10 @@ Primary        = number_literal
                | "false"
                | "null"
                | identifier
+               | ArrayLiteral
                | "(" , Expression , ")" ;
+
+ArrayLiteral   = "[" , [ Expression , { "," , Expression } ] , "]" ;
 ```
 
 ---
@@ -148,5 +159,5 @@ Primary        = number_literal
 | 5 | `+`, `-` | Addition, Subtraction, String Concatenation | Left |
 | 6 | `*`, `/`, `%` | Multiplication, Division, Modulo | Left |
 | 7 | `-` (prefix), `not` | Unary negation, Logical NOT | Right |
-| 8 | `()` (call) | Function Call | Left |
-| 9 | Literals, `(expr)` | Grouping, Primaries | N/A |
+| 8 | `()` (call), `[]` (index) | Function Call, Subscript Indexing | Left |
+| 9 | Literals, `[]`, `(expr)` | Array Literals, Grouping, Primaries | N/A |

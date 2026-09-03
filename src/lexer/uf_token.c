@@ -19,6 +19,10 @@ const char* uf_token_kind_name(UfTokenKind kind) {
         case UF_TOK_WHILE:      return "while";
         case UF_TOK_REPEAT:     return "repeat";
         case UF_TOK_TIMES:      return "times";
+        case UF_TOK_FOR:        return "for";
+        case UF_TOK_IN:         return "in";
+        case UF_TOK_BREAK:      return "break";
+        case UF_TOK_CONTINUE:   return "continue";
         case UF_TOK_AND:        return "and";
         case UF_TOK_OR:         return "or";
         case UF_TOK_NOT:        return "not";

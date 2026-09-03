@@ -421,12 +421,80 @@ static void test_malformed_fuzz_inputs(void) {
     printf("test_malformed_fuzz_inputs passed! (All %zu malformed inputs cleanly handled)\n", count);
 }
 
+static void test_nested_arrays_closures_gc_stress(void) {
+    const char* src =
+        "function make_accumulator(initial):\n"
+        "    let history = [initial]\n"
+        "    function add(val):\n"
+        "        push(history, val)\n"
+        "        return history\n"
+        "    return add\n"
+        "\n"
+        "let acc1 = make_accumulator(\"start_1\")\n"
+        "let acc2 = make_accumulator(\"start_2\")\n"
+        "let handlers = [acc1, acc2]\n"
+        "\n"
+        "let i = 0\n"
+        "while i < 100:\n"
+        "    handlers[0](\"elem_\" + i)\n"
+        "    handlers[1](\"elem_\" + (i * 2))\n"
+        "    i = i + 1\n"
+        "\n"
+        "let h1 = handlers[0](\"final_1\")\n"
+        "let h2 = handlers[1](\"final_2\")\n"
+        "say len(h1)\n"
+        "say len(h2)\n";
+
+    UfArena arena;
+    uf_arena_init(&arena, 8192);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "acc_stress.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "acc_stress.unfish", src, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+    assert(program && !parser.had_error);
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    assert(uf_analyze_program(&sema, program));
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+    /* Aggressive GC threshold: 256 bytes forces frequent collections while closures and arrays are alive */
+    rt.next_gc_threshold = 256;
+
+    char* out_buf = NULL;
+    size_t out_len = 0;
+    FILE* mem = open_memstream(&out_buf, &out_len);
+    rt.out_stream = mem;
+
+    UfInterpretResult res = uf_interpret_program(&rt, program);
+    fclose(mem);
+
+    assert(res == UF_INTERPRET_OK);
+    assert(!rt.had_runtime_error);
+    assert(strcmp(out_buf, "102\n102\n") == 0);
+    assert(rt.gc_count >= 2);
+
+    free(out_buf);
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_nested_arrays_closures_gc_stress passed! (GC ran %zu times)\n", rt.gc_count);
+}
+
 int main(void) {
     printf("Running comprehensive stress tests...\n");
     test_deeply_nested_closures();
     test_mutually_recursive_functions();
     test_variable_shadowing();
     test_gc_stress_collection_under_pressure();
+    test_nested_arrays_closures_gc_stress();
     test_deeply_nested_expressions();
     test_recursion_stack_overflow_limit();
     test_step_limit_quota();
