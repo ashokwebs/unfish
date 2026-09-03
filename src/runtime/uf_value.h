@@ -20,7 +20,9 @@ typedef enum {
     UF_VAL_ARRAY,
     UF_VAL_MAP,
     UF_VAL_ERROR,
-    UF_VAL_MODULE
+    UF_VAL_MODULE,
+    UF_VAL_STRUCT_DEF,
+    UF_VAL_INSTANCE
 } UfValueKind;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
@@ -64,6 +66,21 @@ typedef struct {
     const char* file;
 } UfErrorObject;
 
+typedef struct {
+    UfObj obj;
+    const char* name;
+    const char** field_names;
+    const char** field_types;
+    size_t field_count;
+} UfStructDefObject;
+
+typedef struct {
+    UfObj obj;
+    UfStructDefObject* def;
+    UfValue* fields;
+    size_t field_count;
+} UfInstanceObject;
+
 struct UfValue {
     UfValueKind kind;
     union {
@@ -76,6 +93,8 @@ struct UfValue {
         UfMapObject* map;
         UfErrorObject* error;
         UfModuleObject* module;
+        UfStructDefObject* struct_def;
+        UfInstanceObject* instance;
     } as;
 };
 
@@ -118,6 +137,8 @@ bool uf_map_has(UfMapObject* map, UfValue key);
 bool uf_map_delete(UfMapObject* map, UfValue key);
 UfValue uf_val_error(UfRuntime* rt, const char* message, const char* kind, SourceSpan span);
 UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod);
+UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count);
+UfValue uf_val_instance(UfRuntime* rt, UfStructDefObject* def, UfValue* fields, size_t count);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

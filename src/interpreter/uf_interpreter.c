@@ -101,6 +101,14 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
             result = nat->fn(rt, (int)argc, args);
             uf_runtime_pop_frame(rt);
         }
+    } else if (callee.kind == UF_VAL_STRUCT_DEF) {
+        UfStructDefObject* sdef = callee.as.struct_def;
+        if (sdef->field_count != argc) {
+            uf_runtime_error(rt, span, "Struct '%s' constructor expects %zu argument%s, but %zu provided",
+                             sdef->name, sdef->field_count, sdef->field_count == 1 ? "" : "s", argc);
+        } else {
+            result = uf_val_instance(rt, sdef, args, argc);
+        }
     } else {
         uf_runtime_error(rt, span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));
     }
@@ -428,6 +436,25 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                                          idx_val.as.string->chars);
                     }
                 }
+            } else if (target.kind == UF_VAL_INSTANCE) {
+                if (idx_val.kind != UF_VAL_STRING) {
+                    uf_runtime_error(rt, expr->span, "Struct field access expects a string name, got '%s'", uf_val_type_name(idx_val));
+                } else {
+                    const char* fname = idx_val.as.string->chars;
+                    UfInstanceObject* inst = target.as.instance;
+                    int fidx = -1;
+                    for (size_t i = 0; i < inst->field_count; ++i) {
+                        if (strcmp(inst->def->field_names[i], fname) == 0) {
+                            fidx = (int)i;
+                            break;
+                        }
+                    }
+                    if (fidx < 0) {
+                        uf_runtime_error(rt, expr->span, "Struct '%s' has no field '%s'", inst->def->name, fname);
+                    } else {
+                        result = inst->fields[fidx];
+                    }
+                }
             } else {
                 uf_runtime_error(rt, expr->span, "Cannot index value of type '%s'", uf_val_type_name(target));
             }
@@ -535,6 +562,25 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                         uf_runtime_error(rt, stmt->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
                     } else {
                         arr->elements[idx] = val;
+                    }
+                }
+            } else if (target.kind == UF_VAL_INSTANCE) {
+                if (idx_val.kind != UF_VAL_STRING) {
+                    uf_runtime_error(rt, stmt->span, "Struct field name must be a string, got '%s'", uf_val_type_name(idx_val));
+                } else {
+                    const char* fname = idx_val.as.string->chars;
+                    UfInstanceObject* inst = target.as.instance;
+                    int fidx = -1;
+                    for (size_t i = 0; i < inst->field_count; ++i) {
+                        if (strcmp(inst->def->field_names[i], fname) == 0) {
+                            fidx = (int)i;
+                            break;
+                        }
+                    }
+                    if (fidx < 0) {
+                        uf_runtime_error(rt, stmt->span, "Struct '%s' has no field '%s'", inst->def->name, fname);
+                    } else {
+                        inst->fields[fidx] = val;
                     }
                 }
             } else {
@@ -798,6 +844,16 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                                      : sym;
                 uf_env_declare(env, bound, val);
             }
+            return exec_ok();
+        }
+
+        case UF_STMT_STRUCT: {
+            UfValue sdef = uf_val_struct_def(rt,
+                                             stmt->as.struct_stmt.name,
+                                             stmt->as.struct_stmt.field_names,
+                                             stmt->as.struct_stmt.field_types,
+                                             stmt->as.struct_stmt.field_count);
+            uf_env_declare(env, stmt->as.struct_stmt.name, sdef);
             return exec_ok();
         }
     }

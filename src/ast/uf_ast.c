@@ -274,6 +274,17 @@ UfStmt* uf_stmt_from_import(UfArena* arena, SourceSpan span, const char* module_
     return stmt;
 }
 
+UfStmt* uf_stmt_struct(UfArena* arena, SourceSpan span, const char* name, const char** field_names, const char** field_types, size_t field_count) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_STRUCT;
+    stmt->span = span;
+    stmt->as.struct_stmt.name = name;
+    stmt->as.struct_stmt.field_names = field_names;
+    stmt->as.struct_stmt.field_types = field_types;
+    stmt->as.struct_stmt.field_count = field_count;
+    return stmt;
+}
+
 static void print_indent(FILE* out, int indent) {
     for (int i = 0; i < indent; ++i) {
         fprintf(out, "  ");
@@ -511,6 +522,18 @@ void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent) {
                 if (stmt->as.from_import_stmt.aliases && stmt->as.from_import_stmt.aliases[i]) {
                     fprintf(out, " as %s", stmt->as.from_import_stmt.aliases[i]);
                 }
+            }
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_STRUCT:
+            fprintf(out, "(struct %s", stmt->as.struct_stmt.name);
+            for (size_t i = 0; i < stmt->as.struct_stmt.field_count; ++i) {
+                fprintf(out, " (%s", stmt->as.struct_stmt.field_names[i]);
+                if (stmt->as.struct_stmt.field_types && stmt->as.struct_stmt.field_types[i]) {
+                    fprintf(out, ": %s", stmt->as.struct_stmt.field_types[i]);
+                }
+                fprintf(out, ")");
             }
             fprintf(out, ")\n");
             break;

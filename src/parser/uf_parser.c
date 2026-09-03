@@ -769,6 +769,59 @@ static UfStmt* parse_from_import_statement(UfParser* parser) {
     return uf_stmt_from_import(parser->arena, span, module_name, symbols_copy, aliases_copy, count);
 }
 
+static UfStmt* parse_struct_statement(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start;
+    consume(parser, UF_TOK_IDENTIFIER, "Expected struct name after 'struct'", "Syntax: 'struct <Name>:'");
+    const char* name = parser->previous.as.string_val;
+
+    consume(parser, UF_TOK_COLON, "Expected ':' after struct name", "Syntax: 'struct <Name>:'");
+    consume(parser, UF_TOK_NEWLINE, "Expected newline after ':' in struct declaration", NULL);
+    consume(parser, UF_TOK_INDENT, "Expected indented block for struct fields", "Indent the fields of the struct with 4 spaces");
+
+    const char* field_names[64];
+    const char* field_types[64];
+    size_t field_count = 0;
+
+    while (!check(parser, UF_TOK_DEDENT) && !check(parser, UF_TOK_EOF)) {
+        if (match(parser, UF_TOK_NEWLINE)) continue;
+
+        if (field_count >= 64) {
+            error_current(parser, "Struct exceeds maximum field limit (64)", NULL);
+            break;
+        }
+
+        consume(parser, UF_TOK_IDENTIFIER, "Expected field name in struct declaration", NULL);
+        field_names[field_count] = parser->previous.as.string_val;
+        field_types[field_count] = NULL;
+
+        if (match(parser, UF_TOK_COLON)) {
+            consume(parser, UF_TOK_IDENTIFIER, "Expected type name after ':' for struct field", NULL);
+            field_types[field_count] = parser->previous.as.string_val;
+        }
+
+        field_count++;
+
+        if (!check(parser, UF_TOK_DEDENT) && !check(parser, UF_TOK_EOF)) {
+            consume(parser, UF_TOK_NEWLINE, "Expected newline after struct field declaration", NULL);
+        }
+    }
+
+    consume(parser, UF_TOK_DEDENT, "Expected unindent to close struct declaration", NULL);
+
+    SourceSpan span = source_span_make(start, parser->previous.span.end);
+    const char** field_names_copy = NULL;
+    const char** field_types_copy = NULL;
+    if (field_count > 0) {
+        field_names_copy = (const char**)uf_arena_alloc(parser->arena, field_count * sizeof(const char*));
+        memcpy(field_names_copy, field_names, field_count * sizeof(const char*));
+
+        field_types_copy = (const char**)uf_arena_alloc(parser->arena, field_count * sizeof(const char*));
+        memcpy(field_types_copy, field_types, field_count * sizeof(const char*));
+    }
+
+    return uf_stmt_struct(parser->arena, span, name, field_names_copy, field_types_copy, field_count);
+}
+
 static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_LET))      return parse_let_statement(parser);
     if (match(parser, UF_TOK_SAY))      return parse_say_statement(parser);
@@ -783,6 +836,7 @@ static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_IMPORT))   return parse_import_statement(parser);
     if (match(parser, UF_TOK_FROM))     return parse_from_import_statement(parser);
     if (match(parser, UF_TOK_FUNCTION)) return parse_function_statement(parser);
+    if (match(parser, UF_TOK_STRUCT))   return parse_struct_statement(parser);
 
     return parse_expression_or_assignment_statement(parser);
 }

@@ -9,7 +9,8 @@
 typedef enum {
     UF_SYM_VAR,
     UF_SYM_FUNCTION,
-    UF_SYM_BUILTIN
+    UF_SYM_BUILTIN,
+    UF_SYM_STRUCT
 } UfSymbolKind;
 
 typedef struct UfSymbol {

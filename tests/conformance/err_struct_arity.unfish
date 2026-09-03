@@ -1,0 +1,8 @@
+# expect-exit: 2
+# expect-error: Struct 'Point' constructor expects 2 arguments, but 1 was provided
+
+struct Point:
+    x: Number
+    y: Number
+
+let p = Point(1)

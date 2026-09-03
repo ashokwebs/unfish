@@ -546,6 +546,20 @@ void uf_gc_mark_value(UfValue val) {
             uf_gc_mark_env(val.as.module->env);
             uf_gc_mark_value(val.as.module->exports);
         }
+    } else if (val.kind == UF_VAL_STRUCT_DEF) {
+        if (val.as.struct_def && !val.as.struct_def->obj.marked) {
+            val.as.struct_def->obj.marked = true;
+        }
+    } else if (val.kind == UF_VAL_INSTANCE) {
+        if (val.as.instance && !val.as.instance->obj.marked) {
+            val.as.instance->obj.marked = true;
+            if (val.as.instance->def && !val.as.instance->def->obj.marked) {
+                val.as.instance->def->obj.marked = true;
+            }
+            for (size_t i = 0; i < val.as.instance->field_count; ++i) {
+                uf_gc_mark_value(val.as.instance->fields[i]);
+            }
+        }
     }
 }
 
@@ -615,6 +629,13 @@ void uf_gc_collect(UfRuntime* rt) {
                 free(mod->name);
                 free(mod->path);
                 free(mod);
+            } else if (obj->kind == UF_OBJ_INSTANCE) {
+                UfInstanceObject* inst = (UfInstanceObject*)obj;
+                if (inst->fields) free(inst->fields);
+                free(inst);
+            } else if (obj->kind == UF_OBJ_STRUCT_DEF) {
+                UfStructDefObject* sdef = (UfStructDefObject*)obj;
+                free(sdef);
             } else {
                 free(obj);
             }
@@ -687,6 +708,13 @@ void uf_runtime_free(UfRuntime* rt) {
             free(mod->name);
             free(mod->path);
             free(mod);
+        } else if (obj->kind == UF_OBJ_INSTANCE) {
+            UfInstanceObject* inst = (UfInstanceObject*)obj;
+            if (inst->fields) free(inst->fields);
+            free(inst);
+        } else if (obj->kind == UF_OBJ_STRUCT_DEF) {
+            UfStructDefObject* sdef = (UfStructDefObject*)obj;
+            free(sdef);
         } else {
             free(obj);
         }

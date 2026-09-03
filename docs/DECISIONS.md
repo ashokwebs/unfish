@@ -241,3 +241,29 @@
   4. **Zero Runtime Overhead**: Type annotations are erased after semantic analysis, preserving full dynamic execution speed and memory compactness in `UfValue`.
 * **Consequences**: Enables progressive pedagogical adoption of static contracts while maintaining 100% test compatibility and memory safety under AddressSanitizer/UBSan.
 
+## ADR 021: User-Defined Structs and Records
+* **Date**: Milestone 11 (Phase 4 Part 4)
+* **Status**: Accepted
+* **Context**: Programs need custom structured records with named fields rather than generic dictionaries or untyped tuples, enabling data modeling, strong encapsulation, and type contracts.
+* **Decision**:
+  1. **Declaration Syntax**:
+     ```unfish
+     struct <Name>:
+         <field1>: <Type>
+         <field2>: <Type>
+     ```
+     Fields may optionally omit type annotations (defaulting to `Any`).
+  2. **First-Class Constructors**:
+     The struct name `<Name>` is bound as a callable constructor taking exactly `field_count` positional arguments in declaration order.
+  3. **Dot Member Access & Mutation**:
+     Field read (`inst.field`) and field write (`inst.field = val`) desugar through the parser into index read/write expressions (`inst["field"]`). Runtime checks verify field presence and fail with descriptive errors if unknown fields are accessed.
+  4. **Value & GC Representation**:
+     - `UfStructDefObject`: Holds struct name, field names, and field type descriptors.
+     - `UfInstanceObject`: GC-managed object referencing its `UfStructDefObject` and a dynamically allocated array of `UfValue fields`.
+     - GC sweep frees both the instance shell and its underlying value array, preventing memory leaks.
+  5. **Pedagogical Output & Equality**:
+     - `uf_val_to_string` formats instances as `Point(x: 10, y: 20)`.
+     - `uf_val_equal` provides recursive structural equality across matching struct definitions.
+* **Consequences**: Unfish developers can declare clean domain models with full static and runtime validation, completely memory safe under AddressSanitizer.
+
+

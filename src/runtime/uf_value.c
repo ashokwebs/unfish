@@ -394,6 +394,63 @@ UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod) {
     return v;
 }
 
+UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count) {
+    size_t size = sizeof(UfStructDefObject);
+    UfStructDefObject* sdef = (UfStructDefObject*)malloc(size);
+    if (!sdef) {
+        fprintf(stderr, "Fatal error: Out of memory allocating struct definition\n");
+        abort();
+    }
+    sdef->obj.kind = UF_OBJ_STRUCT_DEF;
+    sdef->obj.marked = false;
+    sdef->obj.next = NULL;
+    sdef->name = name;
+    sdef->field_names = field_names;
+    sdef->field_types = field_types;
+    sdef->field_count = field_count;
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)sdef, size);
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_STRUCT_DEF;
+    v.as.struct_def = sdef;
+    return v;
+}
+
+UfValue uf_val_instance(UfRuntime* rt, UfStructDefObject* def, UfValue* fields, size_t count) {
+    size_t size = sizeof(UfInstanceObject);
+    UfInstanceObject* inst = (UfInstanceObject*)malloc(size);
+    if (!inst) {
+        fprintf(stderr, "Fatal error: Out of memory allocating struct instance\n");
+        abort();
+    }
+    inst->obj.kind = UF_OBJ_INSTANCE;
+    inst->obj.marked = false;
+    inst->obj.next = NULL;
+    inst->def = def;
+    inst->field_count = count;
+    inst->fields = NULL;
+    if (count > 0) {
+        inst->fields = (UfValue*)malloc(count * sizeof(UfValue));
+        if (!inst->fields) {
+            fprintf(stderr, "Fatal error: Out of memory allocating struct instance fields\n");
+            abort();
+        }
+        memcpy(inst->fields, fields, count * sizeof(UfValue));
+    }
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)inst, size + count * sizeof(UfValue));
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_INSTANCE;
+    v.as.instance = inst;
+    return v;
+}
+
 bool uf_val_is_truthy(UfValue val) {
     switch (val.kind) {
         case UF_VAL_NULL:
@@ -413,6 +470,8 @@ bool uf_val_is_truthy(UfValue val) {
             return val.as.map->count > 0;
         case UF_VAL_ERROR:
         case UF_VAL_MODULE:
+        case UF_VAL_STRUCT_DEF:
+        case UF_VAL_INSTANCE:
             return true;
     }
     return false;
@@ -461,6 +520,18 @@ bool uf_val_equal(UfValue a, UfValue b) {
             return a.as.error == b.as.error;
         case UF_VAL_MODULE:
             return a.as.module == b.as.module;
+        case UF_VAL_STRUCT_DEF:
+            return a.as.struct_def == b.as.struct_def;
+        case UF_VAL_INSTANCE: {
+            if (a.as.instance->def != b.as.instance->def) return false;
+            if (a.as.instance->field_count != b.as.instance->field_count) return false;
+            for (size_t i = 0; i < a.as.instance->field_count; ++i) {
+                if (!uf_val_equal(a.as.instance->fields[i], b.as.instance->fields[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
     return false;
 }
@@ -592,22 +663,67 @@ char* uf_val_to_string(UfValue val) {
                      (val.as.module && val.as.module->name) ? val.as.module->name : "anonymous");
             return strdup(mbuf);
         }
+        case UF_VAL_STRUCT_DEF: {
+            char sbuf[256];
+            snprintf(sbuf, sizeof(sbuf), "<struct %s>",
+                     (val.as.struct_def && val.as.struct_def->name) ? val.as.struct_def->name : "anonymous");
+            return strdup(sbuf);
+        }
+        case UF_VAL_INSTANCE: {
+            UfInstanceObject* inst = val.as.instance;
+            const char* sname = (inst->def && inst->def->name) ? inst->def->name : "Instance";
+            size_t cap = 128;
+            char* out = (char*)malloc(cap);
+            snprintf(out, cap, "%s(", sname);
+            size_t len = strlen(out);
+
+            for (size_t i = 0; i < inst->field_count; ++i) {
+                if (i > 0) {
+                    if (len + 3 >= cap) {
+                        cap *= 2;
+                        out = (char*)realloc(out, cap);
+                    }
+                    strcat(out, ", ");
+                    len += 2;
+                }
+                const char* fname = (inst->def && inst->def->field_names) ? inst->def->field_names[i] : "?";
+                char* fval_s = uf_val_to_string(inst->fields[i]);
+                size_t need = strlen(fname) + strlen(fval_s) + 4;
+                if (len + need >= cap) {
+                    cap = (len + need) * 2;
+                    out = (char*)realloc(out, cap);
+                }
+                strcat(out, fname);
+                strcat(out, ": ");
+                strcat(out, fval_s);
+                len += strlen(fname) + 2 + strlen(fval_s);
+                free(fval_s);
+            }
+            if (len + 2 >= cap) {
+                cap += 2;
+                out = (char*)realloc(out, cap);
+            }
+            strcat(out, ")");
+            return out;
+        }
     }
     return strdup("<unknown>");
 }
 
 const char* uf_val_type_name(UfValue val) {
     switch (val.kind) {
-        case UF_VAL_NULL:      return "null";
-        case UF_VAL_BOOL:      return "boolean";
-        case UF_VAL_NUMBER:    return "number";
-        case UF_VAL_STRING:    return "string";
-        case UF_VAL_FUNCTION:  return "function";
-        case UF_VAL_NATIVE_FN: return "function";
-        case UF_VAL_ARRAY:     return "array";
-        case UF_VAL_MAP:       return "map";
-        case UF_VAL_ERROR:     return "error";
-        case UF_VAL_MODULE:    return "module";
+        case UF_VAL_NULL:       return "null";
+        case UF_VAL_BOOL:       return "boolean";
+        case UF_VAL_NUMBER:     return "number";
+        case UF_VAL_STRING:     return "string";
+        case UF_VAL_FUNCTION:   return "function";
+        case UF_VAL_NATIVE_FN:  return "function";
+        case UF_VAL_ARRAY:      return "array";
+        case UF_VAL_MAP:        return "map";
+        case UF_VAL_ERROR:      return "error";
+        case UF_VAL_MODULE:     return "module";
+        case UF_VAL_STRUCT_DEF: return "struct";
+        case UF_VAL_INSTANCE:   return (val.as.instance && val.as.instance->def && val.as.instance->def->name) ? val.as.instance->def->name : "instance";
     }
     return "<unknown>";
 }

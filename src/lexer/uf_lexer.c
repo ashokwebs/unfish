@@ -227,6 +227,7 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             if (memcmp(word, "return", 6) == 0) return UF_TOK_RETURN;
             if (memcmp(word, "repeat", 6) == 0) return UF_TOK_REPEAT;
             if (memcmp(word, "import", 6) == 0) return UF_TOK_IMPORT;
+            if (memcmp(word, "struct", 6) == 0) return UF_TOK_STRUCT;
             break;
         case 8:
             if (memcmp(word, "function", 8) == 0) return UF_TOK_FUNCTION;

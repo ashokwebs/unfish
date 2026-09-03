@@ -10,7 +10,9 @@ typedef enum {
     UF_OBJ_ARRAY,
     UF_OBJ_MAP,
     UF_OBJ_ERROR,
-    UF_OBJ_MODULE
+    UF_OBJ_MODULE,
+    UF_OBJ_STRUCT_DEF,
+    UF_OBJ_INSTANCE
 } UfObjKind;
 
 typedef struct UfObj {

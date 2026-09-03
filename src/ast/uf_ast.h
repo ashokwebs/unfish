@@ -104,7 +104,8 @@ typedef enum {
     UF_STMT_BLOCK,
     UF_STMT_TRY_CATCH,
     UF_STMT_IMPORT,
-    UF_STMT_FROM_IMPORT
+    UF_STMT_FROM_IMPORT,
+    UF_STMT_STRUCT
 } UfStmtKind;
 
 struct UfStmt {
@@ -193,6 +194,13 @@ struct UfStmt {
             const char** aliases;
             size_t count;
         } from_import_stmt;
+
+        struct {
+            const char* name;
+            const char** field_names;
+            const char** field_types; /* May be NULL */
+            size_t field_count;
+        } struct_stmt;
     } as;
 };
 
@@ -236,6 +244,7 @@ UfStmt* uf_stmt_block(UfArena* arena, SourceSpan span, UfStmt** stmts, size_t co
 UfStmt* uf_stmt_try_catch(UfArena* arena, SourceSpan span, UfStmt* try_block, const char* catch_var, UfStmt* catch_block);
 UfStmt* uf_stmt_import(UfArena* arena, SourceSpan span, const char* module_name, const char* alias);
 UfStmt* uf_stmt_from_import(UfArena* arena, SourceSpan span, const char* module_name, const char** symbols, const char** aliases, size_t count);
+UfStmt* uf_stmt_struct(UfArena* arena, SourceSpan span, const char* name, const char** field_names, const char** field_types, size_t field_count);
 
 void uf_ast_print(const UfProgram* program, FILE* out);
 void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent);

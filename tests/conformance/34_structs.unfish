@@ -1,0 +1,50 @@
+# expect: 10
+# expect: 20
+# expect: Point(x: 10, y: 20)
+# expect: 42
+# expect: true
+# expect: false
+# expect: Bob
+# expect: 30
+# expect: true
+# expect: 50
+# expect: 30
+# expect: 100
+
+struct Point:
+    x: Number
+    y: Number
+
+let p = Point(10, 20)
+say p.x
+say p.y
+say p
+
+p.x = 42
+say p.x
+
+let p1 = Point(5, 10)
+let p2 = Point(5, 10)
+let p3 = Point(5, 15)
+say p1 == p2
+say p1 == p3
+
+struct Person:
+    name: String
+    age: Number
+    active: Boolean
+
+let bob = Person("Bob", 30, true)
+say bob.name
+say bob.age
+say bob.active
+
+function translate(pt: Point, dx: Number, dy: Number): Point:
+    return Point(pt.x + dx, pt.y + dy)
+
+let moved = translate(p, 8, 10)
+say moved.x
+say moved.y
+
+let pt_typed: Point = Point(100, 200)
+say pt_typed.x
