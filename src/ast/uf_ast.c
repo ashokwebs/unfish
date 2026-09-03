@@ -285,6 +285,50 @@ UfStmt* uf_stmt_struct(UfArena* arena, SourceSpan span, const char* name, const 
     return stmt;
 }
 
+UfPattern* uf_pattern_literal(UfArena* arena, SourceSpan span, UfExpr* literal) {
+    UfPattern* pat = (UfPattern*)uf_arena_alloc(arena, sizeof(UfPattern));
+    pat->kind = UF_PAT_LITERAL;
+    pat->span = span;
+    pat->as.literal = literal;
+    return pat;
+}
+
+UfPattern* uf_pattern_variable(UfArena* arena, SourceSpan span, const char* var_name) {
+    UfPattern* pat = (UfPattern*)uf_arena_alloc(arena, sizeof(UfPattern));
+    pat->kind = UF_PAT_VARIABLE;
+    pat->span = span;
+    pat->as.var_name = var_name;
+    return pat;
+}
+
+UfPattern* uf_pattern_wildcard(UfArena* arena, SourceSpan span) {
+    UfPattern* pat = (UfPattern*)uf_arena_alloc(arena, sizeof(UfPattern));
+    pat->kind = UF_PAT_WILDCARD;
+    pat->span = span;
+    return pat;
+}
+
+UfPattern* uf_pattern_struct(UfArena* arena, SourceSpan span, const char* struct_name, UfPattern** field_patterns, size_t field_count) {
+    UfPattern* pat = (UfPattern*)uf_arena_alloc(arena, sizeof(UfPattern));
+    pat->kind = UF_PAT_STRUCT;
+    pat->span = span;
+    pat->as.struct_pat.struct_name = struct_name;
+    pat->as.struct_pat.field_patterns = field_patterns;
+    pat->as.struct_pat.field_count = field_count;
+    return pat;
+}
+
+UfStmt* uf_stmt_match(UfArena* arena, SourceSpan span, UfExpr* expr, UfMatchArm* arms, size_t arm_count, UfStmt* else_branch) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_MATCH;
+    stmt->span = span;
+    stmt->as.match_stmt.expr = expr;
+    stmt->as.match_stmt.arms = arms;
+    stmt->as.match_stmt.arm_count = arm_count;
+    stmt->as.match_stmt.else_branch = else_branch;
+    return stmt;
+}
+
 static void print_indent(FILE* out, int indent) {
     for (int i = 0; i < indent; ++i) {
         fprintf(out, "  ");
@@ -535,6 +579,45 @@ void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent) {
                 }
                 fprintf(out, ")");
             }
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_MATCH:
+            fprintf(out, "(match ");
+            uf_ast_print_expr(stmt->as.match_stmt.expr, out);
+            fprintf(out, "\n");
+            for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
+                print_indent(out, indent + 1);
+                fprintf(out, "(when ");
+                /* print pattern inline */
+                if (stmt->as.match_stmt.arms[i].pattern) {
+                    if (stmt->as.match_stmt.arms[i].pattern->kind == UF_PAT_LITERAL) {
+                        uf_ast_print_expr(stmt->as.match_stmt.arms[i].pattern->as.literal, out);
+                    } else if (stmt->as.match_stmt.arms[i].pattern->kind == UF_PAT_VARIABLE) {
+                        fprintf(out, "%s", stmt->as.match_stmt.arms[i].pattern->as.var_name);
+                    } else if (stmt->as.match_stmt.arms[i].pattern->kind == UF_PAT_WILDCARD) {
+                        fprintf(out, "_");
+                    } else if (stmt->as.match_stmt.arms[i].pattern->kind == UF_PAT_STRUCT) {
+                        fprintf(out, "%s(...)", stmt->as.match_stmt.arms[i].pattern->as.struct_pat.struct_name);
+                    }
+                }
+                if (stmt->as.match_stmt.arms[i].guard) {
+                    fprintf(out, " if ");
+                    uf_ast_print_expr(stmt->as.match_stmt.arms[i].guard, out);
+                }
+                fprintf(out, "\n");
+                uf_ast_print_stmt(stmt->as.match_stmt.arms[i].body, out, indent + 2);
+                print_indent(out, indent + 1);
+                fprintf(out, ")\n");
+            }
+            if (stmt->as.match_stmt.else_branch) {
+                print_indent(out, indent + 1);
+                fprintf(out, "(else\n");
+                uf_ast_print_stmt(stmt->as.match_stmt.else_branch, out, indent + 2);
+                print_indent(out, indent + 1);
+                fprintf(out, ")\n");
+            }
+            print_indent(out, indent);
             fprintf(out, ")\n");
             break;
     }

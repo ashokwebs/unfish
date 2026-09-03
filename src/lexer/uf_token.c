@@ -29,6 +29,8 @@ const char* uf_token_kind_name(UfTokenKind kind) {
         case UF_TOK_FROM:       return "from";
         case UF_TOK_AS:         return "as";
         case UF_TOK_STRUCT:     return "struct";
+        case UF_TOK_MATCH:      return "match";
+        case UF_TOK_WHEN:       return "when";
         case UF_TOK_AND:        return "and";
         case UF_TOK_OR:         return "or";
         case UF_TOK_NOT:        return "not";

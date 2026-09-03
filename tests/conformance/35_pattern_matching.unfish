@@ -1,0 +1,51 @@
+# expect: zero
+# expect: small: 5
+# expect: big: 42
+# expect: default
+# expect: hello greeting
+# expect: Point at: 10, 20
+# expect: other point: 1, 2
+# expect: wildcard matched
+
+function describe_num(n):
+    match n:
+        when 0:
+            say "zero"
+        when x if x > 10:
+            say "big: " + x
+        when x if x > 0:
+            say "small: " + x
+        else:
+            say "default"
+
+describe_num(0)
+describe_num(5)
+describe_num(42)
+describe_num(-3)
+
+let msg = "hello"
+match msg:
+    when "hello":
+        say "hello greeting"
+    else:
+        say "unknown greeting"
+
+struct Point:
+    x: Number
+    y: Number
+
+function inspect_point(pt):
+    match pt:
+        when Point(10, 20):
+            say "Point at: 10, 20"
+        when Point(a, b):
+            say "other point: " + a + ", " + b
+        else:
+            say "not a point"
+
+inspect_point(Point(10, 20))
+inspect_point(Point(1, 2))
+
+match 999:
+    when _:
+        say "wildcard matched"

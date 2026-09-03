@@ -518,6 +518,40 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
     }
 }
 
+static void bind_pattern_variables(UfSemanticAnalyzer* analyzer, UfPattern* pat) {
+    if (!pat) return;
+    switch (pat->kind) {
+        case UF_PAT_LITERAL:
+            analyze_expr(analyzer, pat->as.literal);
+            break;
+        case UF_PAT_WILDCARD:
+            break;
+        case UF_PAT_VARIABLE:
+            add_symbol(analyzer, pat->as.var_name, UF_SYM_VAR, pat->span, -1);
+            break;
+        case UF_PAT_STRUCT: {
+            const char* sname = pat->as.struct_pat.struct_name;
+            UfSymbol* s = resolve_symbol(analyzer->current_scope, sname);
+            if (!s || s->kind != UF_SYM_STRUCT) {
+                analyzer->had_error = true;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Unknown struct '%s' in pattern", sname);
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, pat->span, msg, NULL);
+            } else if (s->arity >= 0 && (int)pat->as.struct_pat.field_count != s->arity) {
+                analyzer->had_error = true;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Struct '%s' pattern expects %d field%s, but %zu provided",
+                         s->name, s->arity, s->arity == 1 ? "" : "s", pat->as.struct_pat.field_count);
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, pat->span, msg, NULL);
+            }
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                bind_pattern_variables(analyzer, pat->as.struct_pat.field_patterns[i]);
+            }
+            break;
+        }
+    }
+}
+
 static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
     if (!stmt) return;
 
@@ -794,6 +828,23 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
             uf_semantic_add_symbol_with_type(analyzer, name, UF_SYM_STRUCT, stmt->span,
                                             (int)stmt->as.struct_stmt.field_count, name, name,
                                             stmt->as.struct_stmt.field_types);
+            break;
+        }
+
+        case UF_STMT_MATCH: {
+            analyze_expr(analyzer, stmt->as.match_stmt.expr);
+            for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
+                push_scope(analyzer, false);
+                bind_pattern_variables(analyzer, stmt->as.match_stmt.arms[i].pattern);
+                if (stmt->as.match_stmt.arms[i].guard) {
+                    analyze_expr(analyzer, stmt->as.match_stmt.arms[i].guard);
+                }
+                analyze_stmt(analyzer, stmt->as.match_stmt.arms[i].body);
+                pop_scope(analyzer);
+            }
+            if (stmt->as.match_stmt.else_branch) {
+                analyze_stmt(analyzer, stmt->as.match_stmt.else_branch);
+            }
             break;
         }
     }

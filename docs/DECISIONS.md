@@ -266,4 +266,29 @@
      - `uf_val_equal` provides recursive structural equality across matching struct definitions.
 * **Consequences**: Unfish developers can declare clean domain models with full static and runtime validation, completely memory safe under AddressSanitizer.
 
+## ADR 022: Pattern Matching with Guards and Destructuring
+* **Date**: Milestone 12 (Phase 4 Part 5)
+* **Status**: Accepted
+* **Context**: Complex condition branching with nested `if/else` checks, type inspection, and record property extractions creates cluttered, error-prone code. A dedicated pattern matching construct enables concise, expressive, and type-safe multi-way dispatch.
+* **Decision**:
+  1. **Syntax**:
+     ```unfish
+     match <expression>:
+         when <pattern> [if <guard>]:
+             <statement_block>
+         else:
+             <statement_block>
+     ```
+  2. **Pattern Kinds**:
+     - **Literals**: Numbers (positive and negative), strings, booleans, and `null` matching via `uf_val_equal`.
+     - **Wildcard**: `_` matching any value without binding.
+     - **Variable Binding**: Identifiers (e.g. `n`, `x`) binding the matched value within the arm's lexical scope.
+     - **Struct Destructuring**: `StructName(p1, p2, ...)` verifying instance type and recursively matching field patterns against instance properties.
+  3. **Guards**:
+     Optional `if <condition>` expressions evaluated in the arm's binding environment; if false, matching continues to the next arm.
+  4. **Control Flow**:
+     Arms evaluate in lexical order. Returns, breaks, and continues within an arm cleanly propagate to enclosing functions and loops.
+* **Consequences**: Provides pedagogical clarity for algorithms, tree traversals, and state machines while maintaining zero overhead when unused.
+
+
 

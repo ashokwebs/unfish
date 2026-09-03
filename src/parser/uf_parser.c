@@ -822,6 +822,137 @@ static UfStmt* parse_struct_statement(UfParser* parser) {
     return uf_stmt_struct(parser->arena, span, name, field_names_copy, field_types_copy, field_count);
 }
 
+static UfPattern* parse_pattern(UfParser* parser) {
+    SourceLoc start = parser->current.span.start;
+
+    /* Wildcard: _ */
+    if (check(parser, UF_TOK_IDENTIFIER) && strcmp(parser->current.as.string_val, "_") == 0) {
+        advance(parser);
+        return uf_pattern_wildcard(parser->arena, source_span_make(start, parser->previous.span.end));
+    }
+
+    /* Literal null */
+    if (match(parser, UF_TOK_NULL)) {
+        UfExpr* lit = uf_expr_literal_null(parser->arena, parser->previous.span);
+        return uf_pattern_literal(parser->arena, parser->previous.span, lit);
+    }
+
+    /* Literal bool */
+    if (match(parser, UF_TOK_TRUE)) {
+        UfExpr* lit = uf_expr_literal_bool(parser->arena, parser->previous.span, true);
+        return uf_pattern_literal(parser->arena, parser->previous.span, lit);
+    }
+    if (match(parser, UF_TOK_FALSE)) {
+        UfExpr* lit = uf_expr_literal_bool(parser->arena, parser->previous.span, false);
+        return uf_pattern_literal(parser->arena, parser->previous.span, lit);
+    }
+
+    /* Literal number (or negative number: - <number>) */
+    if (match(parser, UF_TOK_MINUS)) {
+        consume(parser, UF_TOK_NUMBER, "Expected number after '-' in pattern", NULL);
+        UfExpr* lit = uf_expr_literal_number(parser->arena, source_span_make(start, parser->previous.span.end), -parser->previous.as.number_val);
+        return uf_pattern_literal(parser->arena, source_span_make(start, parser->previous.span.end), lit);
+    }
+    if (match(parser, UF_TOK_NUMBER)) {
+        UfExpr* lit = uf_expr_literal_number(parser->arena, parser->previous.span, parser->previous.as.number_val);
+        return uf_pattern_literal(parser->arena, parser->previous.span, lit);
+    }
+
+    /* Literal string */
+    if (match(parser, UF_TOK_STRING)) {
+        UfExpr* lit = uf_expr_literal_string(parser->arena, parser->previous.span, parser->previous.as.string_val);
+        return uf_pattern_literal(parser->arena, parser->previous.span, lit);
+    }
+
+    /* Identifier: either variable binding or struct pattern Point(...) */
+    if (match(parser, UF_TOK_IDENTIFIER)) {
+        const char* name = parser->previous.as.string_val;
+        if (match(parser, UF_TOK_LPAREN)) {
+            /* Struct pattern */
+            UfPattern* subpats[32];
+            size_t subcount = 0;
+            if (!check(parser, UF_TOK_RPAREN)) {
+                do {
+                    if (subcount >= 32) {
+                        error_current(parser, "Struct pattern exceeds 32 fields", NULL);
+                        break;
+                    }
+                    subpats[subcount++] = parse_pattern(parser);
+                } while (match(parser, UF_TOK_COMMA));
+            }
+            consume(parser, UF_TOK_RPAREN, "Expected ')' after struct pattern fields", NULL);
+            SourceSpan span = source_span_make(start, parser->previous.span.end);
+            UfPattern** subpats_copy = NULL;
+            if (subcount > 0) {
+                subpats_copy = (UfPattern**)uf_arena_alloc(parser->arena, subcount * sizeof(UfPattern*));
+                memcpy(subpats_copy, subpats, subcount * sizeof(UfPattern*));
+            }
+            return uf_pattern_struct(parser->arena, span, name, subpats_copy, subcount);
+        } else {
+            /* Variable pattern */
+            return uf_pattern_variable(parser->arena, parser->previous.span, name);
+        }
+    }
+
+    error_current(parser, "Expected pattern", "Patterns can be literals, variables, '_', or 'Struct(fields...)'");
+    return uf_pattern_wildcard(parser->arena, parser->current.span);
+}
+
+static UfStmt* parse_match_statement(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start;
+    UfExpr* expr = uf_parse_expression(parser);
+    consume(parser, UF_TOK_COLON, "Expected ':' after match expression", "Syntax: 'match <expression>:'");
+    consume(parser, UF_TOK_NEWLINE, "Expected newline after ':'", NULL);
+    consume(parser, UF_TOK_INDENT, "Expected indented block for match arms", "Indent match arms with 4 spaces");
+
+    UfMatchArm arms[64];
+    size_t arm_count = 0;
+    UfStmt* else_branch = NULL;
+
+    while (!check(parser, UF_TOK_DEDENT) && !check(parser, UF_TOK_EOF)) {
+        if (match(parser, UF_TOK_NEWLINE)) continue;
+
+        if (match(parser, UF_TOK_WHEN)) {
+            SourceLoc arm_start = parser->previous.span.start;
+            if (arm_count >= 64) {
+                error_current(parser, "Match statement exceeds maximum 64 arms", NULL);
+                break;
+            }
+            UfPattern* pat = parse_pattern(parser);
+            UfExpr* guard = NULL;
+            if (match(parser, UF_TOK_IF)) {
+                guard = uf_parse_expression(parser);
+            }
+            UfStmt* body = parse_block(parser);
+            SourceSpan arm_span = source_span_make(arm_start, parser->previous.span.end);
+            arms[arm_count].pattern = pat;
+            arms[arm_count].guard = guard;
+            arms[arm_count].body = body;
+            arms[arm_count].span = arm_span;
+            arm_count++;
+        } else if (match(parser, UF_TOK_ELSE)) {
+            if (else_branch != NULL) {
+                error_current(parser, "Duplicate 'else' in match statement", NULL);
+            }
+            else_branch = parse_block(parser);
+        } else {
+            error_current(parser, "Expected 'when' or 'else' in match block", "Syntax: 'when <pattern> [if <guard>]:' or 'else:'");
+            break;
+        }
+    }
+
+    consume(parser, UF_TOK_DEDENT, "Expected unindent to close match statement", NULL);
+    SourceSpan span = source_span_make(start, parser->previous.span.end);
+
+    UfMatchArm* arms_copy = NULL;
+    if (arm_count > 0) {
+        arms_copy = (UfMatchArm*)uf_arena_alloc(parser->arena, arm_count * sizeof(UfMatchArm));
+        memcpy(arms_copy, arms, arm_count * sizeof(UfMatchArm));
+    }
+
+    return uf_stmt_match(parser->arena, span, expr, arms_copy, arm_count, else_branch);
+}
+
 static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_LET))      return parse_let_statement(parser);
     if (match(parser, UF_TOK_SAY))      return parse_say_statement(parser);
@@ -837,6 +968,7 @@ static UfStmt* parse_statement(UfParser* parser) {
     if (match(parser, UF_TOK_FROM))     return parse_from_import_statement(parser);
     if (match(parser, UF_TOK_FUNCTION)) return parse_function_statement(parser);
     if (match(parser, UF_TOK_STRUCT))   return parse_struct_statement(parser);
+    if (match(parser, UF_TOK_MATCH))    return parse_match_statement(parser);
 
     return parse_expression_or_assignment_statement(parser);
 }

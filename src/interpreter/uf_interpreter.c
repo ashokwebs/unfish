@@ -477,6 +477,38 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
     return uf_val_null();
 }
 
+static bool match_pattern_and_bind(UfRuntime* rt, UfEnv* env, const UfPattern* pat, UfValue val) {
+    if (!pat) return true;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+            return true;
+
+        case UF_PAT_VARIABLE:
+            uf_env_declare(env, pat->as.var_name, val);
+            return true;
+
+        case UF_PAT_LITERAL: {
+            UfValue lit_val = uf_evaluate_expression(rt, env, pat->as.literal);
+            if (rt->had_runtime_error) return false;
+            return uf_val_equal(lit_val, val);
+        }
+
+        case UF_PAT_STRUCT: {
+            if (val.kind != UF_VAL_INSTANCE) return false;
+            if (!val.as.instance || !val.as.instance->def) return false;
+            if (strcmp(val.as.instance->def->name, pat->as.struct_pat.struct_name) != 0) return false;
+            if (val.as.instance->field_count != pat->as.struct_pat.field_count) return false;
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                if (!match_pattern_and_bind(rt, env, pat->as.struct_pat.field_patterns[i], val.as.instance->fields[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_stmt) {
     for (size_t i = 0; i < block_stmt->as.block.count; ++i) {
         ExecResult res = execute_statement(rt, env, block_stmt->as.block.stmts[i]);
@@ -854,6 +886,47 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                                              stmt->as.struct_stmt.field_types,
                                              stmt->as.struct_stmt.field_count);
             uf_env_declare(env, stmt->as.struct_stmt.name, sdef);
+            return exec_ok();
+        }
+
+        case UF_STMT_MATCH: {
+            UfValue val = uf_evaluate_expression(rt, env, stmt->as.match_stmt.expr);
+            if (rt->had_runtime_error) return exec_error();
+            uf_runtime_push_temp_root(rt, val);
+
+            bool matched = false;
+            ExecResult arm_res = exec_ok();
+
+            for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
+                UfEnv* arm_env = uf_env_create(rt, env);
+                if (match_pattern_and_bind(rt, arm_env, stmt->as.match_stmt.arms[i].pattern, val)) {
+                    bool guard_ok = true;
+                    if (stmt->as.match_stmt.arms[i].guard) {
+                        UfValue gval = uf_evaluate_expression(rt, arm_env, stmt->as.match_stmt.arms[i].guard);
+                        if (rt->had_runtime_error) {
+                            uf_runtime_pop_temp_root(rt);
+                            return exec_error();
+                        }
+                        guard_ok = uf_val_is_truthy(gval);
+                    }
+                    if (guard_ok) {
+                        matched = true;
+                        arm_res = execute_statement(rt, arm_env, stmt->as.match_stmt.arms[i].body);
+                        break;
+                    }
+                }
+            }
+
+            uf_runtime_pop_temp_root(rt);
+
+            if (matched) {
+                return arm_res;
+            }
+
+            if (stmt->as.match_stmt.else_branch) {
+                return execute_statement(rt, env, stmt->as.match_stmt.else_branch);
+            }
+
             return exec_ok();
         }
     }

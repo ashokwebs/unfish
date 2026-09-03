@@ -37,6 +37,8 @@ typedef enum {
     UF_TOK_FROM,
     UF_TOK_AS,
     UF_TOK_STRUCT,
+    UF_TOK_MATCH,
+    UF_TOK_WHEN,
     UF_TOK_AND,
     UF_TOK_OR,
     UF_TOK_NOT,

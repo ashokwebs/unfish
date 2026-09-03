@@ -85,6 +85,36 @@ struct UfExpr {
     } as;
 };
 
+/* --- Patterns for Pattern Matching --- */
+
+typedef enum {
+    UF_PAT_LITERAL,    /* Literal value: Number, String, Bool, Null */
+    UF_PAT_VARIABLE,   /* Variable binding: e.g. x */
+    UF_PAT_WILDCARD,   /* Wildcard: _ */
+    UF_PAT_STRUCT      /* Struct deconstruction: Point(x, y) */
+} UfPatternKind;
+
+typedef struct UfPattern {
+    UfPatternKind kind;
+    SourceSpan span;
+    union {
+        UfExpr* literal;
+        const char* var_name;
+        struct {
+            const char* struct_name;
+            struct UfPattern** field_patterns;
+            size_t field_count;
+        } struct_pat;
+    } as;
+} UfPattern;
+
+typedef struct {
+    UfPattern* pattern;
+    UfExpr* guard; /* Optional if-guard expression, or NULL */
+    struct UfStmt* body;
+    SourceSpan span;
+} UfMatchArm;
+
 /* --- Statements --- */
 
 typedef enum {
@@ -105,7 +135,8 @@ typedef enum {
     UF_STMT_TRY_CATCH,
     UF_STMT_IMPORT,
     UF_STMT_FROM_IMPORT,
-    UF_STMT_STRUCT
+    UF_STMT_STRUCT,
+    UF_STMT_MATCH
 } UfStmtKind;
 
 struct UfStmt {
@@ -201,6 +232,13 @@ struct UfStmt {
             const char** field_types; /* May be NULL */
             size_t field_count;
         } struct_stmt;
+
+        struct {
+            UfExpr* expr;
+            UfMatchArm* arms;
+            size_t arm_count;
+            struct UfStmt* else_branch; /* May be NULL */
+        } match_stmt;
     } as;
 };
 
@@ -227,6 +265,11 @@ UfExpr* uf_expr_index(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* i
 UfExpr* uf_expr_map(UfArena* arena, SourceSpan span, UfExpr** keys, UfExpr** values, size_t count);
 UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, const char** param_types, size_t param_count, const char* return_type, struct UfStmt* body);
 
+UfPattern* uf_pattern_literal(UfArena* arena, SourceSpan span, UfExpr* literal);
+UfPattern* uf_pattern_variable(UfArena* arena, SourceSpan span, const char* var_name);
+UfPattern* uf_pattern_wildcard(UfArena* arena, SourceSpan span);
+UfPattern* uf_pattern_struct(UfArena* arena, SourceSpan span, const char* struct_name, UfPattern** field_patterns, size_t field_count);
+
 UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, const char* type_annotation, UfExpr* init);
 UfStmt* uf_stmt_assign(UfArena* arena, SourceSpan span, const char* name, UfExpr* value);
 UfStmt* uf_stmt_index_assign(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index, UfExpr* value);
@@ -245,6 +288,7 @@ UfStmt* uf_stmt_try_catch(UfArena* arena, SourceSpan span, UfStmt* try_block, co
 UfStmt* uf_stmt_import(UfArena* arena, SourceSpan span, const char* module_name, const char* alias);
 UfStmt* uf_stmt_from_import(UfArena* arena, SourceSpan span, const char* module_name, const char** symbols, const char** aliases, size_t count);
 UfStmt* uf_stmt_struct(UfArena* arena, SourceSpan span, const char* name, const char** field_names, const char** field_types, size_t field_count);
+UfStmt* uf_stmt_match(UfArena* arena, SourceSpan span, UfExpr* expr, UfMatchArm* arms, size_t arm_count, UfStmt* else_branch);
 
 void uf_ast_print(const UfProgram* program, FILE* out);
 void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent);
