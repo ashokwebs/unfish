@@ -1,0 +1,74 @@
+# expect: [apple, banana, cherry]
+# expect: [a, b, c]
+# expect: apple, banana, cherry
+# expect: hello world
+# expect: hello Unfish
+# expect: HELLO UNFISH
+# expect: hello unfish
+# expect: true
+# expect: false
+# expect: true
+# expect: false
+# expect: true
+# expect: false
+# expect: U
+# expect: 42.5
+# expect: null
+# expect: [1, 2, 3]
+# expect: abcabcabc
+# expect: fish
+# expect: Un
+# expect: 6
+# expect: -1
+
+# 1. split
+let fruits = split("apple,banana,cherry", ",")
+say fruits
+
+let chars = split("abc", "")
+say chars
+
+# 2. join
+say join(fruits, ", ")
+
+# 3. trim
+say trim("   hello world   \t\n")
+
+# 4. replace
+let text = "hello world"
+say replace(text, "world", "Unfish")
+
+# 5. to_upper & to_lower
+say to_upper("hello unfish")
+say to_lower("HELLO UNFISH")
+
+# 6. contains
+say contains("programming", "gram")
+say contains("programming", "xyz")
+
+# 7. starts_with & ends_with
+say starts_with("unfish_lang", "unfish")
+say starts_with("unfish_lang", "lang")
+say ends_with("unfish_lang", "lang")
+say ends_with("unfish_lang", "unfish")
+
+# 8. char_at
+say char_at("Unfish", 0)
+
+# 9. to_number
+say to_number("42.5")
+say to_number("not_a_number")
+
+# 10. to_string
+say to_string([1, 2, 3])
+
+# 11. repeat_string
+say repeat_string("abc", 3)
+
+# 12. substring
+say substring("Unfish", 2, 6)
+say substring("Unfish", 0, 2)
+
+# 13. index_of
+say index_of("hello world", "world")
+say index_of("hello world", "xyz")

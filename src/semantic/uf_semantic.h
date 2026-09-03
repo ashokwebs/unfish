@@ -27,7 +27,7 @@ typedef struct UfScope {
     size_t bucket_count;
 } UfScope;
 
-typedef struct {
+typedef struct UfSemanticAnalyzer {
     UfScope* current_scope;
     UfScope* global_scope;
     int function_depth;
@@ -41,6 +41,12 @@ typedef struct {
 void uf_semantic_init(UfSemanticAnalyzer* analyzer,
                       UfArena* arena,
                       UfDiagnosticReporter* reporter);
+
+void uf_semantic_add_symbol(UfSemanticAnalyzer* analyzer,
+                            const char* name,
+                            UfSymbolKind kind,
+                            SourceSpan span,
+                            int arity);
 
 bool uf_analyze_program(UfSemanticAnalyzer* analyzer, UfProgram* program);
 

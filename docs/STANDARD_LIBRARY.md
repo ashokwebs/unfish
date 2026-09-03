@@ -95,11 +95,51 @@
 * **Description**: Raises an `AssertionError` if `condition` is falsy.
 * **Returns**: `null`.
 
-## 3. Future Standard Library Modules (Phase 8 Roadmap)
+## 3. String Standard Library
 
-* `math`: `sin`, `cos`, `sqrt`, `floor`, `ceil`, `abs`, `min`, `max`, `PI`, `E`.
-* `strings`: `split`, `join`, `trim`, `replace`, `to_upper`, `to_lower`, `contains`.
+| Function | Signature | Description |
+|---|---|---|
+| `split(str, delim)` | `(String, String) -> Array` | Splits `str` around delimiter `delim`. If `delim` is `""`, splits into characters. |
+| `join(arr, sep)` | `(Array, String) -> String` | Concatenates elements of `arr` separated by `sep`. |
+| `trim(str)` | `(String) -> String` | Removes leading and trailing whitespace. |
+| `replace(str, old, new)` | `(String, String, String) -> String` | Replaces occurrences of `old` with `new`. |
+| `to_upper(str)` | `(String) -> String` | Converts string to uppercase. |
+| `to_lower(str)` | `(String) -> String` | Converts string to lowercase. |
+| `contains(str, sub)` | `(String, String) -> Boolean` | Returns `true` if `sub` is found inside `str`. |
+| `starts_with(str, pfx)` | `(String, String) -> Boolean` | Returns `true` if `str` begins with prefix `pfx`. |
+| `ends_with(str, sfx)` | `(String, String) -> Boolean` | Returns `true` if `str` ends with suffix `sfx`. |
+| `char_at(str, idx)` | `(String, Number) -> String` | Character at index with negative indexing support (`""` if out of bounds). |
+| `to_number(str)` | `(String) -> Number or null` | Parses numeric string, returning `null` on invalid input. |
+| `to_string(val)` | `(Any) -> String` | Converts any runtime value to string. |
+| `repeat_string(str, n)` | `(String, Number) -> String` | Repeats `str` `n` times. |
+| `substring(str, start, [end])` | `(String, Number, [Number]) -> String` | Slices string from `start` to `end` with negative indexing support. |
+| `index_of(str, sub)` | `(String, String) -> Number` | 0-based index of first occurrence, or `-1` if not found. |
+
+## 4. Math Standard Library
+
+### Constants
+* `PI`: `3.14159265358979323846`
+* `E`: `2.71828182845904523536`
+* `INFINITY`: IEEE 754 positive infinity
+
+### Functions
+* `abs(x)`: Absolute value of `x`.
+* `floor(x)`: Greatest integer less than or equal to `x`.
+* `ceil(x)`: Smallest integer greater than or equal to `x`.
+* `round(x)`: Nearest integer to `x`.
+* `sqrt(x)`: Square root of `x` (domain error if `x < 0`).
+* `pow(base, exp)`: `base` raised to `exp`.
+* `min(a, b)`: Minimum of two numbers.
+* `max(a, b)`: Maximum of two numbers.
+* `log(x)`: Natural logarithm of `x` (domain error if `x <= 0`).
+* `sin(x)`: Sine of `x` in radians.
+* `cos(x)`: Cosine of `x` in radians.
+* `tan(x)`: Tangent of `x` in radians.
+* `random()`: Random floating point number in `[0.0, 1.0)`.
+* `random_int(min, max)`: Random integer in `[min, max]` inclusive.
+
+## 5. Future Standard Library Modules (Phase 8 Roadmap)
+
 * `collections`: `List`, `Map`, `Set`, `Stack`, `Queue`.
 * `fs`: Sandboxed filesystem access (`read_text`, `write_text`, `exists`).
-* `random`: `random()`, `random_int(min, max)`, `choice(list)`.
 * `time`: `sleep(seconds)`, `timestamp()`.

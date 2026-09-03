@@ -15,6 +15,7 @@ SRCS = src/common/uf_arena.c \
        src/runtime/uf_value.c \
        src/runtime/uf_env.c \
        src/runtime/uf_runtime.c \
+       src/runtime/uf_stdlib.c \
        src/interpreter/uf_interpreter.c
 
 CLI_SRC = src/cli/main.c

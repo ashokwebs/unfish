@@ -1,4 +1,5 @@
 #include "uf_runtime.h"
+#include "uf_stdlib.h"
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
@@ -613,6 +614,7 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->reporter = reporter;
 
     register_builtins(rt);
+    uf_stdlib_register_runtime(rt);
 }
 
 void uf_runtime_free(UfRuntime* rt) {

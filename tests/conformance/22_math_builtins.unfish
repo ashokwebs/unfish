@@ -1,0 +1,49 @@
+# expect: 42
+# expect: 3
+# expect: 4
+# expect: 4
+# expect: 4
+# expect: 5
+# expect: 8
+# expect: 3
+# expect: 7
+# expect: 0
+# expect: 1
+# expect: 3.14159
+# expect: 2.71828
+# expect: true
+# expect: true
+
+# 1. abs
+say abs(-42)
+
+# 2. floor, ceil, round
+say floor(3.7)
+say ceil(3.2)
+say round(3.6)
+say round(4.2)
+
+# 3. sqrt & pow
+say sqrt(25)
+say pow(2, 3)
+
+# 4. min & max
+say min(3, 7)
+say max(3, 7)
+
+# 5. log
+say round(log(1))
+
+# 6. trig: cos(0)
+say round(cos(0))
+
+# 7. Constants
+say round(PI * 100000) / 100000
+say round(E * 100000) / 100000
+
+# 8. Random
+let r = random()
+say r >= 0 and r < 1
+
+let ri = random_int(10, 20)
+say ri >= 10 and ri <= 20

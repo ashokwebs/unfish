@@ -1,4 +1,5 @@
 #include "uf_semantic.h"
+#include "../runtime/uf_stdlib.h"
 
 #define SCOPE_BUCKETS 64
 
@@ -58,7 +59,7 @@ static UfSymbol* resolve_symbol(const UfScope* start_scope, const char* name) {
     return NULL;
 }
 
-static void add_symbol(UfSemanticAnalyzer* analyzer, const char* name, UfSymbolKind kind, SourceSpan span, int arity) {
+void uf_semantic_add_symbol(UfSemanticAnalyzer* analyzer, const char* name, UfSymbolKind kind, SourceSpan span, int arity) {
     UfScope* scope = analyzer->current_scope;
     uint32_t h = hash_symbol(name);
     size_t idx = h & (scope->bucket_count - 1);
@@ -70,6 +71,10 @@ static void add_symbol(UfSemanticAnalyzer* analyzer, const char* name, UfSymbolK
     sym->arity = arity;
     sym->next = scope->buckets[idx];
     scope->buckets[idx] = sym;
+}
+
+static void add_symbol(UfSemanticAnalyzer* analyzer, const char* name, UfSymbolKind kind, SourceSpan span, int arity) {
+    uf_semantic_add_symbol(analyzer, name, kind, span, arity);
 }
 
 /* Levenshtein distance for helpful "Did you mean?" suggestions */
@@ -161,6 +166,7 @@ void uf_semantic_init(UfSemanticAnalyzer* analyzer,
     /* Create global scope and register built-in symbols */
     analyzer->global_scope = push_scope(analyzer, false);
     register_builtins(analyzer);
+    uf_stdlib_register_semantic(analyzer);
 }
 
 static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr);

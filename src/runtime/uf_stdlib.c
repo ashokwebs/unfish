@@ -1,0 +1,594 @@
+#include "uf_stdlib.h"
+#include "uf_value.h"
+#include "uf_env.h"
+#include "uf_runtime.h"
+#include "../semantic/uf_semantic.h"
+#include <ctype.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/* ========================================================================= */
+/* STRING STANDARD LIBRARY FUNCTIONS                                         */
+/* ========================================================================= */
+
+static UfValue std_split(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'split()' expects two string arguments (string, delimiter)");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    UfStringObject* delim = args[1].as.string;
+
+    UfValue res = uf_val_array(rt, 8);
+    uf_runtime_push_temp_root(rt, res);
+
+    if (delim->length == 0) {
+        /* Split into individual characters */
+        for (size_t i = 0; i < str->length; ++i) {
+            char ch[2] = { str->chars[i], '\0' };
+            UfValue s = uf_val_string(rt, ch, 1);
+            uf_array_push(rt, res.as.array, s);
+        }
+        uf_runtime_pop_temp_roots(rt, 1);
+        return res;
+    }
+
+    const char* p = str->chars;
+    const char* end = str->chars + str->length;
+    while (p < end) {
+        const char* next = strstr(p, delim->chars);
+        if (!next) {
+            UfValue s = uf_val_string(rt, p, strlen(p));
+            uf_array_push(rt, res.as.array, s);
+            break;
+        }
+        UfValue s = uf_val_string(rt, p, next - p);
+        uf_array_push(rt, res.as.array, s);
+        p = next + delim->length;
+        if (p == end) {
+            /* Trailing delimiter produces an empty string at the end */
+            UfValue empty_str = uf_val_string(rt, "", 0);
+            uf_array_push(rt, res.as.array, empty_str);
+        }
+    }
+
+    uf_runtime_pop_temp_roots(rt, 1);
+    return res;
+}
+
+static UfValue std_join(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY || args[1].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'join()' expects an array and a string delimiter");
+        return uf_val_null();
+    }
+    UfArrayObject* arr = args[0].as.array;
+    UfStringObject* sep = args[1].as.string;
+
+    if (arr->count == 0) {
+        return uf_val_string(rt, "", 0);
+    }
+
+    /* First pass: convert items to strings and calculate total length */
+    char** str_items = (char**)malloc(arr->count * sizeof(char*));
+    size_t total_len = 0;
+    for (size_t i = 0; i < arr->count; ++i) {
+        str_items[i] = uf_val_to_string(arr->elements[i]);
+        total_len += strlen(str_items[i]);
+    }
+    total_len += (arr->count - 1) * sep->length;
+
+    char* buffer = (char*)malloc(total_len + 1);
+    char* cur = buffer;
+    for (size_t i = 0; i < arr->count; ++i) {
+        if (i > 0 && sep->length > 0) {
+            memcpy(cur, sep->chars, sep->length);
+            cur += sep->length;
+        }
+        size_t len = strlen(str_items[i]);
+        memcpy(cur, str_items[i], len);
+        cur += len;
+        free(str_items[i]);
+    }
+    free(str_items);
+    *cur = '\0';
+
+    UfValue result = uf_val_string(rt, buffer, total_len);
+    free(buffer);
+    return result;
+}
+
+static UfValue std_trim(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'trim()' expects a string");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    const char* start = str->chars;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    if (*start == '\0') {
+        return uf_val_string(rt, "", 0);
+    }
+    const char* end = str->chars + str->length - 1;
+    while (end > start && isspace((unsigned char)*end)) {
+        end--;
+    }
+    size_t len = (end - start) + 1;
+    return uf_val_string(rt, start, len);
+}
+
+static UfValue std_replace(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 3 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING || args[2].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'replace()' expects three string arguments (target, old, new)");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    UfStringObject* old_sub = args[1].as.string;
+    UfStringObject* new_sub = args[2].as.string;
+
+    if (old_sub->length == 0 || str->length == 0) {
+        return args[0];
+    }
+
+    /* Count occurrences */
+    size_t count = 0;
+    const char* p = str->chars;
+    while ((p = strstr(p, old_sub->chars)) != NULL) {
+        count++;
+        p += old_sub->length;
+    }
+
+    if (count == 0) {
+        return args[0];
+    }
+
+    size_t new_total_len = str->length + count * (new_sub->length - old_sub->length);
+    char* buffer = (char*)malloc(new_total_len + 1);
+    char* cur = buffer;
+    p = str->chars;
+
+    while (*p) {
+        const char* match = strstr(p, old_sub->chars);
+        if (!match) {
+            size_t rem = strlen(p);
+            memcpy(cur, p, rem);
+            cur += rem;
+            break;
+        }
+        size_t seg = match - p;
+        memcpy(cur, p, seg);
+        cur += seg;
+        memcpy(cur, new_sub->chars, new_sub->length);
+        cur += new_sub->length;
+        p = match + old_sub->length;
+    }
+    *cur = '\0';
+
+    UfValue result = uf_val_string(rt, buffer, new_total_len);
+    free(buffer);
+    return result;
+}
+
+static UfValue std_to_upper(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'to_upper()' expects a string");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    char* buf = (char*)malloc(str->length + 1);
+    for (size_t i = 0; i < str->length; ++i) {
+        buf[i] = (char)toupper((unsigned char)str->chars[i]);
+    }
+    buf[str->length] = '\0';
+    UfValue res = uf_val_string(rt, buf, str->length);
+    free(buf);
+    return res;
+}
+
+static UfValue std_to_lower(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'to_lower()' expects a string");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    char* buf = (char*)malloc(str->length + 1);
+    for (size_t i = 0; i < str->length; ++i) {
+        buf[i] = (char)tolower((unsigned char)str->chars[i]);
+    }
+    buf[str->length] = '\0';
+    UfValue res = uf_val_string(rt, buf, str->length);
+    free(buf);
+    return res;
+}
+
+static UfValue std_contains(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'contains()' expects two strings (haystack, needle)");
+        return uf_val_null();
+    }
+    return uf_val_bool(strstr(args[0].as.string->chars, args[1].as.string->chars) != NULL);
+}
+
+static UfValue std_starts_with(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'starts_with()' expects two strings (target, prefix)");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    UfStringObject* pfx = args[1].as.string;
+    if (str->length < pfx->length) return uf_val_bool(false);
+    return uf_val_bool(strncmp(str->chars, pfx->chars, pfx->length) == 0);
+}
+
+static UfValue std_ends_with(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'ends_with()' expects two strings (target, suffix)");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    UfStringObject* sfx = args[1].as.string;
+    if (str->length < sfx->length) return uf_val_bool(false);
+    return uf_val_bool(strcmp(str->chars + (str->length - sfx->length), sfx->chars) == 0);
+}
+
+static UfValue std_char_at(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'char_at()' expects a string and a numeric index");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    int64_t idx = (int64_t)args[1].as.number;
+    if (idx < 0) idx += str->length;
+    if (idx < 0 || (size_t)idx >= str->length) {
+        return uf_val_string(rt, "", 0);
+    }
+    char ch[2] = { str->chars[idx], '\0' };
+    return uf_val_string(rt, ch, 1);
+}
+
+static UfValue std_to_number(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'to_number()' expects a string");
+        return uf_val_null();
+    }
+    const char* str = args[0].as.string->chars;
+    while (isspace((unsigned char)*str)) str++;
+    if (*str == '\0') return uf_val_null();
+
+    char* endptr = NULL;
+    double val = strtod(str, &endptr);
+    if (endptr == str) return uf_val_null();
+    while (isspace((unsigned char)*endptr)) endptr++;
+    if (*endptr != '\0') return uf_val_null();
+
+    return uf_val_number(val);
+}
+
+static UfValue std_to_string(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1) {
+        return uf_val_string(rt, "null", 4);
+    }
+    char* str = uf_val_to_string(args[0]);
+    UfValue res = uf_val_string(rt, str, strlen(str));
+    free(str);
+    return res;
+}
+
+static UfValue std_repeat_string(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'repeat_string()' expects a string and a number count");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    int64_t count = (int64_t)args[1].as.number;
+    if (count <= 0 || str->length == 0) {
+        return uf_val_string(rt, "", 0);
+    }
+    if (count > 100000) count = 100000; /* Safeguard */
+
+    size_t total_len = str->length * count;
+    char* buf = (char*)malloc(total_len + 1);
+    char* cur = buf;
+    for (int64_t i = 0; i < count; ++i) {
+        memcpy(cur, str->chars, str->length);
+        cur += str->length;
+    }
+    *cur = '\0';
+    UfValue res = uf_val_string(rt, buf, total_len);
+    free(buf);
+    return res;
+}
+
+static UfValue std_substring(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'substring()' expects a string, a start index, and an optional end index");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    int64_t start = (int64_t)args[1].as.number;
+    int64_t end = (argc >= 3 && args[2].kind == UF_VAL_NUMBER) ? (int64_t)args[2].as.number : (int64_t)str->length;
+
+    if (start < 0) start += str->length;
+    if (end < 0) end += str->length;
+
+    if (start < 0) start = 0;
+    if ((size_t)start > str->length) start = str->length;
+    if (end < start) end = start;
+    if ((size_t)end > str->length) end = str->length;
+
+    size_t len = (size_t)(end - start);
+    return uf_val_string(rt, str->chars + start, len);
+}
+
+static UfValue std_index_of(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'index_of()' expects two strings (haystack, needle)");
+        return uf_val_null();
+    }
+    const char* match = strstr(args[0].as.string->chars, args[1].as.string->chars);
+    if (!match) return uf_val_number(-1);
+    return uf_val_number((double)(match - args[0].as.string->chars));
+}
+
+/* ========================================================================= */
+/* MATH STANDARD LIBRARY FUNCTIONS                                           */
+/* ========================================================================= */
+
+static UfValue std_abs(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'abs()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(fabs(args[0].as.number));
+}
+
+static UfValue std_floor(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'floor()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(floor(args[0].as.number));
+}
+
+static UfValue std_ceil(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'ceil()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(ceil(args[0].as.number));
+}
+
+static UfValue std_round(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'round()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(round(args[0].as.number));
+}
+
+static UfValue std_sqrt(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'sqrt()' expects a number");
+        return uf_val_null();
+    }
+    if (args[0].as.number < 0) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'sqrt()' domain error: cannot compute square root of negative number");
+        return uf_val_null();
+    }
+    return uf_val_number(sqrt(args[0].as.number));
+}
+
+static UfValue std_pow(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'pow()' expects two numbers (base, exponent)");
+        return uf_val_null();
+    }
+    return uf_val_number(pow(args[0].as.number, args[1].as.number));
+}
+
+static UfValue std_min(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'min()' expects two numbers");
+        return uf_val_null();
+    }
+    return uf_val_number((args[0].as.number < args[1].as.number) ? args[0].as.number : args[1].as.number);
+}
+
+static UfValue std_max(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'max()' expects two numbers");
+        return uf_val_null();
+    }
+    return uf_val_number((args[0].as.number > args[1].as.number) ? args[0].as.number : args[1].as.number);
+}
+
+static UfValue std_log(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'log()' expects a number");
+        return uf_val_null();
+    }
+    if (args[0].as.number <= 0) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'log()' domain error: argument must be positive");
+        return uf_val_null();
+    }
+    return uf_val_number(log(args[0].as.number));
+}
+
+static UfValue std_sin(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'sin()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(sin(args[0].as.number));
+}
+
+static UfValue std_cos(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'cos()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(cos(args[0].as.number));
+}
+
+static UfValue std_tan(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'tan()' expects a number");
+        return uf_val_null();
+    }
+    return uf_val_number(tan(args[0].as.number));
+}
+
+static UfValue std_random(UfRuntime* rt, int argc, UfValue* args) {
+    UF_UNUSED(rt);
+    UF_UNUSED(argc);
+    UF_UNUSED(args);
+    static bool seeded = false;
+    if (!seeded) {
+        srand((unsigned int)time(NULL));
+        seeded = true;
+    }
+    double r = (double)rand() / ((double)RAND_MAX + 1.0);
+    return uf_val_number(r);
+}
+
+static UfValue std_random_int(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'random_int()' expects two numbers (min, max)");
+        return uf_val_null();
+    }
+    int64_t min_v = (int64_t)args[0].as.number;
+    int64_t max_v = (int64_t)args[1].as.number;
+    if (max_v < min_v) {
+        int64_t tmp = min_v;
+        min_v = max_v;
+        max_v = tmp;
+    }
+    static bool seeded = false;
+    if (!seeded) {
+        srand((unsigned int)time(NULL));
+        seeded = true;
+    }
+    int64_t span = max_v - min_v + 1;
+    int64_t res = min_v + (rand() % span);
+    return uf_val_number((double)res);
+}
+
+/* ========================================================================= */
+/* REGISTRATION                                                              */
+/* ========================================================================= */
+
+void uf_stdlib_register_runtime(UfRuntime* rt) {
+    /* String functions */
+    uf_env_declare(rt->global_env, "split",         uf_val_native("split",         std_split,         2));
+    uf_env_declare(rt->global_env, "join",          uf_val_native("join",          std_join,          2));
+    uf_env_declare(rt->global_env, "trim",          uf_val_native("trim",          std_trim,          1));
+    uf_env_declare(rt->global_env, "replace",       uf_val_native("replace",       std_replace,       3));
+    uf_env_declare(rt->global_env, "to_upper",      uf_val_native("to_upper",      std_to_upper,      1));
+    uf_env_declare(rt->global_env, "to_lower",      uf_val_native("to_lower",      std_to_lower,      1));
+    uf_env_declare(rt->global_env, "contains",      uf_val_native("contains",      std_contains,      2));
+    uf_env_declare(rt->global_env, "starts_with",   uf_val_native("starts_with",   std_starts_with,   2));
+    uf_env_declare(rt->global_env, "ends_with",     uf_val_native("ends_with",     std_ends_with,     2));
+    uf_env_declare(rt->global_env, "char_at",       uf_val_native("char_at",       std_char_at,       2));
+    uf_env_declare(rt->global_env, "to_number",     uf_val_native("to_number",     std_to_number,     1));
+    uf_env_declare(rt->global_env, "to_string",     uf_val_native("to_string",     std_to_string,     1));
+    uf_env_declare(rt->global_env, "repeat_string", uf_val_native("repeat_string", std_repeat_string, 2));
+    uf_env_declare(rt->global_env, "substring",     uf_val_native("substring",     std_substring,     -1));
+    uf_env_declare(rt->global_env, "index_of",      uf_val_native("index_of",      std_index_of,      2));
+
+    /* Math functions */
+    uf_env_declare(rt->global_env, "abs",        uf_val_native("abs",        std_abs,        1));
+    uf_env_declare(rt->global_env, "floor",      uf_val_native("floor",      std_floor,      1));
+    uf_env_declare(rt->global_env, "ceil",       uf_val_native("ceil",       std_ceil,       1));
+    uf_env_declare(rt->global_env, "round",      uf_val_native("round",      std_round,      1));
+    uf_env_declare(rt->global_env, "sqrt",       uf_val_native("sqrt",       std_sqrt,       1));
+    uf_env_declare(rt->global_env, "pow",        uf_val_native("pow",        std_pow,        2));
+    uf_env_declare(rt->global_env, "min",        uf_val_native("min",        std_min,        2));
+    uf_env_declare(rt->global_env, "max",        uf_val_native("max",        std_max,        2));
+    uf_env_declare(rt->global_env, "log",        uf_val_native("log",        std_log,        1));
+    uf_env_declare(rt->global_env, "sin",        uf_val_native("sin",        std_sin,        1));
+    uf_env_declare(rt->global_env, "cos",        uf_val_native("cos",        std_cos,        1));
+    uf_env_declare(rt->global_env, "tan",        uf_val_native("tan",        std_tan,        1));
+    uf_env_declare(rt->global_env, "random",     uf_val_native("random",     std_random,     0));
+    uf_env_declare(rt->global_env, "random_int", uf_val_native("random_int", std_random_int, 2));
+
+    /* Math constants */
+    uf_env_declare(rt->global_env, "PI",       uf_val_number(3.14159265358979323846));
+    uf_env_declare(rt->global_env, "E",        uf_val_number(2.71828182845904523536));
+    uf_env_declare(rt->global_env, "INFINITY", uf_val_number(HUGE_VAL));
+}
+
+void uf_stdlib_register_semantic(struct UfSemanticAnalyzer* analyzer) {
+    SourceLoc loc = source_loc_make("<stdlib>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    /* String functions */
+    uf_semantic_add_symbol(analyzer, "split",         UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "join",          UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "trim",          UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "replace",       UF_SYM_BUILTIN, span, 3);
+    uf_semantic_add_symbol(analyzer, "to_upper",      UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "to_lower",      UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "contains",      UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "starts_with",   UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "ends_with",     UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "char_at",       UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "to_number",     UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "to_string",     UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "repeat_string", UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "substring",     UF_SYM_BUILTIN, span, -1);
+    uf_semantic_add_symbol(analyzer, "index_of",      UF_SYM_BUILTIN, span, 2);
+
+    /* Math functions */
+    uf_semantic_add_symbol(analyzer, "abs",        UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "floor",      UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "ceil",       UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "round",      UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "sqrt",       UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "pow",        UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "min",        UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "max",        UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "log",        UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "sin",        UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "cos",        UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "tan",        UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "random",     UF_SYM_BUILTIN, span, 0);
+    uf_semantic_add_symbol(analyzer, "random_int", UF_SYM_BUILTIN, span, 2);
+
+    /* Math constants */
+    uf_semantic_add_symbol(analyzer, "PI",       UF_SYM_VAR, span, -1);
+    uf_semantic_add_symbol(analyzer, "E",        UF_SYM_VAR, span, -1);
+    uf_semantic_add_symbol(analyzer, "INFINITY", UF_SYM_VAR, span, -1);
+}

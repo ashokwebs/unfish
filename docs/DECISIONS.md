@@ -151,3 +151,28 @@
      - Support full multiline indented blocks: `function(x):\n    let y = x + 1\n    return y`.
   4. **Self-Recursive Named Function Expressions**: Named function expressions (`let fact = function factorial(n): ...`) bind the function name inside its own call scope, permitting self-recursion without polluting the outer namespace.
 * **Consequences**: Enables clean, modern data pipeline construction and functional algorithms with zero external dependencies, 100% verified under ASan/UBSan.
+
+## ADR 016: String and Math Standard Libraries Architecture
+* **Date**: Milestone 6 (Phase 3 Part 4)
+* **Status**: Accepted
+* **Context**: Practical programming, algorithmic problem solving, and educational computational curricula require comprehensive string processing and mathematical functions and constants.
+* **Decision**:
+  1. **Modular Architecture**: House the standard library extensions in a dedicated compilation unit (`src/runtime/uf_stdlib.c` and `uf_stdlib.h`), exposing `uf_stdlib_register_runtime` and `uf_stdlib_register_semantic`.
+  2. **15 String Functions**:
+     - `split(str, delim)`: array of token substrings (handles empty delimiter as char splitter).
+     - `join(arr, sep)`: joined string with delimiter.
+     - `trim(str)`: whitespace-stripped string.
+     - `replace(str, old, new)`: substring substitution.
+     - `to_upper(str)` and `to_lower(str)`: ASCII case conversion.
+     - `contains(str, sub)`, `starts_with(str, pfx)`, `ends_with(str, sfx)`: boolean matchers.
+     - `char_at(str, idx)`: character at index with negative indexing support.
+     - `to_number(str)`: string-to-number parser (returns `null` on invalid).
+     - `to_string(val)`: universal string formatter for any runtime value.
+     - `repeat_string(str, n)`: string repetition with size safeguards.
+     - `substring(str, start, [end])`: substring extraction with clamping and negative indexing.
+     - `index_of(str, sub)`: search index or -1.
+  3. **Math Functions & Constants**:
+     - Functions: `abs`, `floor`, `ceil`, `round`, `sqrt`, `pow`, `min`, `max`, `log`, `sin`, `cos`, `tan`, `random`, `random_int`.
+     - Constants: `PI` (3.14159...), `E` (2.71828...), `INFINITY` (IEEE 754 positive infinity).
+  4. **Error Handling**: Tier 1 errors return `null` (e.g. `to_number("invalid") -> null`, `char_at` out-of-bounds -> `""`); math domain violations (e.g. `sqrt(-1)`, `log(0)`) emit runtime diagnostic errors.
+* **Consequences**: Provides complete string and math capabilities out of the box with zero third-party dependencies, adhering to C99 standards and tested under memory sanitizers.

@@ -1,0 +1,34 @@
+# Unfish - String Processing and Text Transformation
+
+say "=== CSV Parsing & Processing ==="
+
+let csv_data = "name,score,grade\nAlice,95,A\nBob,82,B\nCharlie,74,C\nDiana,91,A"
+let lines = split(csv_data, "\n")
+
+say "Total rows: " + len(lines)
+let header = split(lines[0], ",")
+say "Header: " + join(header, " | ")
+
+say ""
+say "Student Report:"
+for i in range(1, len(lines)):
+    let cols = split(lines[i], ",")
+    let student_name = trim(cols[0])
+    let score = to_number(cols[1])
+    let grade = trim(cols[2])
+
+    let status = ""
+    if score >= 90:
+        status = "Honor Roll"
+    else:
+        status = "Passing"
+
+    say "  - " + to_upper(student_name) + ": Score " + score + " (" + grade + ") -> " + status
+
+say ""
+say "=== Banner Generator ==="
+let title = "UNFISH LANGUAGE ECOSYSTEM"
+let border = repeat_string("=", len(title) + 6)
+say border
+say "== " + title + " =="
+say border

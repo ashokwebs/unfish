@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0-alpha] - 2026-09-04
+
+### Added
+- **Modular Standard Library Architecture**: Created standalone `src/runtime/uf_stdlib.c` and `uf_stdlib.h` with dual runtime registration and semantic symbol validation (ADR 016).
+- **String Standard Library (15 Functions)**:
+  * `split(str, delim)`: tokenize string into array of strings (supports empty delimiter for char splitting).
+  * `join(arr, sep)`: join array elements into single string with delimiter.
+  * `trim(str)`: strip leading/trailing whitespace.
+  * `replace(str, old, new)`: substring replacement.
+  * `to_upper(str)` and `to_lower(str)`: case conversions.
+  * `contains(str, sub)`, `starts_with(str, pfx)`, `ends_with(str, sfx)`: substring predicate tests.
+  * `char_at(str, idx)`: character indexing with negative offset support.
+  * `to_number(str)`: robust string-to-number parser returning `null` on invalid strings.
+  * `to_string(val)`: universal value-to-string formatter.
+  * `repeat_string(str, n)`: string repetition with safety bounds.
+  * `substring(str, start, [end])`: string slicing with boundary clamping and negative indices.
+  * `index_of(str, sub)`: search index or `-1`.
+- **Math Standard Library (14 Functions & 3 Constants)**:
+  * Constants: `PI`, `E`, `INFINITY`.
+  * Functions: `abs`, `floor`, `ceil`, `round`, `sqrt`, `pow`, `min`, `max`, `log`, `sin`, `cos`, `tan`, `random`, `random_int`.
+- **Stdlib Conformance Tests**: Added `21_string_operations.unfish` and `22_math_builtins.unfish`, expanding the conformance suite to 32 tests.
+- **Example Applications**: Added `examples/strings.unfish` showcasing CSV parsing, report generation, and ASCII banner design.
+- **Documentation**: Recorded ADR 016 in `docs/DECISIONS.md`; updated `STANDARD_LIBRARY.md`, `PROJECT_STATE.md`.
+
+---
+
 ## [0.5.0-alpha] - 2026-09-04
 
 ### Added
