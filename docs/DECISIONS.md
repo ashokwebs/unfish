@@ -366,6 +366,25 @@
      Formatted bytecode dumper (`uf_chunk_disassemble`) mapping offsets, line breaks, opcode mnemonics, operands, jump targets, and constant pool entries.
 * **Consequences**: Provides the foundational intermediate representation for the bytecode compiler (Section S) and virtual machine (Section T).
 
+## ADR 027: AST-to-Bytecode Compiler Architecture
+* **Date**: Milestone 17 (Phase 5 Part 2)
+* **Status**: Accepted
+* **Context**: Executing Unfish programs at high performance requires compiling the high-level AST into flat, linear bytecode instructions with lexical scope tracking, local variable slot allocation, upvalue capture resolution for closures, and jump backpatching.
+* **Decision**:
+  1. **Lexical Scope & Local Resolution**:
+     - Scopes track variable depth. Local variables in nested blocks are bound to contiguous 16-bit stack slots (`OP_LOAD_LOCAL`, `OP_STORE_LOCAL`).
+     - Exiting a lexical block emits `OP_POP` or `OP_CLOSE_UPVALUE` for any captured variables.
+  2. **Upvalue Capture Model**:
+     - Closures capture outer local variables or enclosing upvalues through two-pass resolution.
+     - `OP_CLOSURE` instruction encodes the prototype function constant followed by `(is_local, index)` descriptor pairs, enabling runtime closure allocation with shared upvalue cells.
+  3. **Control Flow & Backpatching**:
+     - `if`, `while`, `repeat`, `for_in`, `break`, and `continue` statements compile into conditional and unconditional forward jumps (`OP_JUMP_IF_FALSE`, `OP_JUMP`) and backward loops (`OP_LOOP`).
+     - Jump offsets are backpatched after sub-statement emission with 16-bit displacement bounds checking.
+  4. **CLI Integration (`unfish compile <file>`)**:
+     - Full front-end pipeline (parsing, diagnostics, semantic analysis) followed by bytecode compilation and recursive disassembly of top-level code and nested functions.
+* **Consequences**: Unlocks the stack-based virtual machine execution pipeline (Section T).
+
+
 
 
 

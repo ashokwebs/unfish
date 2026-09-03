@@ -20,6 +20,16 @@ typedef struct {
     int* lines;
 } UfChunk;
 
+struct UfBytecodeFunction {
+    UfObj obj;
+    const char* name;
+    size_t arity;
+    UfChunk chunk;
+    size_t upvalue_count;
+};
+
+UfBytecodeFunction* uf_bytecode_fn_new(UfRuntime* rt, const char* name, size_t arity);
+
 void uf_chunk_init(UfChunk* chunk);
 void uf_chunk_free(UfChunk* chunk);
 

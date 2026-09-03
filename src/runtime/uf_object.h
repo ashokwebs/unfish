@@ -12,7 +12,8 @@ typedef enum {
     UF_OBJ_ERROR,
     UF_OBJ_MODULE,
     UF_OBJ_STRUCT_DEF,
-    UF_OBJ_INSTANCE
+    UF_OBJ_INSTANCE,
+    UF_OBJ_BYTECODE_FN
 } UfObjKind;
 
 typedef struct UfObj {

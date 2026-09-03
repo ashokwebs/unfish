@@ -22,8 +22,12 @@ typedef enum {
     UF_VAL_ERROR,
     UF_VAL_MODULE,
     UF_VAL_STRUCT_DEF,
-    UF_VAL_INSTANCE
+    UF_VAL_INSTANCE,
+    UF_VAL_BYTECODE_FN
 } UfValueKind;
+
+struct UfBytecodeFunction;
+typedef struct UfBytecodeFunction UfBytecodeFunction;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
 
@@ -95,6 +99,7 @@ struct UfValue {
         UfModuleObject* module;
         UfStructDefObject* struct_def;
         UfInstanceObject* instance;
+        UfBytecodeFunction* bytecode_fn;
     } as;
 };
 
@@ -139,6 +144,7 @@ UfValue uf_val_error(UfRuntime* rt, const char* message, const char* kind, Sourc
 UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod);
 UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count);
 UfValue uf_val_instance(UfRuntime* rt, UfStructDefObject* def, UfValue* fields, size_t count);
+UfValue uf_val_bytecode_fn(UfRuntime* rt, UfBytecodeFunction* fn);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

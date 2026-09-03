@@ -1,4 +1,5 @@
 #include "uf_chunk.h"
+#include "../runtime/uf_runtime.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -242,4 +243,29 @@ void uf_chunk_disassemble(const UfChunk* chunk, const char* name, FILE* out) {
     for (size_t offset = 0; offset < chunk->code_count;) {
         offset = uf_disassemble_instruction(chunk, offset, out);
     }
+    for (size_t i = 0; i < chunk->const_count; ++i) {
+        if (chunk->constants[i].kind == UF_VAL_BYTECODE_FN && chunk->constants[i].as.bytecode_fn) {
+            UfBytecodeFunction* sub = chunk->constants[i].as.bytecode_fn;
+            char sub_name[128];
+            snprintf(sub_name, sizeof(sub_name), "%s.<fn %s>", name ? name : "<chunk>", sub->name ? sub->name : "anon");
+            fprintf(out, "\n");
+            uf_chunk_disassemble(&sub->chunk, sub_name, out);
+        }
+    }
+}
+
+UfBytecodeFunction* uf_bytecode_fn_new(UfRuntime* rt, const char* name, size_t arity) {
+    UfBytecodeFunction* bfn = (UfBytecodeFunction*)malloc(sizeof(UfBytecodeFunction));
+    if (!bfn) return NULL;
+    bfn->obj.kind = UF_OBJ_BYTECODE_FN;
+    bfn->obj.marked = false;
+    bfn->obj.next = NULL;
+    bfn->name = name;
+    bfn->arity = arity;
+    bfn->upvalue_count = 0;
+    uf_chunk_init(&bfn->chunk);
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)bfn, sizeof(UfBytecodeFunction));
+    }
+    return bfn;
 }

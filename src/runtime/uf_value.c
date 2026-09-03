@@ -2,6 +2,7 @@
 #include "uf_runtime.h"
 #include "uf_env.h"
 #include "uf_module.h"
+#include "../compiler/uf_chunk.h"
 #include <math.h>
 
 UfValue uf_val_null(void) {
@@ -472,6 +473,7 @@ bool uf_val_is_truthy(UfValue val) {
         case UF_VAL_MODULE:
         case UF_VAL_STRUCT_DEF:
         case UF_VAL_INSTANCE:
+        case UF_VAL_BYTECODE_FN:
             return true;
     }
     return false;
@@ -532,6 +534,8 @@ bool uf_val_equal(UfValue a, UfValue b) {
             }
             return true;
         }
+        case UF_VAL_BYTECODE_FN:
+            return a.as.bytecode_fn == b.as.bytecode_fn;
     }
     return false;
 }
@@ -706,26 +710,41 @@ char* uf_val_to_string(UfValue val) {
             strcat(out, ")");
             return out;
         }
+        case UF_VAL_BYTECODE_FN: {
+            char fbuf[128];
+            snprintf(fbuf, sizeof(fbuf), "<bytecode fn %s>",
+                     (val.as.bytecode_fn && val.as.bytecode_fn->name) ? val.as.bytecode_fn->name : "anonymous");
+            return strdup(fbuf);
+        }
     }
     return strdup("<unknown>");
 }
 
 const char* uf_val_type_name(UfValue val) {
     switch (val.kind) {
-        case UF_VAL_NULL:       return "null";
-        case UF_VAL_BOOL:       return "boolean";
-        case UF_VAL_NUMBER:     return "number";
-        case UF_VAL_STRING:     return "string";
-        case UF_VAL_FUNCTION:   return "function";
-        case UF_VAL_NATIVE_FN:  return "function";
-        case UF_VAL_ARRAY:      return "array";
-        case UF_VAL_MAP:        return "map";
-        case UF_VAL_ERROR:      return "error";
-        case UF_VAL_MODULE:     return "module";
-        case UF_VAL_STRUCT_DEF: return "struct";
-        case UF_VAL_INSTANCE:   return (val.as.instance && val.as.instance->def && val.as.instance->def->name) ? val.as.instance->def->name : "instance";
+        case UF_VAL_NULL:        return "null";
+        case UF_VAL_BOOL:        return "boolean";
+        case UF_VAL_NUMBER:      return "number";
+        case UF_VAL_STRING:      return "string";
+        case UF_VAL_FUNCTION:    return "function";
+        case UF_VAL_NATIVE_FN:   return "function";
+        case UF_VAL_BYTECODE_FN: return "function";
+        case UF_VAL_ARRAY:       return "array";
+        case UF_VAL_MAP:         return "map";
+        case UF_VAL_ERROR:       return "error";
+        case UF_VAL_MODULE:      return "module";
+        case UF_VAL_STRUCT_DEF:  return "struct";
+        case UF_VAL_INSTANCE:    return (val.as.instance && val.as.instance->def && val.as.instance->def->name) ? val.as.instance->def->name : "instance";
     }
     return "<unknown>";
+}
+
+UfValue uf_val_bytecode_fn(UfRuntime* rt, UfBytecodeFunction* fn) {
+    (void)rt;
+    UfValue v;
+    v.kind = UF_VAL_BYTECODE_FN;
+    v.as.bytecode_fn = fn;
+    return v;
 }
 
 void uf_val_print(UfValue val, FILE* out) {

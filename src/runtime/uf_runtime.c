@@ -1,6 +1,7 @@
 #include "uf_runtime.h"
 #include "uf_stdlib.h"
 #include "uf_module.h"
+#include "../compiler/uf_chunk.h"
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
@@ -560,6 +561,13 @@ void uf_gc_mark_value(UfValue val) {
                 uf_gc_mark_value(val.as.instance->fields[i]);
             }
         }
+    } else if (val.kind == UF_VAL_BYTECODE_FN) {
+        if (val.as.bytecode_fn && !val.as.bytecode_fn->obj.marked) {
+            val.as.bytecode_fn->obj.marked = true;
+            for (size_t i = 0; i < val.as.bytecode_fn->chunk.const_count; ++i) {
+                uf_gc_mark_value(val.as.bytecode_fn->chunk.constants[i]);
+            }
+        }
     }
 }
 
@@ -644,6 +652,10 @@ void uf_gc_collect(UfRuntime* rt) {
             } else if (obj->kind == UF_OBJ_STRUCT_DEF) {
                 UfStructDefObject* sdef = (UfStructDefObject*)obj;
                 free(sdef);
+            } else if (obj->kind == UF_OBJ_BYTECODE_FN) {
+                UfBytecodeFunction* bfn = (UfBytecodeFunction*)obj;
+                uf_chunk_free(&bfn->chunk);
+                free(bfn);
             } else {
                 free(obj);
             }
@@ -739,6 +751,10 @@ void uf_runtime_free(UfRuntime* rt) {
         } else if (obj->kind == UF_OBJ_STRUCT_DEF) {
             UfStructDefObject* sdef = (UfStructDefObject*)obj;
             free(sdef);
+        } else if (obj->kind == UF_OBJ_BYTECODE_FN) {
+            UfBytecodeFunction* bfn = (UfBytecodeFunction*)obj;
+            uf_chunk_free(&bfn->chunk);
+            free(bfn);
         } else {
             free(obj);
         }

@@ -1,0 +1,62 @@
+#ifndef UF_COMPILER_H
+#define UF_COMPILER_H
+
+#include "uf_chunk.h"
+#include "../ast/uf_ast.h"
+#include "../runtime/uf_runtime.h"
+#include "../common/uf_diagnostic.h"
+#include <stdbool.h>
+
+typedef struct {
+    const char* name;
+    int depth;
+    bool is_captured;
+} UfLocal;
+
+typedef struct {
+    uint8_t index;
+    bool is_local;
+} UfUpvalue;
+
+typedef enum {
+    TYPE_SCRIPT,
+    TYPE_FUNCTION
+} FunctionType;
+
+typedef struct UfLoop {
+    int start_ip;
+    int scope_depth;
+    int* break_jumps;
+    size_t break_count;
+    size_t break_capacity;
+    struct UfLoop* enclosing;
+} UfLoop;
+
+typedef struct UfCompiler {
+    struct UfCompiler* enclosing;
+    FunctionType type;
+    const char* fn_name;
+    size_t arity;
+
+    UfChunk* chunk;
+    UfBytecodeFunction* function;
+
+    UfLocal locals[256];
+    int local_count;
+    int scope_depth;
+
+    UfUpvalue upvalues[256];
+    int upvalue_count;
+
+    UfLoop* current_loop;
+
+    UfRuntime* rt;
+    UfDiagnosticReporter* reporter;
+    bool had_error;
+} UfCompiler;
+
+/* Compile an AST Program into a top-level bytecode function.
+ * Returns a pointer to UfBytecodeFunction on success, NULL on error. */
+UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter);
+
+#endif /* UF_COMPILER_H */
