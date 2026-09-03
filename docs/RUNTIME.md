@@ -2,46 +2,56 @@
 
 ---
 
-## 1. Overview
+## 1. Feature Status Inventory
 
-The Unfish runtime (`src/runtime/`) manages all state during program execution. It remains completely decoupled from the parser, AST, and CLI.
+| Runtime Subsystem | Status | Implementation Reference |
+|---|---|---|
+| Lexical Environments (`UfEnv`) | **IMPLEMENTED** | `src/runtime/uf_env.c` |
+| Environment Parent Chaining | **IMPLEMENTED** | `src/runtime/uf_env.c` |
+| First-Class Functions & Closures | **IMPLEMENTED** | `src/runtime/uf_value.c` |
+| Top-Level Function Hoisting | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Native Function Bindings | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Call Stack & Backtrace Tracker | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Stack Overflow Guard (512 frames) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Execution Step Quota Guard | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Temporary Root Protection Stack | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Mark-and-Sweep Garbage Collection | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Visual Execution Observer Hooks | **PLANNED** (Phase 6) | Debugger milestone |
+| Bytecode Virtual Machine Loop | **PLANNED** (Phase 7) | VM milestone |
+
+---
 
 ## 2. Core Runtime Components
 
-### 2.1. Environments (`UfEnv`)
+### 2.1. Environments (`UfEnv`) [IMPLEMENTED]
 Lexical scoping is modeled as a hierarchy of environment frames:
 ```c
-typedef struct UfEnv {
+struct UfEnv {
+    UfObj obj;
     struct UfEnv* parent;       // Enclosing scope pointer
-    UfSymbolTable bindings;     // Key-value map of variable names to UfValue
-    bool is_function_root;      // Flag denoting function call boundary
-} UfEnv;
+    UfEnvBinding** buckets;     // Hash table of bindings
+    size_t bucket_count;
+    size_t count;
+};
 ```
-* **Declaration (`let x = v`)**: Inserts `x` into the current environment.
-* **Lookup (`x`)**: Searches the current environment; if not found, recurses up `parent`.
+* **Declaration (`let x = v`)**: Inserts `x` into the current frame.
+* **Lookup (`x`)**: Searches current frame; if not found, recurses up `parent`.
 * **Assignment (`x = v`)**: Searches upward for the nearest frame binding `x` and updates it.
 
-### 2.2. Call Stack & Activation Records
+### 2.2. Call Stack & Activation Records [IMPLEMENTED]
 Function calls create an activation record on the runtime call stack:
 ```c
-typedef struct UfCallFrame {
-    const char* function_name;  // Function identifier (or "<script>")
-    SourceLoc call_site;        // Source position where call was issued
-    UfEnv* env;                 // Function local environment
+typedef struct {
+    const char* fn_name;
+    SourceSpan call_span;
+    UfEnv* env;
 } UfCallFrame;
 ```
-When an error occurs, the call stack formats a clean stack backtrace showing the exact file, line, and function call chain.
+If recursion exceeds `UF_MAX_CALL_FRAMES` (512), a `StackOverflowError` is triggered. On any runtime error, the call stack renders a clean traceback with source locations.
 
-### 2.3. Native Functions (`UfNativeFn`)
-The runtime exposes host capabilities strictly via native function bindings:
+### 2.3. Native Functions (`UfNativeFn`) [IMPLEMENTED]
+Host capabilities are exposed via native function bindings:
 ```c
-typedef UfValue (*UfNativeFnPtr)(struct UfVM* vm, int argc, UfValue* args);
+typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
 ```
-Standard built-ins (`say`, `print`, `type_of`, `len`, `clock`) are registered into the global environment during runtime initialization.
-
-## 3. Execution Observers & Tracing Hooks
-To support the educational visualizer and interactive debugger, the runtime evaluator triggers event callbacks:
-* `on_statement_step(SourceSpan span, UfEnv* env)`
-* `on_variable_binding(const char* name, UfValue val)`
-* `on_function_enter(const char* name, int argc, UfValue* args)`
-* `on_function_exit(const char* name, UfValue return_val)`
+Built-ins (`say`, `print`, `type_of`, `len`, `clock`, `assert`) are registered into `global_env` at runtime initialization.

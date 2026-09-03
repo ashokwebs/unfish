@@ -9,6 +9,8 @@
 #include "uf_env.h"
 
 #define UF_MAX_CALL_FRAMES 512
+#define UF_MAX_TEMP_ROOTS 512
+#define UF_GC_INITIAL_THRESHOLD (64 * 1024) /* 64 KB */
 
 typedef struct {
     const char* fn_name;
@@ -18,7 +20,15 @@ typedef struct {
 
 struct UfRuntime {
     UfEnv* global_env;
+    UfEnv* current_env;
     UfObj* all_objects;
+
+    UfValue temp_roots[UF_MAX_TEMP_ROOTS];
+    size_t temp_root_count;
+
+    size_t bytes_allocated;
+    size_t next_gc_threshold;
+    size_t gc_count;
 
     UfCallFrame frames[UF_MAX_CALL_FRAMES];
     size_t frame_count;
@@ -36,7 +46,11 @@ struct UfRuntime {
 void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter);
 void uf_runtime_free(UfRuntime* rt);
 
-void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj);
+void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj, size_t size);
+void uf_runtime_push_temp_root(UfRuntime* rt, UfValue val);
+void uf_runtime_pop_temp_root(UfRuntime* rt);
+void uf_runtime_pop_temp_roots(UfRuntime* rt, size_t count);
+
 void uf_gc_mark_value(UfValue val);
 void uf_gc_mark_env(UfEnv* env);
 void uf_gc_collect(UfRuntime* rt);

@@ -431,6 +431,12 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
             case ')':
                 if (lexer->paren_depth > 0) lexer->paren_depth--;
                 return make_token(lexer, UF_TOK_RPAREN);
+            case '[':
+                lexer->paren_depth++;
+                return make_token(lexer, UF_TOK_LBRACKET);
+            case ']':
+                if (lexer->paren_depth > 0) lexer->paren_depth--;
+                return make_token(lexer, UF_TOK_RBRACKET);
             case '=':
                 return make_token(lexer, match(lexer, '=') ? UF_TOK_EQEQ : UF_TOK_EQUAL);
             case '!':

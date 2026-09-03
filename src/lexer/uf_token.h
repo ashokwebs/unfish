@@ -50,7 +50,9 @@ typedef enum {
     UF_TOK_LPAREN,     /* ( */
     UF_TOK_RPAREN,     /* ) */
     UF_TOK_COLON,      /* : */
-    UF_TOK_COMMA       /* , */
+    UF_TOK_COMMA,      /* , */
+    UF_TOK_LBRACKET,   /* [ */
+    UF_TOK_RBRACKET    /* ] */
 } UfTokenKind;
 
 typedef struct {

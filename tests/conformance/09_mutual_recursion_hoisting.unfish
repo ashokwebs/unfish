@@ -1,0 +1,21 @@
+# expect: Hello, Hoisted World
+# expect: true
+
+# Call function before its syntactic definition
+say greet("Hoisted World")
+
+function greet(person):
+    return "Hello, " + person
+
+# Mutual recursion
+function is_even(n):
+    if n == 0:
+        return true
+    return is_odd(n - 1)
+
+function is_odd(n):
+    if n == 0:
+        return false
+    return is_even(n - 1)
+
+say is_even(10)

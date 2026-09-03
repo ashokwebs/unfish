@@ -39,11 +39,14 @@ test: $(BIN_DIR)/unfish
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_parser.c $(LDFLAGS) -o $(BIN_DIR)/test_parser
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_semantic.c $(LDFLAGS) -o $(BIN_DIR)/test_semantic
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_interpreter.c $(LDFLAGS) -o $(BIN_DIR)/test_interpreter
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	@echo "=== Running Unit Tests ==="
 	@$(BIN_DIR)/test_lexer
 	@$(BIN_DIR)/test_parser
 	@$(BIN_DIR)/test_semantic
 	@$(BIN_DIR)/test_interpreter
+	@echo "=== Running Stress Tests ==="
+	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests ==="
 	@./tools/run_conformance_tests.sh
 
@@ -53,12 +56,15 @@ test-asan:
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_parser.c $(LDFLAGS) -o $(BIN_DIR)/test_parser
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_semantic.c $(LDFLAGS) -o $(BIN_DIR)/test_semantic
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_interpreter.c $(LDFLAGS) -o $(BIN_DIR)/test_interpreter
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) $(CLI_SRC) $(LDFLAGS) -o $(BIN_DIR)/unfish
 	@echo "=== Running Unit Tests with ASan/UBSan ==="
 	@$(BIN_DIR)/test_lexer
 	@$(BIN_DIR)/test_parser
 	@$(BIN_DIR)/test_semantic
 	@$(BIN_DIR)/test_interpreter
+	@echo "=== Running Stress Tests with ASan/UBSan ==="
+	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests with ASan/UBSan ==="
 	@./tools/run_conformance_tests.sh
 

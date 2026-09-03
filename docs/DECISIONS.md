@@ -50,3 +50,26 @@
 * **Context**: Resetting the compilation arena after each REPL line caused interned identifier strings and function bodies defined in prior lines to be overwritten by subsequent allocations.
 * **Decision**: Maintain a persistent arena across the lifetime of the interactive REPL session, freeing all allocations only when the user exits.
 * **Consequences**: Variables, functions, and closures remain valid and callable throughout the interactive session without memory corruption.
+
+## ADR 008: Temporary Root Protection Stack & Active Block Scope Rooting
+* **Date**: Engineering Review
+* **Status**: Accepted
+* **Context**: Under high GC pressure (e.g. loops allocating many objects with small thresholds), temporary values evaluated during complex expressions and local block scope environments (`UfEnv` created in `while`/`if`/`repeat` bodies) were not discovered by the garbage collector because they were neither in global scope nor registered in function activation frames. This led to heap-use-after-free when GC triggered during subexpression evaluation.
+* **Decision**: 
+  1. Add an evaluation operand root stack `rt->temp_roots` in `UfRuntime` with `uf_runtime_push_temp_root` and `uf_runtime_pop_temp_roots`.
+  2. Track the currently active environment frame `rt->current_env` during statement/block execution, restoring it with RAII-like discipline across blocks and calls.
+  3. Traverse `rt->current_env` and its parent chain during GC root marking.
+* **Consequences**: Completely eliminated use-after-free under heavy GC pressure (verified by ASan in `test_stress`), guaranteeing safety for all arbitrary expression trees and nested block loops.
+
+## ADR 009: First-Class Dynamic Arrays and In-Place Index Assignment
+* **Date**: Milestone 2 (Phase 3)
+* **Status**: Accepted
+* **Context**: General-purpose algorithmic programming (sorting, data structures, lookup buffers) requires first-class sequential collections and subscript access.
+* **Decision**: 
+  1. Add `UF_TOK_LBRACKET` (`[`) and `UF_TOK_RBRACKET` (`]`) with paren-depth tracking in the lexer.
+  2. Implement prefix `[` for array literals and infix `[` with `PREC_CALL` for subscripting in the Pratt parser.
+  3. Introduce `UfArrayObject` (`UF_OBJ_ARRAY` / `UF_VAL_ARRAY`) containing dynamically resizable `elements` buffers tracked by GC.
+  4. Support Python-style negative indexing (`arr[-1]` accesses the last element).
+  5. Introduce `UF_STMT_INDEX_ASSIGN` allowing in-place assignment (`arr[i] = val`).
+  6. Extend `len()`, `push()`, and `pop()` built-ins.
+* **Consequences**: Enables implementing standard algorithms (e.g. `bubble_sort`, search) natively in Unfish, fully integrated with garbage collection and memory safety under ASan.

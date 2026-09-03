@@ -174,6 +174,38 @@ static UfExpr* parse_call(UfParser* parser, UfExpr* left) {
     return uf_expr_call(parser->arena, span, left, args_copy, argc);
 }
 
+static UfExpr* parse_array(UfParser* parser) {
+    SourceSpan start_span = parser->previous.span;
+    UfExpr* elements[256];
+    size_t count = 0;
+
+    if (!check(parser, UF_TOK_RBRACKET)) {
+        do {
+            if (check(parser, UF_TOK_RBRACKET)) break;
+            elements[count++] = uf_parse_expression(parser);
+        } while (match(parser, UF_TOK_COMMA));
+    }
+
+    consume(parser, UF_TOK_RBRACKET, "Expected ']' after array elements", "Close array literal with ']'");
+
+    UfExpr** elems_copy = NULL;
+    if (count > 0) {
+        elems_copy = (UfExpr**)uf_arena_alloc(parser->arena, count * sizeof(UfExpr*));
+        memcpy(elems_copy, elements, count * sizeof(UfExpr*));
+    }
+
+    SourceSpan span = source_span_join(start_span, parser->previous.span);
+    return uf_expr_array(parser->arena, span, elems_copy, count);
+}
+
+static UfExpr* parse_index(UfParser* parser, UfExpr* left) {
+    /* parser->previous is UF_TOK_LBRACKET */
+    UfExpr* index = uf_parse_expression(parser);
+    consume(parser, UF_TOK_RBRACKET, "Expected ']' after index", "Close index expression with ']'");
+    SourceSpan span = source_span_join(left->span, parser->previous.span);
+    return uf_expr_index(parser->arena, span, left, index);
+}
+
 static const ParseRule rules[] = {
     [UF_TOK_EOF]        = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_ERROR]      = { NULL,             NULL,         PREC_NONE },
@@ -214,6 +246,8 @@ static const ParseRule rules[] = {
     [UF_TOK_RPAREN]     = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_COLON]      = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_COMMA]      = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_LBRACKET]   = { parse_array,      parse_index,  PREC_CALL },
+    [UF_TOK_RBRACKET]   = { NULL,             NULL,         PREC_NONE },
 };
 
 static const ParseRule* get_rule(UfTokenKind kind) {
@@ -391,38 +425,25 @@ static UfStmt* parse_function_statement(UfParser* parser) {
 
 static UfStmt* parse_expression_or_assignment_statement(UfParser* parser) {
     SourceLoc start = parser->current.span.start;
+    UfExpr* expr = uf_parse_expression(parser);
 
-    /* Check if this is an assignment: IDENTIFIER '=' ... */
-    if (check(parser, UF_TOK_IDENTIFIER)) {
-        /* Advance to identifier */
-        advance(parser);
-        const char* id_name = parser->previous.as.string_val;
-        SourceSpan id_span = parser->previous.span;
-
-        if (match(parser, UF_TOK_EQUAL)) {
+    if (match(parser, UF_TOK_EQUAL)) {
+        if (expr && expr->kind == UF_EXPR_IDENTIFIER) {
+            const char* id_name = expr->as.identifier_name;
             UfExpr* val = uf_parse_expression(parser);
             consume(parser, UF_TOK_NEWLINE, "Expected newline after assignment", NULL);
             SourceSpan span = source_span_make(start, parser->previous.span.end);
             return uf_stmt_assign(parser->arena, span, id_name, val);
+        } else if (expr && expr->kind == UF_EXPR_INDEX) {
+            UfExpr* val = uf_parse_expression(parser);
+            consume(parser, UF_TOK_NEWLINE, "Expected newline after assignment", NULL);
+            SourceSpan span = source_span_make(start, parser->previous.span.end);
+            return uf_stmt_index_assign(parser->arena, span, expr->as.index_expr.target, expr->as.index_expr.index, val);
+        } else {
+            error_at(parser, &parser->previous, "Invalid assignment target", "Left side of '=' must be a variable or index expression");
         }
-
-        /* It was not an assignment; re-construct expression beginning with this identifier */
-        UfExpr* expr = uf_expr_identifier(parser->arena, id_span, id_name);
-        while (PREC_ASSIGNMENT <= get_rule(parser->current.kind)->precedence) {
-            advance(parser);
-            InfixParseFn infix_rule = get_rule(parser->previous.kind)->infix;
-            if (infix_rule) {
-                expr = infix_rule(parser, expr);
-            }
-        }
-
-        consume(parser, UF_TOK_NEWLINE, "Expected newline after expression statement", NULL);
-        SourceSpan span = source_span_make(start, parser->previous.span.end);
-        return uf_stmt_expr(parser->arena, span, expr);
     }
 
-    /* General expression statement */
-    UfExpr* expr = uf_parse_expression(parser);
     consume(parser, UF_TOK_NEWLINE, "Expected newline after expression", NULL);
     SourceSpan span = source_span_make(start, parser->previous.span.end);
     return uf_stmt_expr(parser->arena, span, expr);

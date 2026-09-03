@@ -41,14 +41,17 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
     if (rt->had_runtime_error) {
         return uf_val_null();
     }
+    uf_runtime_push_temp_root(rt, callee);
 
     size_t argc = expr->as.call.argc;
     UfValue args[64];
     for (size_t i = 0; i < argc; ++i) {
         args[i] = uf_evaluate_expression(rt, env, expr->as.call.args[i]);
         if (rt->had_runtime_error) {
+            uf_runtime_pop_temp_roots(rt, 1 + i);
             return uf_val_null();
         }
+        uf_runtime_push_temp_root(rt, args[i]);
     }
 
     UfValue result = uf_val_null();
@@ -61,12 +64,16 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
         } else {
             UfEnv* call_env = uf_env_create(rt, fn->closure_env);
             if (uf_runtime_push_frame(rt, fn->name ? fn->name : "<anonymous>", expr->span, call_env)) {
+                UfEnv* prev_env = rt->current_env;
+                rt->current_env = call_env;
+
                 for (size_t i = 0; i < argc; ++i) {
                     uf_env_declare(call_env, fn->params[i], args[i]);
                 }
 
                 ExecResult body_res = execute_statement(rt, call_env, fn->body);
                 uf_runtime_pop_frame(rt);
+                rt->current_env = prev_env;
 
                 if (body_res.status == EXEC_RETURN) {
                     result = body_res.value;
@@ -88,6 +95,7 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
         uf_runtime_error(rt, expr->span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));
     }
 
+    uf_runtime_pop_temp_roots(rt, 1 + argc);
     return result;
 }
 
@@ -159,8 +167,16 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
 
             UfValue left = uf_evaluate_expression(rt, env, expr->as.binary.left);
             if (rt->had_runtime_error) return left;
+            uf_runtime_push_temp_root(rt, left);
+
             UfValue right = uf_evaluate_expression(rt, env, expr->as.binary.right);
-            if (rt->had_runtime_error) return right;
+            if (rt->had_runtime_error) {
+                uf_runtime_pop_temp_root(rt);
+                return right;
+            }
+            uf_runtime_push_temp_root(rt, right);
+
+            UfValue result = uf_val_null();
 
             switch (expr->as.binary.op) {
                 case UF_TOK_PLUS: {
@@ -175,14 +191,14 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                         combined[l1 + l2] = '\0';
                         free(s1);
                         free(s2);
-                        return uf_val_string_take(rt, combined, l1 + l2);
+                        result = uf_val_string_take(rt, combined, l1 + l2);
+                    } else if (left.kind == UF_VAL_NUMBER && right.kind == UF_VAL_NUMBER) {
+                        result = uf_val_number(left.as.number + right.as.number);
+                    } else {
+                        uf_runtime_error(rt, expr->span, "Operands of '+' must be two numbers or at least one string, got '%s' and '%s'",
+                                         uf_val_type_name(left), uf_val_type_name(right));
                     }
-                    if (left.kind == UF_VAL_NUMBER && right.kind == UF_VAL_NUMBER) {
-                        return uf_val_number(left.as.number + right.as.number);
-                    }
-                    uf_runtime_error(rt, expr->span, "Operands of '+' must be two numbers or at least one string, got '%s' and '%s'",
-                                     uf_val_type_name(left), uf_val_type_name(right));
-                    return uf_val_null();
+                    break;
                 }
 
                 case UF_TOK_MINUS:
@@ -192,36 +208,38 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                     if (left.kind != UF_VAL_NUMBER || right.kind != UF_VAL_NUMBER) {
                         uf_runtime_error(rt, expr->span, "Arithmetic operands must be numbers, got '%s' and '%s'",
                                          uf_val_type_name(left), uf_val_type_name(right));
-                        return uf_val_null();
-                    }
-
-                    double n1 = left.as.number;
-                    double n2 = right.as.number;
-
-                    if (expr->as.binary.op == UF_TOK_SLASH) {
-                        if (n2 == 0.0) {
-                            uf_runtime_error(rt, expr->span, "Division by zero");
-                            return uf_val_null();
-                        }
-                        return uf_val_number(n1 / n2);
-                    } else if (expr->as.binary.op == UF_TOK_PERCENT) {
-                        if (n2 == 0.0) {
-                            uf_runtime_error(rt, expr->span, "Modulo by zero");
-                            return uf_val_null();
-                        }
-                        return uf_val_number(fmod(n1, n2));
-                    } else if (expr->as.binary.op == UF_TOK_MINUS) {
-                        return uf_val_number(n1 - n2);
                     } else {
-                        return uf_val_number(n1 * n2);
+                        double n1 = left.as.number;
+                        double n2 = right.as.number;
+
+                        if (expr->as.binary.op == UF_TOK_SLASH) {
+                            if (n2 == 0.0) {
+                                uf_runtime_error(rt, expr->span, "Division by zero");
+                            } else {
+                                result = uf_val_number(n1 / n2);
+                            }
+                        } else if (expr->as.binary.op == UF_TOK_PERCENT) {
+                            if (n2 == 0.0) {
+                                uf_runtime_error(rt, expr->span, "Modulo by zero");
+                            } else {
+                                result = uf_val_number(fmod(n1, n2));
+                            }
+                        } else if (expr->as.binary.op == UF_TOK_MINUS) {
+                            result = uf_val_number(n1 - n2);
+                        } else {
+                            result = uf_val_number(n1 * n2);
+                        }
                     }
+                    break;
                 }
 
                 case UF_TOK_EQEQ:
-                    return uf_val_bool(uf_val_equal(left, right));
+                    result = uf_val_bool(uf_val_equal(left, right));
+                    break;
 
                 case UF_TOK_BANGEQ:
-                    return uf_val_bool(!uf_val_equal(left, right));
+                    result = uf_val_bool(!uf_val_equal(left, right));
+                    break;
 
                 case UF_TOK_LT:
                 case UF_TOK_LTEQ:
@@ -230,15 +248,15 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                     if (left.kind != UF_VAL_NUMBER || right.kind != UF_VAL_NUMBER) {
                         uf_runtime_error(rt, expr->span, "Comparison operands must be numbers, got '%s' and '%s'",
                                          uf_val_type_name(left), uf_val_type_name(right));
-                        return uf_val_null();
-                    }
-                    double a = left.as.number;
-                    double b = right.as.number;
+                    } else {
+                        double a = left.as.number;
+                        double b = right.as.number;
 
-                    if (expr->as.binary.op == UF_TOK_LT)   return uf_val_bool(a < b);
-                    if (expr->as.binary.op == UF_TOK_LTEQ) return uf_val_bool(a <= b);
-                    if (expr->as.binary.op == UF_TOK_GT)   return uf_val_bool(a > b);
-                    if (expr->as.binary.op == UF_TOK_GTEQ) return uf_val_bool(a >= b);
+                        if (expr->as.binary.op == UF_TOK_LT)   result = uf_val_bool(a < b);
+                        if (expr->as.binary.op == UF_TOK_LTEQ) result = uf_val_bool(a <= b);
+                        if (expr->as.binary.op == UF_TOK_GT)   result = uf_val_bool(a > b);
+                        if (expr->as.binary.op == UF_TOK_GTEQ) result = uf_val_bool(a >= b);
+                    }
                     break;
                 }
 
@@ -246,11 +264,75 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                     break;
             }
 
-            return uf_val_null();
+            uf_runtime_pop_temp_roots(rt, 2);
+            return result;
         }
 
         case UF_EXPR_CALL:
             return evaluate_call(rt, env, expr);
+
+        case UF_EXPR_ARRAY: {
+            UfValue arr_val = uf_val_array(rt, expr->as.array_lit.count);
+            uf_runtime_push_temp_root(rt, arr_val);
+
+            for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                UfValue elem = uf_evaluate_expression(rt, env, expr->as.array_lit.elements[i]);
+                if (rt->had_runtime_error) {
+                    uf_runtime_pop_temp_root(rt);
+                    return uf_val_null();
+                }
+                uf_array_push(rt, arr_val.as.array, elem);
+            }
+
+            uf_runtime_pop_temp_root(rt);
+            return arr_val;
+        }
+
+        case UF_EXPR_INDEX: {
+            UfValue target = uf_evaluate_expression(rt, env, expr->as.index_expr.target);
+            if (rt->had_runtime_error) return uf_val_null();
+            uf_runtime_push_temp_root(rt, target);
+
+            UfValue idx_val = uf_evaluate_expression(rt, env, expr->as.index_expr.index);
+            if (rt->had_runtime_error) {
+                uf_runtime_pop_temp_root(rt);
+                return uf_val_null();
+            }
+            uf_runtime_push_temp_root(rt, idx_val);
+
+            if (idx_val.kind != UF_VAL_NUMBER) {
+                uf_runtime_error(rt, expr->span, "Index must be a number, got '%s'", uf_val_type_name(idx_val));
+                uf_runtime_pop_temp_roots(rt, 2);
+                return uf_val_null();
+            }
+
+            int64_t idx = (int64_t)idx_val.as.number;
+            UfValue result = uf_val_null();
+
+            if (target.kind == UF_VAL_ARRAY) {
+                UfArrayObject* arr = target.as.array;
+                if (idx < 0) idx += arr->count;
+                if (idx < 0 || (size_t)idx >= arr->count) {
+                    uf_runtime_error(rt, expr->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
+                } else {
+                    result = arr->elements[idx];
+                }
+            } else if (target.kind == UF_VAL_STRING) {
+                UfStringObject* str = target.as.string;
+                if (idx < 0) idx += str->length;
+                if (idx < 0 || (size_t)idx >= str->length) {
+                    uf_runtime_error(rt, expr->span, "IndexOutOfBounds: Index %ld out of bounds for string of length %zu", (long)idx, str->length);
+                } else {
+                    char ch[2] = { str->chars[idx], '\0' };
+                    result = uf_val_string(rt, ch, 1);
+                }
+            } else {
+                uf_runtime_error(rt, expr->span, "Cannot index value of type '%s'", uf_val_type_name(target));
+            }
+
+            uf_runtime_pop_temp_roots(rt, 2);
+            return result;
+        }
     }
 
     return uf_val_null();
@@ -283,19 +365,64 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             if (stmt->as.let_stmt.init) {
                 init_val = uf_evaluate_expression(rt, env, stmt->as.let_stmt.init);
                 if (rt->had_runtime_error) return exec_error();
+                uf_runtime_push_temp_root(rt, init_val);
             }
             uf_env_declare(env, stmt->as.let_stmt.name, init_val);
+            if (stmt->as.let_stmt.init) {
+                uf_runtime_pop_temp_root(rt);
+            }
             return exec_ok();
         }
 
         case UF_STMT_ASSIGN: {
             UfValue val = uf_evaluate_expression(rt, env, stmt->as.assign_stmt.value);
             if (rt->had_runtime_error) return exec_error();
+            uf_runtime_push_temp_root(rt, val);
             if (!uf_env_assign(env, stmt->as.assign_stmt.name, val)) {
                 uf_runtime_error(rt, stmt->span, "Cannot assign to undefined identifier '%s'", stmt->as.assign_stmt.name);
+                uf_runtime_pop_temp_root(rt);
                 return exec_error();
             }
+            uf_runtime_pop_temp_root(rt);
             return exec_ok();
+        }
+
+        case UF_STMT_INDEX_ASSIGN: {
+            UfValue target = uf_evaluate_expression(rt, env, stmt->as.index_assign.target);
+            if (rt->had_runtime_error) return exec_error();
+            uf_runtime_push_temp_root(rt, target);
+
+            UfValue idx_val = uf_evaluate_expression(rt, env, stmt->as.index_assign.index);
+            if (rt->had_runtime_error) {
+                uf_runtime_pop_temp_root(rt);
+                return exec_error();
+            }
+            uf_runtime_push_temp_root(rt, idx_val);
+
+            UfValue val = uf_evaluate_expression(rt, env, stmt->as.index_assign.value);
+            if (rt->had_runtime_error) {
+                uf_runtime_pop_temp_roots(rt, 2);
+                return exec_error();
+            }
+            uf_runtime_push_temp_root(rt, val);
+
+            if (target.kind != UF_VAL_ARRAY) {
+                uf_runtime_error(rt, stmt->span, "Cannot assign to index of non-array type '%s'", uf_val_type_name(target));
+            } else if (idx_val.kind != UF_VAL_NUMBER) {
+                uf_runtime_error(rt, stmt->span, "Array index must be a number, got '%s'", uf_val_type_name(idx_val));
+            } else {
+                int64_t idx = (int64_t)idx_val.as.number;
+                UfArrayObject* arr = target.as.array;
+                if (idx < 0) idx += arr->count;
+                if (idx < 0 || (size_t)idx >= arr->count) {
+                    uf_runtime_error(rt, stmt->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
+                } else {
+                    arr->elements[idx] = val;
+                }
+            }
+
+            uf_runtime_pop_temp_roots(rt, 3);
+            return rt->had_runtime_error ? exec_error() : exec_ok();
         }
 
         case UF_STMT_SAY: {
@@ -321,13 +448,21 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
 
             if (truthy) {
                 UfEnv* block_env = uf_env_create(rt, env);
-                return execute_statement(rt, block_env, stmt->as.if_stmt.then_branch);
+                UfEnv* prev_env = rt->current_env;
+                rt->current_env = block_env;
+                ExecResult res = execute_statement(rt, block_env, stmt->as.if_stmt.then_branch);
+                rt->current_env = prev_env;
+                return res;
             } else if (stmt->as.if_stmt.else_branch) {
                 if (stmt->as.if_stmt.else_branch->kind == UF_STMT_IF) {
                     return execute_statement(rt, env, stmt->as.if_stmt.else_branch);
                 } else {
                     UfEnv* block_env = uf_env_create(rt, env);
-                    return execute_statement(rt, block_env, stmt->as.if_stmt.else_branch);
+                    UfEnv* prev_env = rt->current_env;
+                    rt->current_env = block_env;
+                    ExecResult res = execute_statement(rt, block_env, stmt->as.if_stmt.else_branch);
+                    rt->current_env = prev_env;
+                    return res;
                 }
             }
             return exec_ok();
@@ -337,10 +472,14 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             for (;;) {
                 UfValue cond = uf_evaluate_expression(rt, env, stmt->as.while_stmt.condition);
                 if (rt->had_runtime_error) return exec_error();
-                if (!uf_val_is_truthy(cond)) break;
+                bool truthy = uf_val_is_truthy(cond);
+                if (!truthy) break;
 
                 UfEnv* block_env = uf_env_create(rt, env);
+                UfEnv* prev_env = rt->current_env;
+                rt->current_env = block_env;
                 ExecResult res = execute_statement(rt, block_env, stmt->as.while_stmt.body);
+                rt->current_env = prev_env;
 
                 if (res.status != EXEC_OK) {
                     return res;
@@ -360,7 +499,10 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
 
             for (int64_t i = 0; i < count; ++i) {
                 UfEnv* block_env = uf_env_create(rt, env);
+                UfEnv* prev_env = rt->current_env;
+                rt->current_env = block_env;
                 ExecResult res = execute_statement(rt, block_env, stmt->as.repeat_stmt.body);
+                rt->current_env = prev_env;
 
                 if (res.status != EXEC_OK) {
                     return res;
@@ -397,14 +539,39 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
 }
 
 UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) {
+    UfEnv* prev_env = rt->current_env;
+    rt->current_env = rt->global_env;
+
+    /* Pass 1: Hoist top-level function declarations */
     for (size_t i = 0; i < program->count; ++i) {
+        UfStmt* stmt = program->stmts[i];
+        if (stmt->kind == UF_STMT_FUNCTION) {
+            UfValue fn = uf_val_function(rt,
+                                         stmt->as.function_stmt.name,
+                                         stmt->as.function_stmt.params,
+                                         stmt->as.function_stmt.param_count,
+                                         stmt->as.function_stmt.body,
+                                         rt->global_env);
+            uf_env_declare(rt->global_env, stmt->as.function_stmt.name, fn);
+        }
+    }
+
+    /* Pass 2: Execute statements in order (skipping hoisted functions) */
+    for (size_t i = 0; i < program->count; ++i) {
+        if (program->stmts[i]->kind == UF_STMT_FUNCTION) {
+            continue;
+        }
         ExecResult res = execute_statement(rt, rt->global_env, program->stmts[i]);
         if (res.status == EXEC_ERROR || rt->had_runtime_error) {
+            rt->current_env = prev_env;
             return UF_INTERPRET_RUNTIME_ERROR;
         }
         if (res.status == EXEC_RETURN) {
+            rt->current_env = prev_env;
             return UF_INTERPRET_OK;
         }
     }
+
+    rt->current_env = prev_env;
     return UF_INTERPRET_OK;
 }

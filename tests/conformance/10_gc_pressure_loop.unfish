@@ -1,0 +1,13 @@
+# expect: true
+# expect: 100
+
+# Stress test heap allocations in loops
+let counter = 0
+let acc = ""
+
+while counter < 100:
+    acc = acc + "x"
+    counter = counter + 1
+
+say len(acc) == 100
+say counter

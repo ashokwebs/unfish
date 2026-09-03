@@ -41,6 +41,8 @@ const char* uf_token_kind_name(UfTokenKind kind) {
         case UF_TOK_RPAREN:     return ")";
         case UF_TOK_COLON:      return ":";
         case UF_TOK_COMMA:      return ",";
+        case UF_TOK_LBRACKET:   return "[";
+        case UF_TOK_RBRACKET:   return "]";
     }
     return "<unknown>";
 }

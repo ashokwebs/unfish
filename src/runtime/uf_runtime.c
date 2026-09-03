@@ -33,12 +33,39 @@ static UfValue native_type_of(UfRuntime* rt, int argc, UfValue* args) {
 }
 
 static UfValue native_len(UfRuntime* rt, int argc, UfValue* args) {
-    if (argc == 0 || args[0].kind != UF_VAL_STRING) {
+    if (argc == 0) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
-        uf_runtime_error(rt, source_span_make(loc, loc), "'len()' argument must be a string");
+        uf_runtime_error(rt, source_span_make(loc, loc), "'len()' expects 1 argument");
         return uf_val_null();
     }
-    return uf_val_number((double)args[0].as.string->length);
+    if (args[0].kind == UF_VAL_STRING) {
+        return uf_val_number((double)args[0].as.string->length);
+    }
+    if (args[0].kind == UF_VAL_ARRAY) {
+        return uf_val_number((double)args[0].as.array->count);
+    }
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    uf_runtime_error(rt, source_span_make(loc, loc), "'len()' argument must be a string or array, got '%s'", uf_val_type_name(args[0]));
+    return uf_val_null();
+}
+
+static UfValue native_push(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'push()' expects an array and a value");
+        return uf_val_null();
+    }
+    uf_array_push(rt, args[0].as.array, args[1]);
+    return uf_val_number((double)args[0].as.array->count);
+}
+
+static UfValue native_pop(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'pop()' expects an array");
+        return uf_val_null();
+    }
+    return uf_array_pop(args[0].as.array);
 }
 
 static UfValue native_clock(UfRuntime* rt, int argc, UfValue* args) {
@@ -71,11 +98,39 @@ static void register_builtins(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "print",   uf_val_native("print",   native_print,   1));
     uf_env_declare(rt->global_env, "type_of", uf_val_native("type_of", native_type_of, 1));
     uf_env_declare(rt->global_env, "len",     uf_val_native("len",     native_len,     1));
+    uf_env_declare(rt->global_env, "push",    uf_val_native("push",    native_push,    2));
+    uf_env_declare(rt->global_env, "pop",     uf_val_native("pop",     native_pop,     1));
     uf_env_declare(rt->global_env, "clock",   uf_val_native("clock",   native_clock,   0));
     uf_env_declare(rt->global_env, "assert",  uf_val_native("assert",  native_assert,  -1));
 }
 
-void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj) {
+void uf_runtime_push_temp_root(UfRuntime* rt, UfValue val) {
+    if (rt->temp_root_count < UF_MAX_TEMP_ROOTS) {
+        rt->temp_roots[rt->temp_root_count++] = val;
+    }
+}
+
+void uf_runtime_pop_temp_root(UfRuntime* rt) {
+    if (rt->temp_root_count > 0) {
+        rt->temp_root_count--;
+    }
+}
+
+void uf_runtime_pop_temp_roots(UfRuntime* rt, size_t count) {
+    if (rt->temp_root_count >= count) {
+        rt->temp_root_count -= count;
+    } else {
+        rt->temp_root_count = 0;
+    }
+}
+
+void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj, size_t size) {
+    rt->bytes_allocated += size;
+
+    if (rt->bytes_allocated > rt->next_gc_threshold) {
+        uf_gc_collect(rt);
+    }
+
     obj->next = rt->all_objects;
     rt->all_objects = obj;
 }
@@ -87,6 +142,13 @@ void uf_gc_mark_value(UfValue val) {
         if (val.as.function && !val.as.function->obj.marked) {
             val.as.function->obj.marked = true;
             uf_gc_mark_env(val.as.function->closure_env);
+        }
+    } else if (val.kind == UF_VAL_ARRAY) {
+        if (val.as.array && !val.as.array->obj.marked) {
+            val.as.array->obj.marked = true;
+            for (size_t i = 0; i < val.as.array->count; ++i) {
+                uf_gc_mark_value(val.as.array->elements[i]);
+            }
         }
     }
 }
@@ -107,13 +169,19 @@ void uf_gc_mark_env(UfEnv* env) {
 }
 
 void uf_gc_collect(UfRuntime* rt) {
-    /* Mark roots */
+    /* 1. Mark roots */
     uf_gc_mark_env(rt->global_env);
+    uf_gc_mark_env(rt->current_env);
+
     for (size_t i = 0; i < rt->frame_count; ++i) {
         uf_gc_mark_env(rt->frames[i].env);
     }
 
-    /* Sweep */
+    for (size_t i = 0; i < rt->temp_root_count; ++i) {
+        uf_gc_mark_value(rt->temp_roots[i]);
+    }
+
+    /* 2. Sweep */
     UfObj** curr = &rt->all_objects;
     while (*curr) {
         UfObj* obj = *curr;
@@ -124,16 +192,30 @@ void uf_gc_collect(UfRuntime* rt) {
             *curr = obj->next;
             if (obj->kind == UF_OBJ_ENV) {
                 uf_env_free((UfEnv*)obj);
+            } else if (obj->kind == UF_OBJ_ARRAY) {
+                UfArrayObject* arr = (UfArrayObject*)obj;
+                free(arr->elements);
+                free(arr);
             } else {
                 free(obj);
             }
         }
     }
+
+    rt->gc_count++;
+    size_t min_thresh = 1024;
+    rt->next_gc_threshold = (rt->bytes_allocated * 2 > min_thresh) ? rt->bytes_allocated * 2 : min_thresh;
 }
 
 void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->all_objects = NULL;
+    rt->temp_root_count = 0;
+    rt->bytes_allocated = 0;
+    rt->next_gc_threshold = UF_GC_INITIAL_THRESHOLD;
+    rt->gc_count = 0;
+
     rt->global_env = uf_env_create(rt, NULL);
+    rt->current_env = rt->global_env;
     rt->frame_count = 0;
     rt->step_count = 0;
     rt->max_steps = 10000000;
@@ -147,12 +229,18 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
 
 void uf_runtime_free(UfRuntime* rt) {
     rt->global_env = NULL;
+    rt->current_env = NULL;
+    rt->temp_root_count = 0;
 
     UfObj* obj = rt->all_objects;
     while (obj) {
         UfObj* next = obj->next;
         if (obj->kind == UF_OBJ_ENV) {
             uf_env_free((UfEnv*)obj);
+        } else if (obj->kind == UF_OBJ_ARRAY) {
+            UfArrayObject* arr = (UfArrayObject*)obj;
+            free(arr->elements);
+            free(arr);
         } else {
             free(obj);
         }
@@ -160,6 +248,7 @@ void uf_runtime_free(UfRuntime* rt) {
     }
     rt->all_objects = NULL;
     rt->frame_count = 0;
+    rt->bytes_allocated = 0;
 }
 
 bool uf_runtime_push_frame(UfRuntime* rt, const char* fn_name, SourceSpan call_span, UfEnv* env) {

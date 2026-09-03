@@ -7,18 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0-alpha] - 2026-09-03
+
+### Added
+- **First-Class Dynamic Arrays**: `[e1, e2, ...]` array literals, dynamically resizable `UfArrayObject` heap objects tracked by GC.
+- **Subscript Indexing**: `target[index]` supporting both array and string indexing, with negative offset support (`arr[-1]`).
+- **In-Place Index Assignment**: `arr[index] = value` syntax and evaluation.
+- **Array Built-ins**: `len(arr)` returning element count, `push(arr, val)` appending elements, and `pop(arr)` popping elements.
+- **Structural Array Equality**: Deep element-wise equality comparison for nested arrays.
+- **Comprehensive Stress Test Suite**: `tests/unit/test_stress.c` verifying 4-level closures, mutual recursion, variable shadowing, GC stress under 1KB threshold with multiple active collections, 60-level nested expressions, 512-frame stack overflow limits, step quotas, and 13 malformed fuzz inputs.
+- **Conformance Suite Expansion**: Conformance test cases expanded to 19 tests, including sorting algorithms (`bubble_sort.unfish`).
+- **Examples**: `examples/arrays.unfish` and `examples/sorting.unfish`.
+
+### Changed / Fixed
+- **Function Hoisting Inconsistency**: Fixed top-level function hoisting in the interpreter (`uf_interpret_program`) to mirror semantic analysis pass, resolving undefined identifier errors on forward calls.
+- **GC Temporary Roots**: Implemented `rt->temp_roots` evaluation stack to guarantee all intermediate subexpression values are rooted during GC collections.
+- **GC Active Block Scope Rooting**: Implemented `rt->current_env` tracking across block statements (`while`, `repeat`, `if`) and call frames to ensure executing block environments are never swept during loop allocations.
+
+---
+
 ## [0.1.0-alpha] - 2026-09-03
 
 ### Added
-- **Formal Documentation Suite**: 22 comprehensive technical documents in `docs/` covering language specification, type system, memory model, architecture, roadmap, error model, runtime, VM, compiler, and blocks.
-- **Common Core Infrastructure**: Contiguous chunk memory arena (`uf_arena`), dynamic strings (`uf_string`), string interning (`uf_intern`), source coordinates & spans (`uf_source`), and diagnostics engine (`uf_diagnostic`).
-- **Indentation Lexer**: Off-side rule scanner producing `INDENT`, `DEDENT`, and `NEWLINE` tokens with complete source spans, string escapes, number literals, and comments.
-- **AST Architecture**: Strongly typed AST nodes with source span preservation (`uf_ast`) and S-expression tree pretty printer (`uf_ast_print`).
-- **Pratt & Recursive Descent Parser**: Precedence-driven expression parsing with Pratt algorithm and indentation block parsing.
-- **Semantic Analysis Pass**: Scope resolution, symbol tables, undefined identifier detection with Levenshtein fuzzy matching, duplicate declaration prevention, function arity checks, and return statement validation.
-- **Runtime & Value System**: Tagged union `UfValue` representation, dynamic strings, first-class functions, lexical closures, and native C function bindings.
-- **Garbage Collection**: Object-tracked mark-and-sweep garbage collection resolving closure cyclic dependencies with zero leaks.
-- **Tree-Walking Interpreter**: AST evaluator supporting arithmetic, strings, conditionals (`if/else/elif`), loops (`while`, `repeat`), functions, recursion, and step execution quotas.
-- **Standard Library Core**: Built-ins `say`, `print`, `type_of`, `len`, `clock`, and `assert`.
-- **Command-Line Interface (`unfish`)**: Full CLI supporting `run`, `check`, `ast`, `tokens`, `repl`, and `version`.
-- **Automated Verification**: C unit test binaries and automated conformance test runner verified under AddressSanitizer and UndefinedBehaviorSanitizer.
+- Initial language architecture, documentation suite (22 files), lexer, parser, semantic analyzer, runtime, interpreter, and CLI.

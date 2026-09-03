@@ -1,0 +1,19 @@
+# First-Class Dynamic Arrays in Unfish
+
+let fruits = ["apple", "banana", "cherry"]
+say "Initial fruits: " + fruits
+say "First fruit: " + fruits[0]
+say "Last fruit: " + fruits[-1]
+
+# Mutate elements
+fruits[1] = "blueberry"
+say "After update: " + fruits
+
+# Push and Pop
+push(fruits, "dragonfruit")
+say "After push: " + fruits
+say "Count: " + len(fruits)
+
+let removed = pop(fruits)
+say "Popped: " + removed
+say "Final array: " + fruits

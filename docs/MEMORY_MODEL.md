@@ -2,74 +2,57 @@
 
 ---
 
-## 1. Architectural Memory Layout
+## 1. Feature Status Inventory
 
-The Unfish runtime models memory explicitly to serve both execution efficiency and pedagogical inspectability:
+| Component | Status | Implementation Reference |
+|---|---|---|
+| Contiguous Compilation Arena (`UfArena`) | **IMPLEMENTED** | `src/common/uf_arena.c` |
+| Tagged Union Value Representation (`UfValue`) | **IMPLEMENTED** | `src/runtime/uf_value.h` |
+| Heap Object Tracking Header (`UfObj`) | **IMPLEMENTED** | `src/runtime/uf_object.h` |
+| Mark-and-Sweep Garbage Collector | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Temporary Root Protection Stack (`temp_roots`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Active Block Scope Root Tracking (`current_env`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Dynamic Threshold GC Triggering | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Generational / Compacting GC | **PLANNED** (Phase 7) | Future VM GC |
+| Explicit Memory Buffers (`Buffer`) | **NOT IMPLEMENTED** | Deferred to Phase 10 |
+| Raw Pointers & Unsafe Blocks | **NOT IMPLEMENTED** | Deferred to Phase 10 |
+
+---
+
+## 2. Implemented Memory Architecture
+
+The Unfish memory model consists of two cleanly separated allocators:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    STACK SEGMENT                        │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ Call Frame 0 (global)                             │  │
-│  │   Env: global_env_ptr                             │  │
-│  │   IP: statement 12                                │  │
-│  ├───────────────────────────────────────────────────┤  │
-│  │ Call Frame 1: greet("World")                      │  │
-│  │   Locals: person -> [String: "World"]             │  │
-│  │   Return Address: frame 0                         │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                            │ (References)
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│                     HEAP SEGMENT                        │
-│  ┌─────────────────────────┐   ┌─────────────────────┐  │
-│  │ UfString                │   │ UfEnvironment       │  │
-│  │   ref_count: 1          │   │   parent: ptr       │  │
-│  │   length: 5             │   │   bindings: map     │  │
-│  │   chars: "World\0"      │   └─────────────────────┘  │
-│  └─────────────────────────┘   ┌─────────────────────┐  │
-│                                │ UfFunction          │  │
-│                                │   closure_env: ptr  │  │
-│                                │   ast_node: ptr     │  │
-│                                └─────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+Compilation Stage (Arena Allocator)         Execution Stage (GC Managed Heap)
+┌──────────────────────────────────────┐    ┌──────────────────────────────────────┐
+│ UfArena                              │    │ UfRuntime                            │
+│  - Contiguous 64KB Chunks            │    │  - Tagged union values (on C stack)  │
+│  - O(1) Bump Allocation              │    │  - Heap objects linked via UfObj:    │
+│  - Tokens, Source Spans, AST Nodes   │    │      * UfStringObject                │
+│  - O(1) Bulk Teardown on Parse End   │    │      * UfFunctionObject              │
+│                                      │    │      * UfEnv (Lexical frames)        │
+└──────────────────────────────────────┘    │  - Mark-and-Sweep Garbage Collector  │
+                                            └──────────────────────────────────────┘
 ```
 
-## 2. Value Representation (`UfValue`)
+### 2.1. Compilation Arena (`UfArena`) [IMPLEMENTED]
+All compiler artifacts (tokens, interned identifier strings, AST nodes) are allocated linearly inside contiguous chunks. When compilation finishes, the entire arena is reclaimed in O(1) without traversing individual AST nodes.
 
-To minimize indirection and achieve optimal cache locality while keeping C code clean, values are represented as tagged unions:
+### 2.2. Runtime Garbage Collection (`uf_gc_collect`) [IMPLEMENTED]
+The runtime uses an object-tracked mark-and-sweep garbage collector:
+1. **Header**: Every heap-allocated runtime object begins with `UfObj { UfObjKind kind; bool marked; struct UfObj* next; }`.
+2. **Root Set**:
+   * `rt->global_env`: Global variables and hoisted functions.
+   * `rt->current_env`: The currently executing block environment and its parent chain.
+   * `rt->frames[i].env`: The activation record environment of each active call frame.
+   * `rt->temp_roots`: Temporary evaluation values held in C local variables during expression evaluation.
+3. **Circular Closure References**: Handled correctly. Closures retain their enclosing environment, and environments can bind those closures without leaking memory.
+4. **Triggering**: Runs automatically when `bytes_allocated > next_gc_threshold`.
 
-```c
-typedef struct UfValue {
-    UfValueKind kind;
-    union {
-        bool boolean;
-        double number;
-        struct UfString* string;
-        struct UfFunction* function;
-        struct UfNativeFn* native_fn;
-        void* obj;
-    } as;
-} UfValue;
-```
+---
 
-* Primitives (`Null`, `Boolean`, `Number`) reside directly inside `UfValue` on the stack or inside environments without heap allocations.
-* Reference types (`String`, `Function`, `NativeFunction`, and future `Array`/`Map`) point to heap-allocated headers.
+## 3. Systems Progression Roadmap
 
-## 3. Allocation Strategies
-
-### 3.1. Compilation Arena Allocator (`UfArena`)
-All compiler artifacts (tokens, source snippets, AST expressions, statements, symbol tables) are allocated inside a linear chunk arena.
-* **Property**: O(1) allocation without per-node `malloc` overhead.
-* **Lifecycle**: When parsing/compilation finishes, the entire arena is reclaimed in a single pass (`uf_arena_free`), eliminating AST memory leaks entirely.
-
-### 3.2. Runtime Environment & Heap Lifecycles
-* In Phase 1–4 (Tree-Walk / Initial Engine), the runtime manages environments and heap objects with explicit lifecycle tracking and automatic teardown upon VM / environment release.
-* In Phase 7 (VM), a generational or mark-sweep Garbage Collector will trace the call stack, global environments, and active value registers.
-
-## 4. Systems Progression Roadmap
-
-As students progress to advanced computer science:
-* **Level 6**: Students inspect the runtime heap and environment frames directly in the debugger visualizer.
-* **Level 10**: Unfish introduces explicit memory buffers (`Buffer`), raw pointer representations (`Ptr<T>`), and manual allocation primitives for systems programming education.
+* **Level 6 (Pedagogical)**: Students inspect active heap objects, allocation counters, and GC mark-and-sweep cycles via educational hooks.
+* **Level 10 (Systems)**: Unfish introduces explicit memory buffers, manual allocations, and pointer visualization.

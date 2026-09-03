@@ -2,24 +2,31 @@
 
 ---
 
-## 1. Type Philosophy: The Progression from Dynamic to Gradual
+## 1. Feature Status Inventory
 
-Unfish adopts an educational and evolutionary type philosophy:
-1. **Initial Tier (Phase 1–4)**: Dynamically typed with strong runtime safety. Types are properties of values, not variable declarations. Implicit type coercions are minimized (only string conversion in `+` with string operands is permitted).
-2. **Intermediate Tier (Phase 5–7)**: Optional gradual type annotations (e.g. `let count: Number = 0`, `function add(a: Number, b: Number) -> Number:`). Semantic analysis enforces type consistency where annotations exist.
-3. **Advanced Tier (Phase 8–10)**: Structural types, interfaces/traits, generics (`Array<T>`, `Result<T, E>`), and fixed-size systems types (`i32`, `u8`, `Ptr<T>`) for low-level systems programming.
+| Tier / Feature | Status | Implementation Reference |
+|---|---|---|
+| Dynamic Tagged Union Representation (`UfValue`) | **IMPLEMENTED** | `src/runtime/uf_value.h` |
+| Primitive Types (`Null`, `Boolean`, `Number`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
+| UTF-8 Dynamic Strings (`String`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
+| First-Class Functions & Closures (`Function`) | **IMPLEMENTED** | `src/runtime/uf_value.c`, `src/runtime/uf_env.c` |
+| Native Host Functions (`NativeFunction`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| String Concatenation Coercion in `+` | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Runtime Type Query (`type_of()`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Collections (`Array`, `Map`) | **PLANNED** (Phase 3) | Next milestone |
+| Gradual Type Annotations (`let x: Number`) | **PLANNED** (Phase 4) | Static checker pass |
+| User-Defined Structs / Records | **PLANNED** (Phase 4) | Record system |
+| Generic Types (`Array<T>`, `Result<T, E>`) | **NOT IMPLEMENTED** | Deferred to Phase 9 |
+| Low-Level Systems Types (`i32`, `u8`, `Ptr<T>`) | **NOT IMPLEMENTED** | Deferred to Phase 10 |
 
-## 2. Fundamental Types (Phase 1)
+---
 
-### 2.1. Primitive Types
-* **`Null`**: Represents absence of value. Literal: `null`.
-* **`Boolean`**: Truth values. Literals: `true`, `false`.
-* **`Number`**: 64-bit IEEE 754 double precision floating-point (`double` in C). Whole numbers format without trailing decimal points (e.g., `42` rather than `42.0`).
-* **`String`**: UTF-8 encoded, immutable character sequences. Length-prefixed and null-terminated for C interoperability.
-* **`Function`**: First-class user-defined callable consisting of an AST parameter list, body block, and a captured lexical environment (closure).
-* **`NativeFunction`**: First-class callable implemented in C conforming to `UfValue (*UfNativeFn)(UfVM* vm, int argc, UfValue* args)`.
+## 2. Currently Implemented Type Model
 
-### 2.2. Value Discriminant (`UfValueKind`)
+Unfish currently implements a strongly checked dynamic type model where types are properties of values:
+
+### 2.1. Value Representation (`UfValue`) [IMPLEMENTED]
+All values fit into a 16-byte tagged union:
 ```c
 typedef enum {
     UF_VAL_NULL,
@@ -29,19 +36,28 @@ typedef enum {
     UF_VAL_FUNCTION,
     UF_VAL_NATIVE_FN
 } UfValueKind;
+
+struct UfValue {
+    UfValueKind kind;
+    union {
+        bool boolean;
+        double number;
+        UfStringObject* string;
+        UfFunctionObject* function;
+        UfNativeObject native_fn;
+    } as;
+};
 ```
 
-## 3. Type Checking & Coercion Rules
+### 2.2. Semantics & Coercion Rules [IMPLEMENTED]
+* **Implicit Coercion**: Minimal by design. The only implicit coercion permitted is in binary `+`: if either operand is a string, the other operand is converted to a string and concatenated.
+* **Truthiness**: Only `false`, `null`, `0`, and empty string `""` are falsy. All other values are truthy.
+* **Strict Type Safety**: Incompatible operations (e.g. `true * 5` or `"str" - 2`) trigger an explicit `TypeError` at runtime.
 
-| Expression | Operands | Rule | Result Type |
-|---|---|---|---|
-| `a + b` | Number, Number | Numeric addition | Number |
-| `a + b` | String, Any | String concatenation (converts `b` to string) | String |
-| `a + b` | Any, String | String concatenation (converts `a` to string) | String |
-| `a - b`, `*`, `/`, `%` | Number, Number | Arithmetic | Number |
-| `a < b`, `<=`, `>`, `>=` | Number, Number | Numeric ordering | Boolean |
-| `a == b`, `!=` | Any, Any | Identity / value equality | Boolean |
-| `not a` | Any | Logical negation of truthiness | Boolean |
-| `a and b`, `a or b` | Any, Any | Short-circuit return of evaluated operand | Any |
+---
 
-Any other arithmetic operation on incompatible types (such as `true * 5` or `null / 2`) triggers a compile-time semantic error if determinable, or an explicit runtime `TypeError`.
+## 3. Evolutionary Roadmap
+
+1. **Phase 3 (Next)**: Dynamic `Array` and `Map` collections.
+2. **Phase 4**: Gradual optional type annotations enforced by the semantic analyzer.
+3. **Phase 10**: Controlled low-level primitive types for systems programming.

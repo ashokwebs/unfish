@@ -76,6 +76,24 @@ UfExpr* uf_expr_grouping(UfArena* arena, SourceSpan span, UfExpr* inner) {
     return expr;
 }
 
+UfExpr* uf_expr_array(UfArena* arena, SourceSpan span, UfExpr** elements, size_t count) {
+    UfExpr* expr = (UfExpr*)uf_arena_alloc(arena, sizeof(UfExpr));
+    expr->kind = UF_EXPR_ARRAY;
+    expr->span = span;
+    expr->as.array_lit.elements = elements;
+    expr->as.array_lit.count = count;
+    return expr;
+}
+
+UfExpr* uf_expr_index(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index) {
+    UfExpr* expr = (UfExpr*)uf_arena_alloc(arena, sizeof(UfExpr));
+    expr->kind = UF_EXPR_INDEX;
+    expr->span = span;
+    expr->as.index_expr.target = target;
+    expr->as.index_expr.index = index;
+    return expr;
+}
+
 UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init) {
     UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
     stmt->kind = UF_STMT_LET;
@@ -91,6 +109,16 @@ UfStmt* uf_stmt_assign(UfArena* arena, SourceSpan span, const char* name, UfExpr
     stmt->span = span;
     stmt->as.assign_stmt.name = name;
     stmt->as.assign_stmt.value = value;
+    return stmt;
+}
+
+UfStmt* uf_stmt_index_assign(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index, UfExpr* value) {
+    UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
+    stmt->kind = UF_STMT_INDEX_ASSIGN;
+    stmt->span = span;
+    stmt->as.index_assign.target = target;
+    stmt->as.index_assign.index = index;
+    stmt->as.index_assign.value = value;
     return stmt;
 }
 
@@ -218,6 +246,21 @@ void uf_ast_print_expr(const UfExpr* expr, FILE* out) {
         case UF_EXPR_GROUPING:
             uf_ast_print_expr(expr->as.grouping.inner, out);
             break;
+        case UF_EXPR_ARRAY:
+            fprintf(out, "(array");
+            for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                fprintf(out, " ");
+                uf_ast_print_expr(expr->as.array_lit.elements[i], out);
+            }
+            fprintf(out, ")");
+            break;
+        case UF_EXPR_INDEX:
+            fprintf(out, "(index ");
+            uf_ast_print_expr(expr->as.index_expr.target, out);
+            fprintf(out, " ");
+            uf_ast_print_expr(expr->as.index_expr.index, out);
+            fprintf(out, ")");
+            break;
     }
 }
 
@@ -239,6 +282,16 @@ void uf_ast_print_stmt(const UfStmt* stmt, FILE* out, int indent) {
         case UF_STMT_ASSIGN:
             fprintf(out, "(assign %s ", stmt->as.assign_stmt.name);
             uf_ast_print_expr(stmt->as.assign_stmt.value, out);
+            fprintf(out, ")\n");
+            break;
+
+        case UF_STMT_INDEX_ASSIGN:
+            fprintf(out, "(index-assign ");
+            uf_ast_print_expr(stmt->as.index_assign.target, out);
+            fprintf(out, " ");
+            uf_ast_print_expr(stmt->as.index_assign.index, out);
+            fprintf(out, " ");
+            uf_ast_print_expr(stmt->as.index_assign.value, out);
             fprintf(out, ")\n");
             break;
 

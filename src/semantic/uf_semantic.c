@@ -128,6 +128,8 @@ static void register_builtins(UfSemanticAnalyzer* analyzer) {
     add_symbol(analyzer, "print",   UF_SYM_BUILTIN, span, 1);
     add_symbol(analyzer, "type_of", UF_SYM_BUILTIN, span, 1);
     add_symbol(analyzer, "len",     UF_SYM_BUILTIN, span, 1);
+    add_symbol(analyzer, "push",    UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "pop",     UF_SYM_BUILTIN, span, 1);
     add_symbol(analyzer, "clock",   UF_SYM_BUILTIN, span, 0);
     add_symbol(analyzer, "assert",  UF_SYM_BUILTIN, span, -1);
 }
@@ -215,6 +217,17 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
         case UF_EXPR_GROUPING:
             analyze_expr(analyzer, expr->as.grouping.inner);
             break;
+
+        case UF_EXPR_ARRAY:
+            for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                analyze_expr(analyzer, expr->as.array_lit.elements[i]);
+            }
+            break;
+
+        case UF_EXPR_INDEX:
+            analyze_expr(analyzer, expr->as.index_expr.target);
+            analyze_expr(analyzer, expr->as.index_expr.index);
+            break;
     }
 }
 
@@ -260,6 +273,12 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
             analyze_expr(analyzer, stmt->as.assign_stmt.value);
             break;
         }
+
+        case UF_STMT_INDEX_ASSIGN:
+            analyze_expr(analyzer, stmt->as.index_assign.target);
+            analyze_expr(analyzer, stmt->as.index_assign.index);
+            analyze_expr(analyzer, stmt->as.index_assign.value);
+            break;
 
         case UF_STMT_SAY:
             analyze_expr(analyzer, stmt->as.say_stmt.expr);

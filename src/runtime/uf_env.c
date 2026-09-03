@@ -29,7 +29,8 @@ UfEnv* uf_env_create(UfRuntime* rt, UfEnv* parent) {
     }
 
     if (rt) {
-        uf_runtime_register_obj(rt, (UfObj*)env);
+        size_t size = sizeof(UfEnv) + env->bucket_count * sizeof(UfEnvBinding*);
+        uf_runtime_register_obj(rt, (UfObj*)env, size);
     }
     return env;
 }

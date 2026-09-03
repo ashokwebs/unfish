@@ -16,7 +16,8 @@ typedef enum {
     UF_VAL_NUMBER,
     UF_VAL_STRING,
     UF_VAL_FUNCTION,
-    UF_VAL_NATIVE_FN
+    UF_VAL_NATIVE_FN,
+    UF_VAL_ARRAY
 } UfValueKind;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
@@ -42,6 +43,13 @@ typedef struct {
     int arity;
 } UfNativeObject;
 
+typedef struct {
+    UfObj obj;
+    UfValue* elements;
+    size_t count;
+    size_t capacity;
+} UfArrayObject;
+
 struct UfValue {
     UfValueKind kind;
     union {
@@ -50,6 +58,7 @@ struct UfValue {
         UfStringObject* string;
         UfFunctionObject* function;
         UfNativeObject native_fn;
+        UfArrayObject* array;
     } as;
 };
 
@@ -62,6 +71,11 @@ UfValue uf_val_string_take(UfRuntime* rt, char* chars, size_t len);
 UfValue uf_val_string_cstr(UfRuntime* rt, const char* cstr);
 UfValue uf_val_function(UfRuntime* rt, const char* name, const char** params, size_t param_count, struct UfStmt* body, UfEnv* closure_env);
 UfValue uf_val_native(const char* name, UfNativeFn fn, int arity);
+UfValue uf_val_array(UfRuntime* rt, size_t initial_cap);
+void uf_array_push(UfRuntime* rt, UfArrayObject* arr, UfValue val);
+UfValue uf_array_pop(UfArrayObject* arr);
+UfValue uf_array_get(UfArrayObject* arr, size_t index);
+void uf_array_set(UfArrayObject* arr, size_t index, UfValue val);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

@@ -21,7 +21,9 @@ typedef enum {
     UF_EXPR_UNARY,
     UF_EXPR_BINARY,
     UF_EXPR_CALL,
-    UF_EXPR_GROUPING
+    UF_EXPR_GROUPING,
+    UF_EXPR_ARRAY,
+    UF_EXPR_INDEX
 } UfExprKind;
 
 struct UfExpr {
@@ -53,6 +55,16 @@ struct UfExpr {
         struct {
             UfExpr* inner;
         } grouping;
+
+        struct {
+            UfExpr** elements;
+            size_t count;
+        } array_lit;
+
+        struct {
+            UfExpr* target;
+            UfExpr* index;
+        } index_expr;
     } as;
 };
 
@@ -61,6 +73,7 @@ struct UfExpr {
 typedef enum {
     UF_STMT_LET,
     UF_STMT_ASSIGN,
+    UF_STMT_INDEX_ASSIGN,
     UF_STMT_SAY,
     UF_STMT_EXPR,
     UF_STMT_IF,
@@ -84,6 +97,12 @@ struct UfStmt {
             const char* name;
             UfExpr* value;
         } assign_stmt;
+
+        struct {
+            UfExpr* target;
+            UfExpr* index;
+            UfExpr* value;
+        } index_assign;
 
         struct {
             UfExpr* expr;
@@ -145,9 +164,12 @@ UfExpr* uf_expr_unary(UfArena* arena, SourceSpan span, UfTokenKind op, UfExpr* o
 UfExpr* uf_expr_binary(UfArena* arena, SourceSpan span, UfTokenKind op, UfExpr* left, UfExpr* right);
 UfExpr* uf_expr_call(UfArena* arena, SourceSpan span, UfExpr* callee, UfExpr** args, size_t argc);
 UfExpr* uf_expr_grouping(UfArena* arena, SourceSpan span, UfExpr* inner);
+UfExpr* uf_expr_array(UfArena* arena, SourceSpan span, UfExpr** elements, size_t count);
+UfExpr* uf_expr_index(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index);
 
 UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init);
 UfStmt* uf_stmt_assign(UfArena* arena, SourceSpan span, const char* name, UfExpr* value);
+UfStmt* uf_stmt_index_assign(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index, UfExpr* value);
 UfStmt* uf_stmt_say(UfArena* arena, SourceSpan span, UfExpr* expr);
 UfStmt* uf_stmt_expr(UfArena* arena, SourceSpan span, UfExpr* expr);
 UfStmt* uf_stmt_if(UfArena* arena, SourceSpan span, UfExpr* condition, UfStmt* then_branch, UfStmt* else_branch);

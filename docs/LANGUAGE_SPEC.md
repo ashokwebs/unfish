@@ -1,28 +1,63 @@
 # UNFISH — FORMAL LANGUAGE SPECIFICATION
 
-**Version:** 0.1.0-draft  
+**Version:** 0.1.0-alpha  
 **Status:** Canonical Reference
 
 ---
 
-## 1. Lexical Grammar
+## 1. Feature Status Inventory
 
-### 1.1. Character Set & Encoding
+| Feature | Status | Implementation Reference |
+|---|---|---|
+| UTF-8 Source Encoding | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
+| Comments (`# ...`) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
+| Indentation (Off-Side Rule) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` (`INDENT`, `DEDENT`, `NEWLINE`) |
+| Identifiers & Keywords | **IMPLEMENTED** | `src/lexer/uf_token.c` |
+| Numeric Literals (Integers & Floats) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` (64-bit IEEE 754) |
+| String Literals (`"..."` with `\n`, `\t`, `\"`, `\\`) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
+| Boolean Literals (`true`, `false`) | **IMPLEMENTED** | `src/lexer/uf_token.c` |
+| Null Literal (`null`) | **IMPLEMENTED** | `src/lexer/uf_token.c` |
+| Arithmetic Ops (`+`, `-`, `*`, `/`, `%`) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Equality & Relational Ops (`==`, `!=`, `<`, `<=`, `>`, `>=`) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Logical Operators (`and`, `or`, `not` with short-circuit) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Variable Declarations (`let x = ...`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| Variable Assignment (`x = ...`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| Output Statement (`say <expr>`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| Conditionals (`if / else / else if`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| While Loops (`while <cond>:`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| Repeat Loops (`repeat <n> times:`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| Functions & Lexical Closures | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_runtime.c` |
+| Function Hoisting (Top-level) | **IMPLEMENTED** | `src/semantic/uf_semantic.c`, `src/interpreter/uf_interpreter.c` |
+| Return Statements (`return [<expr>]`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
+| Standard Library Built-ins (`say`, `print`, `type_of`, `len`, `clock`, `assert`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
+| Arrays & Indexing (`[1, 2, 3]`, `arr[0]`) | **PLANNED** (Phase 3) | Target next milestone |
+| Maps / Dictionaries (`{"k": v}`) | **PLANNED** (Phase 3) | Target next milestone |
+| Modules & Imports (`import math`) | **PLANNED** (Phase 8) | Module system milestone |
+| Static / Gradual Type Annotations | **PLANNED** (Phase 4) | Gradual type checker |
+| Structs / Custom Types | **PLANNED** (Phase 4) | Data types milestone |
+| Pattern Matching | **NOT IMPLEMENTED** | Deferred to future phase |
+| Asynchronous / Concurrency Constructs | **NOT IMPLEMENTED** | Deferred to Phase 10 |
+
+---
+
+## 2. Lexical Grammar
+
+### 2.1. Character Set & Encoding [IMPLEMENTED]
 Source files must be encoded in UTF-8.
 
-### 1.2. Whitespace & Newlines
-* **Horizontal Whitespace**: Space (`U+0020`) and horizontal tab (`U+0009`). Spaces are standard (4 spaces per indentation level recommended). Mixed tabs and spaces on the same indentation line are disallowed.
+### 2.2. Whitespace & Newlines [IMPLEMENTED]
+* **Horizontal Whitespace**: Space (`U+0020`) and horizontal tab (`U+0009`). Spaces are standard (4 spaces per indentation level recommended). Mixed tabs and spaces on the same indentation line are strictly rejected with an informative diagnostic.
 * **Line Terminators**: LF (`\n`, `U+000A`) or CRLF (`\r\n`).
-* **Blank Lines**: Lines containing only whitespace and/or comments are ignored and do not produce `NEWLINE` tokens.
+* **Blank Lines**: Lines containing only whitespace and/or comments are ignored and do not emit `NEWLINE` or indentation tokens.
 
-### 1.3. Comments
-Comments begin with a hash character `#` and extend to the end of the current physical line:
+### 2.3. Comments [IMPLEMENTED]
+Comments begin with a hash character `#` and extend to the end of the physical line:
 ```unfish
 # This is a comment
 let x = 42 # Inline comment
 ```
 
-### 1.4. Indentation (Off-Side Rule)
+### 2.4. Indentation (Off-Side Rule) [IMPLEMENTED]
 Blocks of code are delimited by indentation changes. The lexer maintains an internal indentation stack:
 * At the beginning of each non-blank logical line, the lexer measures the column indentation.
 * If indentation is greater than the stack top: push current level, emit `INDENT`.
@@ -30,16 +65,11 @@ Blocks of code are delimited by indentation changes. The lexer maintains an inte
 * If indentation is less than the stack top: pop levels until a match is found. For each popped level, emit `DEDENT`. If the current indentation matches no previous level on the stack, an `IndentationError` is raised.
 * At the end of input (EOF), the lexer emits a `NEWLINE` (if the file did not terminate with one) followed by `DEDENT` tokens for every remaining level on the stack until level 0 is reached.
 
-### 1.5. Identifiers
-An identifier begins with an ASCII letter (`a-z`, `A-Z`) or an underscore (`_`), followed by any number of ASCII letters, digits (`0-9`), or underscores:
-```ebnf
-letter        = "a" ... "z" | "A" ... "Z" | "_" ;
-digit         = "0" ... "9" ;
-identifier    = letter , { letter | digit } ;
-```
+### 2.5. Identifiers [IMPLEMENTED]
+An identifier begins with an ASCII letter (`a-z`, `A-Z`) or an underscore (`_`), followed by any number of ASCII letters, digits (`0-9`), or underscores.
 
-### 1.6. Keywords
-The following identifiers are reserved keywords:
+### 2.6. Keywords [IMPLEMENTED]
+Reserved keywords:
 ```
 and         break       continue    else        false
 function    if          let         not         null
@@ -47,36 +77,15 @@ or          repeat      return      say         times
 true        while
 ```
 
-### 1.7. Literals
-
-#### Numeric Literals
-Numbers may be decimal integers or floating-point:
-```ebnf
-number_literal = digit , { digit } , [ "." , digit , { digit } ] ;
-```
-Examples: `0`, `42`, `3.14159`, `0.005`.
-
-#### String Literals
-Strings are delimited by double quotes `"..."` and support the following escape sequences:
-* `\n`: newline (ASCII 10)
-* `\t`: tab (ASCII 9)
-* `\\`: backslash
-* `\"`: double quote
-```ebnf
-escape_seq     = "\" , ( "n" | "t" | "\" | '"' ) ;
-string_char    = ? any UTF-8 character except '"' or '\' or newline ? | escape_seq ;
-string_literal = '"' , { string_char } , '"' ;
-```
-
-#### Boolean Literals
-`true` and `false`.
-
-#### Null Literal
-`null`.
+### 2.7. Literals [IMPLEMENTED]
+* **Number**: decimal integers or floats (e.g., `0`, `42`, `3.14159`).
+* **String**: delimited by `"..."` supporting `\n`, `\t`, `\"`, `\\`.
+* **Boolean**: `true`, `false`.
+* **Null**: `null`.
 
 ---
 
-## 2. Syntactic Grammar (EBNF)
+## 3. Syntactic Grammar (EBNF) [IMPLEMENTED]
 
 ```ebnf
 Program        = { Statement | NEWLINE } , EOF ;
@@ -128,40 +137,16 @@ Primary        = number_literal
 
 ---
 
-## 3. Operator Precedence & Associativity
-
-From lowest precedence to highest:
+## 4. Operator Precedence Table [IMPLEMENTED]
 
 | Precedence | Operator | Description | Associativity |
 |---|---|---|---|
-| 1 | `or` | Logical OR | Left |
-| 2 | `and` | Logical AND | Left |
-| 3 | `==`, `!=` | Equality | Non-associative / Left |
-| 4 | `<`, `<=`, `>`, `>=` | Relational | Non-associative / Left |
+| 1 | `or` | Logical OR (short-circuit) | Left |
+| 2 | `and` | Logical AND (short-circuit) | Left |
+| 3 | `==`, `!=` | Equality | Left |
+| 4 | `<`, `<=`, `>`, `>=` | Relational | Left |
 | 5 | `+`, `-` | Addition, Subtraction, String Concatenation | Left |
 | 6 | `*`, `/`, `%` | Multiplication, Division, Modulo | Left |
 | 7 | `-` (prefix), `not` | Unary negation, Logical NOT | Right |
 | 8 | `()` (call) | Function Call | Left |
 | 9 | Literals, `(expr)` | Grouping, Primaries | N/A |
-
----
-
-## 4. Evaluation Semantics
-
-1. **Short-Circuit Evaluation**:
-   * `a and b`: if `a` is falsy, returns `a` without evaluating `b`.
-   * `a or b`: if `a` is truthy, returns `a` without evaluating `b`.
-2. **Truthiness**:
-   * Falsy values: `false`, `null`, `0`, `""`.
-   * All other values are truthy.
-3. **String Concatenation**:
-   * The `+` operator performs string concatenation when either operand is a string. If one operand is not a string, it is automatically converted to its string representation.
-   * If both operands are numbers, `+` performs arithmetic addition.
-   * If operands are non-string, non-numeric combinations (e.g. `true + null`), a runtime `TypeError` is raised.
-4. **Division**:
-   * Division by zero produces a `DivisionByZeroError`.
-5. **Scopes & Environments**:
-   * `let x = ...` creates a binding in the current lexical environment.
-   * A variable cannot be declared twice in the exact same scope (`let x = 1` followed by `let x = 2` in the same block produces a compile-time `SemanticError`).
-   * Inner scopes may shadow variables from outer scopes.
-   * Assignments `x = expr` update the nearest enclosing binding of `x`. If no binding exists, a `SemanticError` or `RuntimeError` is raised.

@@ -1,0 +1,4 @@
+# expect-exit: 3
+# expect-error: Runtime Error: IndexOutOfBounds: Index 5 out of bounds for array of length 3
+let arr = [1, 2, 3]
+say arr[5]
