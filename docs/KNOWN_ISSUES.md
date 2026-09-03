@@ -1,14 +1,14 @@
 # UNFISH — KNOWN ISSUES & LIMITATIONS
 
-**Last Updated:** Phase 0 / Phase 1 Initial Build
+**Last Updated:** Milestone 3 Complete (v0.3.0-alpha / v0.4.0-alpha)
 
 ---
 
-## 1. Active Limitations (By Design in Phase 1)
+## 1. Active Limitations
 
-1. **Tree-Walking Execution Only**: Phase 1 targets an AST evaluator. Bytecode VM compilation is slated for Phase 7.
-2. **Dynamic Typing Only**: Gradual type annotations are recognized in grammar design but not yet type-checked at compile time.
-3. **No Dynamic Arrays / Maps Yet**: Collections are scheduled for Phase 3.
+1. **Tree-Walking Execution Only**: Currently targets an AST evaluator. Bytecode VM compilation is slated for Phase 7 (ISA designed in ADR 013).
+2. **Dynamic Typing Only**: Gradual type annotations are recognized in grammar design but not yet type-checked at compile time (Phase 4).
+3. **No Key-Value Hash Maps Yet**: Scheduled for Phase 3 Part 2 (arrays and iteration are fully implemented).
 4. **Single-Threaded Execution**: Concurrency and asynchronous constructs are deferred to Phase 10.
 
 ## 2. Tracked Bugs

@@ -24,8 +24,20 @@
 * **Returns**: `String`.
 
 ### `len(collection_or_string)`
-* **Description**: Returns the number of characters in a string (or elements in a future collection).
+* **Description**: Returns the number of characters in a string or elements in an array.
 * **Returns**: `Number`.
+
+### `push(array, value)`
+* **Description**: Appends `value` to the end of `array`, dynamically growing its capacity if needed.
+* **Returns**: `null`.
+
+### `pop(array)`
+* **Description**: Removes and returns the last element from `array`. Returns `null` if the array is empty.
+* **Returns**: `Any` (the popped value or `null`).
+
+### `range([start,] end[, step])`
+* **Description**: Generates an array of numbers from `start` (default: 0) up to (exclusive) `end` with step `step` (default: 1). Capped at 1,000,000 elements for safety.
+* **Returns**: `Array`.
 
 ### `clock()`
 * **Description**: Returns elapsed wall-clock time in seconds as a high-resolution `Number`. Useful for benchmarking student algorithms.

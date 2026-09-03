@@ -13,35 +13,35 @@ This roadmap defines the engineering progression of Unfish from initial architec
 - [x] Repository build harness (Makefiles, sanitizers, test runner).
 
 ## Phase 1: Core Lexer, Parser & AST
-- [ ] Source location tracking system (`SourceLoc`, `SourceSpan`, line/column/offset).
-- [ ] Memory arena and string interning for AST nodes.
-- [ ] Lexer with indentation engine (`INDENT`, `DEDENT`, `NEWLINE` off-side rules).
-- [ ] Rich token diagnostics with source snippet carets.
-- [ ] Strongly typed AST definitions for declarations, statements, and expressions.
-- [ ] Pratt parser for expressions (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`, groupings, function calls).
-- [ ] Recursive descent parser for statements (`let`, `say`, `if`, `while`, `repeat`, `function`, `return`).
-- [ ] AST printer / formatter for debugging and validation.
+- [x] Source location tracking system (`SourceLoc`, `SourceSpan`, line/column/offset).
+- [x] Memory arena and string interning for AST nodes.
+- [x] Lexer with indentation engine (`INDENT`, `DEDENT`, `NEWLINE` off-side rules).
+- [x] Rich token diagnostics with source snippet carets.
+- [x] Strongly typed AST definitions for declarations, statements, and expressions.
+- [x] Pratt parser for expressions (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`, groupings, function calls).
+- [x] Recursive descent parser for statements (`let`, `say`, `if`, `while`, `repeat`, `function`, `return`).
+- [x] AST printer / formatter for debugging and validation.
 
 ## Phase 2: Semantic Analysis & Tree-Walking Interpreter
-- [ ] Lexical scoping and environment chain model.
-- [ ] Semantic analysis pass (scope resolution, variable shadowing, duplicate declarations, arity checks, return-outside-function validation).
-- [ ] Tagged union runtime values (`Number`, `String`, `Boolean`, `Null`, `Function`, `NativeFunction`).
-- [ ] Tree-walking interpreter with execution hooks.
-- [ ] Call stack tracking with activation records and stack traces.
-- [ ] Clean runtime error propagation.
-- [ ] First end-to-end vertical slice program verified.
+- [x] Lexical scoping and environment chain model.
+- [x] Semantic analysis pass (scope resolution, variable shadowing, duplicate declarations, arity checks, return-outside-function validation).
+- [x] Tagged union runtime values (`Number`, `String`, `Boolean`, `Null`, `Function`, `NativeFunction`).
+- [x] Tree-walking interpreter with execution hooks.
+- [x] Call stack tracking with activation records and stack traces.
+- [x] Clean runtime error propagation.
+- [x] First end-to-end vertical slice program verified.
 
 ## Phase 3: First-Class Functions, Closures & Collections
-- [ ] Lexical closures capturing enclosing scope.
+- [x] Lexical closures capturing enclosing scope.
 - [ ] First-class function expressions / anonymous functions.
-- [ ] Array collections (`[elem1, elem2]`, indexing, length, push, pop).
+- [x] Array collections (`[elem1, elem2]`, indexing, length, push, pop).
 - [ ] Map / dictionary collections (`{"key": val}`, indexing, keys, values).
 - [ ] Higher-order functions (`map`, `filter`, `reduce`).
 
 ## Phase 4: CLI, REPL & Developer Tooling
-- [ ] Unified CLI executable: `unfish [run|check|ast|tokens|repl|version]`.
-- [ ] Interactive REPL with persistent environment and multiline support.
-- [ ] Formatted diagnostic reporter with colorized output and educational hints.
+- [x] Unified CLI executable: `unfish [run|check|ast|tokens|repl|version]`.
+- [x] Interactive REPL with persistent environment and multiline support.
+- [x] Formatted diagnostic reporter with colorized output and educational hints.
 - [ ] Source code formatter (`unfish format`).
 
 ## Phase 5: Block ↔ AST ↔ Text Bi-Directional Representation

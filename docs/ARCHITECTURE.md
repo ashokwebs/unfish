@@ -15,7 +15,10 @@
 | Semantic Analyzer & Scope Resolver | **IMPLEMENTED** | `src/semantic/uf_semantic.c` |
 | Mark-and-Sweep Garbage Collection | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
 | AST Tree-Walking Interpreter | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
+| Dynamic Arrays & Subscripting | **IMPLEMENTED** | `src/runtime/uf_value.c`, `src/parser/uf_parser.c` |
+| Control Flow (for-in, break, continue) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
 | Command-Line Tool (`unfish`) | **IMPLEMENTED** | `src/cli/main.c` |
+| Key-Value Hash Maps (`Map`) | **PLANNED** (Phase 3 Part 2) | Milestone 4 |
 | Intermediate Representation (IR) | **PLANNED** (Phase 7) | Target for VM compiler |
 | Bytecode Virtual Machine (VM) | **PLANNED** (Phase 7) | Stack-based VM |
 | C99 Code Generator / Native AOT | **PLANNED** (Phase 9) | Native compiler |
