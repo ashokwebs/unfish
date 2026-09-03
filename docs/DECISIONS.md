@@ -222,3 +222,22 @@
      - Built-in modules (`math`, `strings`, `sys`, `fs`, `random`, `time`, `json`) are instantiated lazily on their first `import` or `from ... import`, keeping baseline runtime allocation minimal.
      - Filesystem module resolution automatically checks `src/stdlib/<name>.unfish` as a fallback, allowing standard library modules written in Unfish to be imported cleanly without explicit path prefixes.
 * **Consequences**: Programs can import only the capabilities they require, keeping educational sandboxes lean and preventing unexpected system interactions.
+
+## ADR 020: Optional Type Annotations and Gradual Type Checking
+* **Date**: Milestone 10 (Phase 4 Part 3)
+* **Status**: Accepted
+* **Context**: Educational programming progression requires moving from untyped, exploratory prototyping to explicit interface contracts and type discipline without breaking backwards compatibility or runtime performance.
+* **Decision**:
+  1. **Syntax**:
+     - Variable declarations: `let <name>: <Type> [= <init>]`
+     - Function parameters: `function <name>(<param>: <Type>, ...): <ReturnType>:`
+     - Anonymous lambda expressions: `function(<param>: <Type>, ...): <ReturnType>: <expr>`
+  2. **Core Types**: `Number`, `String`, `Boolean`, `Array`, `Map`, `Function`, `Null`, `Any`, `Error`. Unannotated symbols default to `Any`.
+  3. **Static Gradual Analysis**:
+     - Expression type inference for literals, variables, arithmetic, comparisons, logic, and calls.
+     - Type compatibility is checked during `uf_analyze_program` and `uf_typecheck_program`.
+     - In standard mode, type mismatches produce informative yellow compiler warnings (`UF_DIAG_WARNING`).
+     - In `--strict` mode, type mismatches are promoted to semantic compilation errors (`UF_DIAG_SEMANTIC_ERROR`), halting execution.
+  4. **Zero Runtime Overhead**: Type annotations are erased after semantic analysis, preserving full dynamic execution speed and memory compactness in `UfValue`.
+* **Consequences**: Enables progressive pedagogical adoption of static contracts while maintaining 100% test compatibility and memory safety under AddressSanitizer/UBSan.
+

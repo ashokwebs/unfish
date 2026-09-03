@@ -17,6 +17,9 @@ typedef struct UfSymbol {
     UfSymbolKind kind;
     SourceSpan span;
     int arity; /* For functions; -1 if variadic/unknown */
+    const char* type_annotation; /* Annotated type name, or NULL */
+    const char* return_type;     /* Annotated return type, or NULL */
+    const char** param_types;    /* Annotated parameter types, or NULL */
     struct UfSymbol* next;
 } UfSymbol;
 
@@ -33,6 +36,8 @@ typedef struct UfSemanticAnalyzer {
     int function_depth;
     int loop_depth;
     bool had_error;
+    bool strict_mode;
+    const char* current_fn_return_type;
 
     UfArena* arena;
     UfDiagnosticReporter* reporter;
@@ -48,6 +53,16 @@ void uf_semantic_add_symbol(UfSemanticAnalyzer* analyzer,
                             SourceSpan span,
                             int arity);
 
+void uf_semantic_add_symbol_with_type(UfSemanticAnalyzer* analyzer,
+                                      const char* name,
+                                      UfSymbolKind kind,
+                                      SourceSpan span,
+                                      int arity,
+                                      const char* type_annotation,
+                                      const char* return_type,
+                                      const char** param_types);
+
 bool uf_analyze_program(UfSemanticAnalyzer* analyzer, UfProgram* program);
+bool uf_typecheck_program(UfSemanticAnalyzer* analyzer, UfProgram* program);
 
 #endif /* UF_SEMANTIC_H */

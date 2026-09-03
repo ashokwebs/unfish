@@ -169,6 +169,113 @@ static void test_arity_mismatch(void) {
     printf("test_arity_mismatch passed!\n");
 }
 
+static void test_type_annotations_valid(void) {
+    const char* src =
+        "let x: Number = 42\n"
+        "let s: String = \"hello\"\n"
+        "function add(a: Number, b: Number): Number:\n"
+        "    return a + b\n"
+        "add(x, 10)\n";
+
+    UfArena arena;
+    uf_arena_init(&arena, 4096);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "types_valid.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "types_valid.unfish", src, &arena, &interner, &reporter);
+
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+    assert(program && !parser.had_error);
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    sema.strict_mode = true;
+    bool ok = uf_analyze_program(&sema, program);
+    assert(ok);
+    assert(reporter.error_count == 0);
+    assert(reporter.warning_count == 0);
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_type_annotations_valid passed!\n");
+}
+
+static void test_type_mismatch_strict(void) {
+    const char* src = "let x: Number = \"hello\"\n";
+
+    UfArena arena;
+    uf_arena_init(&arena, 4096);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "mismatch.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "mismatch.unfish", src, &arena, &interner, &reporter);
+
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+    assert(program && !parser.had_error);
+
+    /* In non-strict mode, it produces a warning */
+    UfSemanticAnalyzer sema_warn;
+    uf_semantic_init(&sema_warn, &arena, &reporter);
+    sema_warn.strict_mode = false;
+    bool ok_warn = uf_analyze_program(&sema_warn, program);
+    assert(ok_warn);
+    assert(reporter.warning_count == 1);
+    assert(reporter.error_count == 0);
+
+    /* In strict mode, it produces an error */
+    reporter.warning_count = 0;
+    reporter.error_count = 0;
+    UfSemanticAnalyzer sema_strict;
+    uf_semantic_init(&sema_strict, &arena, &reporter);
+    sema_strict.strict_mode = true;
+    bool ok_strict = uf_analyze_program(&sema_strict, program);
+    assert(!ok_strict);
+    assert(reporter.error_count == 1);
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_type_mismatch_strict passed!\n");
+}
+
+static void test_unknown_type_annotation(void) {
+    const char* src = "let x: BogusType = 42\n";
+
+    UfArena arena;
+    uf_arena_init(&arena, 4096);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "unknown_type.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "unknown_type.unfish", src, &arena, &interner, &reporter);
+
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+    assert(program && !parser.had_error);
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    bool ok = uf_analyze_program(&sema, program);
+    assert(!ok);
+    assert(reporter.error_count == 1);
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_unknown_type_annotation passed!\n");
+}
+
 int main(void) {
     printf("Running semantic analyzer tests...\n");
     test_valid_vertical_slice();
@@ -176,6 +283,9 @@ int main(void) {
     test_duplicate_declaration();
     test_return_outside_function();
     test_arity_mismatch();
+    test_type_annotations_valid();
+    test_type_mismatch_strict();
+    test_unknown_type_annotation();
     printf("All semantic analyzer tests passed successfully!\n");
     return 0;
 }

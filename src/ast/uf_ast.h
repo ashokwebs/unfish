@@ -77,7 +77,9 @@ struct UfExpr {
         struct {
             const char* name; /* Optional, may be NULL */
             const char** params;
+            const char** param_types; /* May be NULL */
             size_t param_count;
+            const char* return_type; /* May be NULL */
             struct UfStmt* body;
         } fn_expr;
     } as;
@@ -111,6 +113,7 @@ struct UfStmt {
     union {
         struct {
             const char* name;
+            const char* type_annotation; /* May be NULL */
             UfExpr* init;
         } let_stmt;
 
@@ -158,7 +161,9 @@ struct UfStmt {
         struct {
             const char* name;
             const char** params;
+            const char** param_types; /* May be NULL */
             size_t param_count;
+            const char* return_type; /* May be NULL */
             UfStmt* body;
         } function_stmt;
 
@@ -212,9 +217,9 @@ UfExpr* uf_expr_grouping(UfArena* arena, SourceSpan span, UfExpr* inner);
 UfExpr* uf_expr_array(UfArena* arena, SourceSpan span, UfExpr** elements, size_t count);
 UfExpr* uf_expr_index(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index);
 UfExpr* uf_expr_map(UfArena* arena, SourceSpan span, UfExpr** keys, UfExpr** values, size_t count);
-UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, struct UfStmt* body);
+UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, const char** param_types, size_t param_count, const char* return_type, struct UfStmt* body);
 
-UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init);
+UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, const char* type_annotation, UfExpr* init);
 UfStmt* uf_stmt_assign(UfArena* arena, SourceSpan span, const char* name, UfExpr* value);
 UfStmt* uf_stmt_index_assign(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index, UfExpr* value);
 UfStmt* uf_stmt_say(UfArena* arena, SourceSpan span, UfExpr* expr);
@@ -225,7 +230,7 @@ UfStmt* uf_stmt_repeat(UfArena* arena, SourceSpan span, UfExpr* count_expr, UfSt
 UfStmt* uf_stmt_for(UfArena* arena, SourceSpan span, const char* var_name, UfExpr* iterable, UfStmt* body);
 UfStmt* uf_stmt_break(UfArena* arena, SourceSpan span);
 UfStmt* uf_stmt_continue(UfArena* arena, SourceSpan span);
-UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body);
+UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, const char** param_types, size_t param_count, const char* return_type, UfStmt* body);
 UfStmt* uf_stmt_return(UfArena* arena, SourceSpan span, UfExpr* value);
 UfStmt* uf_stmt_block(UfArena* arena, SourceSpan span, UfStmt** stmts, size_t count);
 UfStmt* uf_stmt_try_catch(UfArena* arena, SourceSpan span, UfStmt* try_block, const char* catch_var, UfStmt* catch_block);

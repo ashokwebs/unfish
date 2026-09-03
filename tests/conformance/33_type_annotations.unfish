@@ -1,0 +1,41 @@
+# expect: 42
+# expect: Alice
+# expect: true
+# expect: 3
+# expect: Bob
+# expect: null
+# expect: 30
+# expect: Hello, Alice
+# expect: 42
+# expect: 100
+
+let count: Number = 42
+let name: String = "Alice"
+let is_active: Boolean = true
+let items: Array = [1, 2, 3]
+let person: Map = {"name": "Bob", "age": 25}
+let empty: Null = null
+let dynamic_val: Any = "initial"
+dynamic_val = 100
+
+say count
+say name
+say is_active
+say len(items)
+say person.name
+say empty
+
+function add(a: Number, b: Number): Number:
+    return a + b
+
+say add(10, 20)
+
+function greet(user: String): String:
+    return "Hello, " + user
+
+say greet("Alice")
+
+let multiply = function(x: Number, y: Number): Number: x * y
+say multiply(6, 7)
+
+say dynamic_val

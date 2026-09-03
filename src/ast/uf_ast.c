@@ -104,22 +104,25 @@ UfExpr* uf_expr_map(UfArena* arena, SourceSpan span, UfExpr** keys, UfExpr** val
     return expr;
 }
 
-UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body) {
+UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, const char** param_types, size_t param_count, const char* return_type, UfStmt* body) {
     UfExpr* expr = (UfExpr*)uf_arena_alloc(arena, sizeof(UfExpr));
     expr->kind = UF_EXPR_FUNCTION;
     expr->span = span;
     expr->as.fn_expr.name = name;
     expr->as.fn_expr.params = params;
+    expr->as.fn_expr.param_types = param_types;
     expr->as.fn_expr.param_count = param_count;
+    expr->as.fn_expr.return_type = return_type;
     expr->as.fn_expr.body = body;
     return expr;
 }
 
-UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init) {
+UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, const char* type_annotation, UfExpr* init) {
     UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
     stmt->kind = UF_STMT_LET;
     stmt->span = span;
     stmt->as.let_stmt.name = name;
+    stmt->as.let_stmt.type_annotation = type_annotation;
     stmt->as.let_stmt.init = init;
     return stmt;
 }
@@ -211,13 +214,15 @@ UfStmt* uf_stmt_continue(UfArena* arena, SourceSpan span) {
     return stmt;
 }
 
-UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body) {
+UfStmt* uf_stmt_function(UfArena* arena, SourceSpan span, const char* name, const char** params, const char** param_types, size_t param_count, const char* return_type, UfStmt* body) {
     UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
     stmt->kind = UF_STMT_FUNCTION;
     stmt->span = span;
     stmt->as.function_stmt.name = name;
     stmt->as.function_stmt.params = params;
+    stmt->as.function_stmt.param_types = param_types;
     stmt->as.function_stmt.param_count = param_count;
+    stmt->as.function_stmt.return_type = return_type;
     stmt->as.function_stmt.body = body;
     return stmt;
 }

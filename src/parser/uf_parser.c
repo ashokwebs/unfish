@@ -28,9 +28,29 @@ static UfExpr* parse_precedence(UfParser* parser, Precedence precedence);
 static UfStmt* parse_statement(UfParser* parser);
 static UfStmt* parse_block(UfParser* parser);
 
+static UfToken peek(UfParser* parser) {
+    if (!parser->has_peek) {
+        for (;;) {
+            parser->peek_token = uf_lexer_next_token(parser->lexer);
+            if (parser->peek_token.kind != UF_TOK_ERROR) {
+                break;
+            }
+            parser->had_error = true;
+        }
+        parser->has_peek = true;
+    }
+    return parser->peek_token;
+}
+
 /* Advance helper maintaining lookahead */
 static void advance(UfParser* parser) {
     parser->previous = parser->current;
+
+    if (parser->has_peek) {
+        parser->current = parser->peek_token;
+        parser->has_peek = false;
+        return;
+    }
 
     for (;;) {
         parser->current = uf_lexer_next_token(parser->lexer);
@@ -277,6 +297,7 @@ static UfExpr* parse_function_expr(UfParser* parser) {
     consume(parser, UF_TOK_LPAREN, "Expected '(' after 'function'", NULL);
 
     const char* params[32];
+    const char* param_types[32];
     size_t param_count = 0;
 
     if (!check(parser, UF_TOK_RPAREN)) {
@@ -286,12 +307,25 @@ static UfExpr* parse_function_expr(UfParser* parser) {
                 break;
             }
             consume(parser, UF_TOK_IDENTIFIER, "Expected parameter name", NULL);
-            params[param_count++] = parser->previous.as.string_val;
+            params[param_count] = parser->previous.as.string_val;
+            param_types[param_count] = NULL;
+            if (match(parser, UF_TOK_COLON)) {
+                consume(parser, UF_TOK_IDENTIFIER, "Expected parameter type after ':'", NULL);
+                param_types[param_count] = parser->previous.as.string_val;
+            }
+            param_count++;
         } while (match(parser, UF_TOK_COMMA));
     }
 
     consume(parser, UF_TOK_RPAREN, "Expected ')' after parameters", NULL);
     consume(parser, UF_TOK_COLON, "Expected ':' after function signature", NULL);
+
+    const char* return_type = NULL;
+    if (check(parser, UF_TOK_IDENTIFIER) && peek(parser).kind == UF_TOK_COLON) {
+        advance(parser);
+        return_type = parser->previous.as.string_val;
+        consume(parser, UF_TOK_COLON, "Expected ':' after return type", NULL);
+    }
 
     UfStmt* body = NULL;
     if (match(parser, UF_TOK_NEWLINE)) {
@@ -337,12 +371,16 @@ static UfExpr* parse_function_expr(UfParser* parser) {
 
     SourceSpan span = source_span_make(start, body->span.end);
     const char** params_copy = NULL;
+    const char** param_types_copy = NULL;
     if (param_count > 0) {
         params_copy = (const char**)uf_arena_alloc(parser->arena, param_count * sizeof(const char*));
         memcpy(params_copy, params, param_count * sizeof(const char*));
+
+        param_types_copy = (const char**)uf_arena_alloc(parser->arena, param_count * sizeof(const char*));
+        memcpy(param_types_copy, param_types, param_count * sizeof(const char*));
     }
 
-    return uf_expr_function(parser->arena, span, fn_name, params_copy, param_count, body);
+    return uf_expr_function(parser->arena, span, fn_name, params_copy, param_types_copy, param_count, return_type, body);
 }
 
 static const ParseRule rules[] = {
@@ -435,9 +473,7 @@ UfExpr* uf_parse_expression(UfParser* parser) {
 
 /* --- Statement Parsing --- */
 
-static UfStmt* parse_block(UfParser* parser) {
-    SourceLoc start = parser->previous.span.start;
-    consume(parser, UF_TOK_COLON, "Expected ':' before block", "Add ':' after the statement header");
+static UfStmt* parse_block_body(UfParser* parser, SourceLoc start) {
     consume(parser, UF_TOK_NEWLINE, "Expected newline after ':'", NULL);
     consume(parser, UF_TOK_INDENT, "Expected indented block", "Indent the body of the block with 4 spaces");
 
@@ -470,10 +506,22 @@ static UfStmt* parse_block(UfParser* parser) {
     return uf_stmt_block(parser->arena, span, stmts_copy, count);
 }
 
+static UfStmt* parse_block(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start;
+    consume(parser, UF_TOK_COLON, "Expected ':' before block", "Add ':' after the statement header");
+    return parse_block_body(parser, start);
+}
+
 static UfStmt* parse_let_statement(UfParser* parser) {
     SourceLoc start = parser->previous.span.start;
     consume(parser, UF_TOK_IDENTIFIER, "Expected variable name after 'let'", "Provide an identifier name, e.g., 'let count = 0'");
     const char* name = parser->previous.as.string_val;
+
+    const char* type_annotation = NULL;
+    if (match(parser, UF_TOK_COLON)) {
+        consume(parser, UF_TOK_IDENTIFIER, "Expected type name after ':' in type annotation", "Valid types include Number, String, Boolean, Array, Map, Function, Null, Any");
+        type_annotation = parser->previous.as.string_val;
+    }
 
     UfExpr* init = NULL;
     if (match(parser, UF_TOK_EQUAL)) {
@@ -486,7 +534,7 @@ static UfStmt* parse_let_statement(UfParser* parser) {
         consume(parser, UF_TOK_NEWLINE, "Expected newline after variable declaration", NULL);
     }
     SourceSpan span = source_span_make(start, parser->previous.span.end);
-    return uf_stmt_let(parser->arena, span, name, init);
+    return uf_stmt_let(parser->arena, span, name, type_annotation, init);
 }
 
 static UfStmt* parse_say_statement(UfParser* parser) {
@@ -576,6 +624,7 @@ static UfStmt* parse_function_statement(UfParser* parser) {
     consume(parser, UF_TOK_LPAREN, "Expected '(' after function name", NULL);
 
     const char* params[32];
+    const char* param_types[32];
     size_t param_count = 0;
 
     if (!check(parser, UF_TOK_RPAREN)) {
@@ -585,22 +634,40 @@ static UfStmt* parse_function_statement(UfParser* parser) {
                 break;
             }
             consume(parser, UF_TOK_IDENTIFIER, "Expected parameter name", NULL);
-            params[param_count++] = parser->previous.as.string_val;
+            params[param_count] = parser->previous.as.string_val;
+            param_types[param_count] = NULL;
+            if (match(parser, UF_TOK_COLON)) {
+                consume(parser, UF_TOK_IDENTIFIER, "Expected parameter type after ':'", NULL);
+                param_types[param_count] = parser->previous.as.string_val;
+            }
+            param_count++;
         } while (match(parser, UF_TOK_COMMA));
     }
 
     consume(parser, UF_TOK_RPAREN, "Expected ')' after parameters", NULL);
+    consume(parser, UF_TOK_COLON, "Expected ':' after function signature", NULL);
 
-    UfStmt* body = parse_block(parser);
+    const char* return_type = NULL;
+    if (check(parser, UF_TOK_IDENTIFIER) && peek(parser).kind == UF_TOK_COLON) {
+        advance(parser);
+        return_type = parser->previous.as.string_val;
+        consume(parser, UF_TOK_COLON, "Expected ':' after return type", NULL);
+    }
+
+    UfStmt* body = parse_block_body(parser, start);
     SourceSpan span = source_span_make(start, parser->previous.span.end);
 
     const char** params_copy = NULL;
+    const char** param_types_copy = NULL;
     if (param_count > 0) {
         params_copy = (const char**)uf_arena_alloc(parser->arena, param_count * sizeof(const char*));
         memcpy(params_copy, params, param_count * sizeof(const char*));
+
+        param_types_copy = (const char**)uf_arena_alloc(parser->arena, param_count * sizeof(const char*));
+        memcpy(param_types_copy, param_types, param_count * sizeof(const char*));
     }
 
-    return uf_stmt_function(parser->arena, span, fn_name, params_copy, param_count, body);
+    return uf_stmt_function(parser->arena, span, fn_name, params_copy, param_types_copy, param_count, return_type, body);
 }
 
 static UfStmt* parse_expression_or_assignment_statement(UfParser* parser) {
@@ -729,6 +796,7 @@ void uf_parser_init(UfParser* parser,
     parser->reporter = reporter;
     parser->had_error = false;
     parser->panic_mode = false;
+    parser->has_peek = false;
 
     /* Prime current token */
     advance(parser);

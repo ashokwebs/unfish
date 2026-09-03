@@ -11,6 +11,8 @@ typedef struct {
     UfLexer* lexer;
     UfToken previous;
     UfToken current;
+    UfToken peek_token;
+    bool has_peek;
     bool had_error;
     bool panic_mode;
 

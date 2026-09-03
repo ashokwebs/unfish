@@ -43,13 +43,13 @@ static char* read_file(const char* path) {
 static void print_usage(const char* prog) {
     printf("Unfish — Serious Programming Language & Runtime (v%s)\n\n", UF_VERSION_STRING);
     printf("Usage:\n");
-    printf("  %s run <file.unfish>     Execute an Unfish program\n", prog);
-    printf("  %s check <file.unfish>   Check program syntax and semantic analysis\n", prog);
-    printf("  %s ast <file.unfish>     Dump parsed Abstract Syntax Tree\n", prog);
-    printf("  %s tokens <file.unfish>  Scan and print token stream\n", prog);
-    printf("  %s repl                  Launch interactive REPL\n", prog);
-    printf("  %s version               Display version and build information\n", prog);
-    printf("  %s <file.unfish>         Shorthand for 'run <file.unfish>'\n", prog);
+    printf("  %s run [--strict] <file.unfish>   Execute an Unfish program\n", prog);
+    printf("  %s check [--strict] <file.unfish> Check program syntax and semantic analysis\n", prog);
+    printf("  %s ast <file.unfish>              Dump parsed Abstract Syntax Tree\n", prog);
+    printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
+    printf("  %s repl                           Launch interactive REPL\n", prog);
+    printf("  %s version                        Display version and build information\n", prog);
+    printf("  %s [--strict] <file.unfish>       Shorthand for 'run <file.unfish>'\n", prog);
 }
 
 static int cmd_tokens(const char* file_path) {
@@ -111,7 +111,7 @@ static int cmd_ast(const char* file_path) {
     return exit_code;
 }
 
-static int cmd_check(const char* file_path) {
+static int cmd_check(const char* file_path, bool strict) {
     char* source = read_file(file_path);
     if (!source) return 1;
 
@@ -138,6 +138,7 @@ static int cmd_check(const char* file_path) {
 
     UfSemanticAnalyzer sema;
     uf_semantic_init(&sema, &arena, &reporter);
+    sema.strict_mode = strict;
     bool ok = uf_analyze_program(&sema, program);
 
     int exit_code = (ok && reporter.error_count == 0) ? 0 : 2;
@@ -151,7 +152,7 @@ static int cmd_check(const char* file_path) {
     return exit_code;
 }
 
-static int cmd_run(const char* file_path, int script_argc, char** script_argv) {
+static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict) {
     char* source = read_file(file_path);
     if (!source) {
         fprintf(stderr, "Error: Could not open or read file '%s'\n", file_path);
@@ -182,6 +183,7 @@ static int cmd_run(const char* file_path, int script_argc, char** script_argv) {
 
     UfSemanticAnalyzer sema;
     uf_semantic_init(&sema, &arena, &reporter);
+    sema.strict_mode = strict;
     if (!uf_analyze_program(&sema, program) || reporter.error_count > 0) {
         uf_interner_free(&interner);
         uf_arena_free(&arena);
@@ -219,7 +221,7 @@ static void cmd_repl(void) {
 
     char line[1024];
 
-    for (;;) {
+    while (true) {
         printf("unfish> ");
         fflush(stdout);
 
@@ -228,22 +230,24 @@ static void cmd_repl(void) {
             break;
         }
 
-        /* Check for exit */
-        if (strncmp(line, "exit", 4) == 0 && (line[4] == '\n' || line[4] == '\0')) {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+
+        if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) {
             break;
         }
 
-        /* Check if block input required (ends with :) */
-        size_t len = strlen(line);
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' || line[len - 1] == ' ')) {
-            len--;
+        if (len == 0) {
+            continue;
         }
 
         UfStrBuf input_buf;
         uf_strbuf_init(&input_buf);
         uf_strbuf_append(&input_buf, line);
 
-        if (len > 0 && line[len - 1] == ':') {
+        if (line[len - 1] == ':') {
             /* Multiline block entry */
             char block_line[1024];
             for (;;) {
@@ -298,7 +302,20 @@ int main(int argc, char* argv[]) {
         return 64;
     }
 
-    const char* cmd = argv[1];
+    bool strict = false;
+    int arg_idx = 1;
+
+    if (arg_idx < argc && strcmp(argv[arg_idx], "--strict") == 0) {
+        strict = true;
+        arg_idx++;
+    }
+
+    if (arg_idx >= argc) {
+        print_usage("unfish");
+        return 64;
+    }
+
+    const char* cmd = argv[arg_idx];
 
     if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0 || strcmp(cmd, "-v") == 0) {
         printf("unfish version %s (x86_64-linux, ANSI C99)\n", UF_VERSION_STRING);
@@ -316,43 +333,53 @@ int main(int argc, char* argv[]) {
     }
 
     if (strcmp(cmd, "tokens") == 0) {
-        if (argc < 3) {
+        if (arg_idx + 1 >= argc) {
             fprintf(stderr, "Error: Expected file path for 'tokens'\n");
             return 64;
         }
-        return cmd_tokens(argv[2]);
+        return cmd_tokens(argv[arg_idx + 1]);
     }
 
     if (strcmp(cmd, "ast") == 0) {
-        if (argc < 3) {
+        if (arg_idx + 1 >= argc) {
             fprintf(stderr, "Error: Expected file path for 'ast'\n");
             return 64;
         }
-        return cmd_ast(argv[2]);
+        return cmd_ast(argv[arg_idx + 1]);
     }
 
     if (strcmp(cmd, "check") == 0) {
-        if (argc < 3) {
+        arg_idx++;
+        if (arg_idx < argc && strcmp(argv[arg_idx], "--strict") == 0) {
+            strict = true;
+            arg_idx++;
+        }
+        if (arg_idx >= argc) {
             fprintf(stderr, "Error: Expected file path for 'check'\n");
             return 64;
         }
-        return cmd_check(argv[2]);
+        return cmd_check(argv[arg_idx], strict);
     }
 
     if (strcmp(cmd, "run") == 0) {
-        if (argc < 3) {
+        arg_idx++;
+        if (arg_idx < argc && strcmp(argv[arg_idx], "--strict") == 0) {
+            strict = true;
+            arg_idx++;
+        }
+        if (arg_idx >= argc) {
             fprintf(stderr, "Error: Expected file path for 'run'\n");
             return 64;
         }
-        return cmd_run(argv[2], argc - 2, argv + 2);
+        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict);
     }
 
-    /* Shorthand: unfish <file.unfish> */
-    if (argv[1][0] != '-') {
-        return cmd_run(argv[1], argc - 1, argv + 1);
+    /* Shorthand: unfish [--strict] <file.unfish> */
+    if (argv[arg_idx][0] != '-') {
+        return cmd_run(argv[arg_idx], argc - arg_idx, argv + arg_idx, strict);
     }
 
-    fprintf(stderr, "Error: Unknown command or option '%s'\n", argv[1]);
+    fprintf(stderr, "Error: Unknown command or option '%s'\n", argv[arg_idx]);
     print_usage("unfish");
     return 64;
 }

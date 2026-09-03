@@ -33,9 +33,14 @@ for test_file in "$TESTS_DIR"/*.unfish; do
         expected_exit=$(grep "^# expect-exit:" "$test_file" | head -n1 | awk '{print $3}')
     fi
 
+    flags=""
+    if grep -q "^# flags:" "$test_file"; then
+        flags=$(grep "^# flags:" "$test_file" | head -n1 | sed 's/^# flags:[ ]*//')
+    fi
+
     # Run unfish
     set +e
-    "$UNFISH_BIN" run "$test_file" > "$TMP_OUT" 2> "$TMP_ERR"
+    "$UNFISH_BIN" run $flags "$test_file" > "$TMP_OUT" 2> "$TMP_ERR"
     actual_exit=$?
     set -e
 

@@ -1,0 +1,6 @@
+# flags: --strict
+# expect-exit: 2
+# expect-error: Type mismatch in variable declaration: expected 'Number', got 'String'
+
+let x: Number = "this is a string"
+say x
