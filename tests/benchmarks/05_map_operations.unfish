@@ -1,0 +1,12 @@
+let m = {}
+let i = 0
+while i < 5000:
+    m["key_" + i] = i * 2
+    i = i + 1
+
+let sum = 0
+let j = 0
+while j < 5000:
+    sum = sum + m["key_" + j]
+    j = j + 1
+say "map sum = " + sum

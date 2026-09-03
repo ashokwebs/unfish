@@ -1,0 +1,12 @@
+function make_adder(x):
+    let fn = function(y):
+        return x + y
+    return fn
+
+let add5 = make_adder(5)
+let sum = 0
+let i = 0
+while i < 20000:
+    sum = sum + add5(i)
+    i = i + 1
+say "closure sum = " + sum

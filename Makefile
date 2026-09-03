@@ -29,9 +29,12 @@ CLI_SRC = src/cli/main.c
 
 BIN_DIR = bin
 
-.PHONY: all asan test test-asan clean
+.PHONY: all asan test test-asan bench clean
 
 all: $(BIN_DIR)/unfish
+
+bench: $(BIN_DIR)/unfish
+	@./tools/run_benchmarks.sh $(BIN_DIR)/unfish
 
 $(BIN_DIR)/unfish: $(SRCS) $(CLI_SRC)
 	@mkdir -p $(BIN_DIR)

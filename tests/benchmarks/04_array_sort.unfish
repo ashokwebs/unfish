@@ -1,0 +1,19 @@
+let arr = []
+let i = 500
+while i > 0:
+    push(arr, i)
+    i = i - 1
+
+let n = len(arr)
+let j = 0
+while j < n:
+    let k = 0
+    while k < n - j - 1:
+        if arr[k] > arr[k + 1]:
+            let tmp = arr[k]
+            arr[k] = arr[k + 1]
+            arr[k + 1] = tmp
+        k = k + 1
+    j = j + 1
+
+say "sorted first = " + arr[0] + ", last = " + arr[n - 1]
