@@ -14,7 +14,7 @@
 | String Concatenation Coercion in `+` | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
 | Runtime Type Query (`type_of()`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
 | Collections (`Array`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
-| Collections (`Map`) | **PLANNED** (Phase 3 Part 2) | Hash table implementation |
+| Collections (`Map`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
 | Gradual Type Annotations (`let x: Number`) | **DESIGN / PLANNED** (Phase 4) | Static checker pass |
 | User-Defined Structs / Records | **PLANNED** (Phase 4) | Record system |
 | Generic Types (`Array<T>`, `Result<T, E>`) | **NOT IMPLEMENTED** | Deferred to Phase 9 |
@@ -34,9 +34,10 @@ typedef enum {
     UF_VAL_BOOL,
     UF_VAL_NUMBER,
     UF_VAL_STRING,
-    UF_VAL_ARRAY,
     UF_VAL_FUNCTION,
-    UF_VAL_NATIVE_FN
+    UF_VAL_NATIVE_FN,
+    UF_VAL_ARRAY,
+    UF_VAL_MAP
 } UfValueKind;
 
 struct UfValue {
@@ -45,16 +46,17 @@ struct UfValue {
         bool boolean;
         double number;
         UfStringObject* string;
-        UfArrayObject* array;
         UfFunctionObject* function;
         UfNativeObject native_fn;
+        UfArrayObject* array;
+        UfMapObject* map;
     } as;
 };
 ```
 
 ### 2.2. Semantics & Coercion Rules [IMPLEMENTED]
 * **Implicit Coercion**: Minimal by design. The only implicit coercion permitted is in binary `+`: if either operand is a string, the other operand is converted to a string and concatenated.
-* **Truthiness**: Only `false`, `null`, `0`, empty string `""`, and empty array `[]` are falsy. All other values are truthy.
+* **Truthiness**: Only `false`, `null`, `0`, empty string `""`, empty array `[]`, and empty map `{}` are falsy. All other values are truthy.
 * **Strict Type Safety**: Incompatible operations (e.g. `true * 5` or `"str" - 2`) trigger an explicit `TypeError` at runtime.
 
 ---

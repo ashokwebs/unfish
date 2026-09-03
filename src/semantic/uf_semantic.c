@@ -131,6 +131,10 @@ static void register_builtins(UfSemanticAnalyzer* analyzer) {
     add_symbol(analyzer, "push",    UF_SYM_BUILTIN, span, 2);
     add_symbol(analyzer, "pop",     UF_SYM_BUILTIN, span, 1);
     add_symbol(analyzer, "range",   UF_SYM_BUILTIN, span, -1);
+    add_symbol(analyzer, "keys",    UF_SYM_BUILTIN, span, 1);
+    add_symbol(analyzer, "values",  UF_SYM_BUILTIN, span, 1);
+    add_symbol(analyzer, "has_key", UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "delete",  UF_SYM_BUILTIN, span, 2);
     add_symbol(analyzer, "clock",   UF_SYM_BUILTIN, span, 0);
     add_symbol(analyzer, "assert",  UF_SYM_BUILTIN, span, -1);
 }
@@ -229,6 +233,13 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
         case UF_EXPR_INDEX:
             analyze_expr(analyzer, expr->as.index_expr.target);
             analyze_expr(analyzer, expr->as.index_expr.index);
+            break;
+
+        case UF_EXPR_MAP:
+            for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                analyze_expr(analyzer, expr->as.map_lit.keys[i]);
+                analyze_expr(analyzer, expr->as.map_lit.values[i]);
+            }
             break;
     }
 }

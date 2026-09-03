@@ -1,0 +1,3 @@
+# expect-exit: 3
+# expect-error: Runtime Error: Map key must be a string or number, got 'array'
+let m = {[1, 2]: "invalid"}

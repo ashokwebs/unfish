@@ -1,0 +1,32 @@
+# expect: Ada Lovelace
+# expect: Pioneer
+# expect: 42
+# expect: 100
+# expect: Empress of Science
+# expect: 43
+# expect: true
+
+let user = {
+    name: "Ada Lovelace",
+    role: "Pioneer",
+    stats: {
+        commits: 42,
+        stars: 100
+    }
+}
+
+# Read via dot access
+say user.name
+say user.role
+say user.stats.commits
+say user.stats.stars
+
+# Write via dot access
+user.role = "Empress of Science"
+user.stats.commits = 43
+say user.role
+say user.stats.commits
+
+# Dynamic addition of new property via dot
+user.active = true
+say user.active

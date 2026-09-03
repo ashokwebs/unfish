@@ -17,7 +17,8 @@ typedef enum {
     UF_VAL_STRING,
     UF_VAL_FUNCTION,
     UF_VAL_NATIVE_FN,
-    UF_VAL_ARRAY
+    UF_VAL_ARRAY,
+    UF_VAL_MAP
 } UfValueKind;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
@@ -50,6 +51,8 @@ typedef struct {
     size_t capacity;
 } UfArrayObject;
 
+typedef struct UfMapObject UfMapObject;
+
 struct UfValue {
     UfValueKind kind;
     union {
@@ -59,7 +62,25 @@ struct UfValue {
         UfFunctionObject* function;
         UfNativeObject native_fn;
         UfArrayObject* array;
+        UfMapObject* map;
     } as;
+};
+
+typedef struct {
+    UfValue key;
+    UfValue value;
+    bool occupied;
+    bool tombstone;
+} UfMapEntry;
+
+struct UfMapObject {
+    UfObj obj;
+    UfMapEntry* entries;
+    size_t count;
+    size_t capacity;
+    UfValue* order_keys;
+    size_t order_count;
+    size_t order_capacity;
 };
 
 /* Value constructors */
@@ -76,6 +97,12 @@ void uf_array_push(UfRuntime* rt, UfArrayObject* arr, UfValue val);
 UfValue uf_array_pop(UfArrayObject* arr);
 UfValue uf_array_get(UfArrayObject* arr, size_t index);
 void uf_array_set(UfArrayObject* arr, size_t index, UfValue val);
+
+UfValue uf_val_map(UfRuntime* rt, size_t initial_cap);
+bool uf_map_set(UfRuntime* rt, UfMapObject* map, UfValue key, UfValue val);
+UfValue uf_map_get(UfMapObject* map, UfValue key);
+bool uf_map_has(UfMapObject* map, UfValue key);
+bool uf_map_delete(UfMapObject* map, UfValue key);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

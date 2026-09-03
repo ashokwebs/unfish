@@ -52,21 +52,11 @@ static ExecResult exec_error(void) {
 static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stmt);
 static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_stmt);
 
-static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
-    UfValue callee = uf_evaluate_expression(rt, env, expr->as.call.callee);
-    if (rt->had_runtime_error) {
-        return uf_val_null();
-    }
-    uf_runtime_push_temp_root(rt, callee);
+UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span) {
+    if (rt->had_runtime_error) return uf_val_null();
 
-    size_t argc = expr->as.call.argc;
-    UfValue args[64];
+    uf_runtime_push_temp_root(rt, callee);
     for (size_t i = 0; i < argc; ++i) {
-        args[i] = uf_evaluate_expression(rt, env, expr->as.call.args[i]);
-        if (rt->had_runtime_error) {
-            uf_runtime_pop_temp_roots(rt, 1 + i);
-            return uf_val_null();
-        }
         uf_runtime_push_temp_root(rt, args[i]);
     }
 
@@ -75,11 +65,11 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
     if (callee.kind == UF_VAL_FUNCTION) {
         UfFunctionObject* fn = callee.as.function;
         if (fn->param_count != argc) {
-            uf_runtime_error(rt, expr->span, "Function '%s' expects %zu arguments, but %zu provided",
+            uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
                              fn->name ? fn->name : "anonymous", fn->param_count, argc);
         } else {
             UfEnv* call_env = uf_env_create(rt, fn->closure_env);
-            if (uf_runtime_push_frame(rt, fn->name ? fn->name : "<anonymous>", expr->span, call_env)) {
+            if (uf_runtime_push_frame(rt, fn->name ? fn->name : "<anonymous>", span, call_env)) {
                 UfEnv* prev_env = rt->current_env;
                 rt->current_env = call_env;
 
@@ -101,16 +91,39 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
     } else if (callee.kind == UF_VAL_NATIVE_FN) {
         UfNativeObject* nat = &callee.as.native_fn;
         if (nat->arity >= 0 && (int)argc != nat->arity) {
-            uf_runtime_error(rt, expr->span, "Native function '%s' expects %d arguments, but %zu provided",
+            uf_runtime_error(rt, span, "Native function '%s' expects %d arguments, but %zu provided",
                              nat->name, nat->arity, argc);
-        } else if (uf_runtime_push_frame(rt, nat->name, expr->span, env)) {
+        } else if (uf_runtime_push_frame(rt, nat->name, span, rt->current_env)) {
             result = nat->fn(rt, (int)argc, args);
             uf_runtime_pop_frame(rt);
         }
     } else {
-        uf_runtime_error(rt, expr->span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));
+        uf_runtime_error(rt, span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));
     }
 
+    uf_runtime_pop_temp_roots(rt, 1 + argc);
+    return result;
+}
+
+static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
+    UfValue callee = uf_evaluate_expression(rt, env, expr->as.call.callee);
+    if (rt->had_runtime_error) {
+        return uf_val_null();
+    }
+    uf_runtime_push_temp_root(rt, callee);
+
+    size_t argc = expr->as.call.argc;
+    UfValue args[64];
+    for (size_t i = 0; i < argc; ++i) {
+        args[i] = uf_evaluate_expression(rt, env, expr->as.call.args[i]);
+        if (rt->had_runtime_error) {
+            uf_runtime_pop_temp_roots(rt, 1 + i);
+            return uf_val_null();
+        }
+        uf_runtime_push_temp_root(rt, args[i]);
+    }
+
+    UfValue result = uf_call_value(rt, callee, argc, args, expr->span);
     uf_runtime_pop_temp_roots(rt, 1 + argc);
     return result;
 }
@@ -304,6 +317,38 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
             return arr_val;
         }
 
+        case UF_EXPR_MAP: {
+            UfValue map_val = uf_val_map(rt, expr->as.map_lit.count);
+            uf_runtime_push_temp_root(rt, map_val);
+
+            for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                UfValue k = uf_evaluate_expression(rt, env, expr->as.map_lit.keys[i]);
+                if (rt->had_runtime_error) {
+                    uf_runtime_pop_temp_root(rt);
+                    return uf_val_null();
+                }
+                uf_runtime_push_temp_root(rt, k);
+
+                UfValue v = uf_evaluate_expression(rt, env, expr->as.map_lit.values[i]);
+                if (rt->had_runtime_error) {
+                    uf_runtime_pop_temp_roots(rt, 2);
+                    return uf_val_null();
+                }
+
+                if (k.kind != UF_VAL_STRING && k.kind != UF_VAL_NUMBER && k.kind != UF_VAL_BOOL && k.kind != UF_VAL_NULL) {
+                    uf_runtime_error(rt, expr->as.map_lit.keys[i]->span, "Map key must be a string or number, got '%s'", uf_val_type_name(k));
+                    uf_runtime_pop_temp_roots(rt, 2);
+                    return uf_val_null();
+                }
+
+                uf_map_set(rt, map_val.as.map, k, v);
+                uf_runtime_pop_temp_root(rt);
+            }
+
+            uf_runtime_pop_temp_root(rt);
+            return map_val;
+        }
+
         case UF_EXPR_INDEX: {
             UfValue target = uf_evaluate_expression(rt, env, expr->as.index_expr.target);
             if (rt->had_runtime_error) return uf_val_null();
@@ -316,31 +361,36 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
             }
             uf_runtime_push_temp_root(rt, idx_val);
 
-            if (idx_val.kind != UF_VAL_NUMBER) {
-                uf_runtime_error(rt, expr->span, "Index must be a number, got '%s'", uf_val_type_name(idx_val));
-                uf_runtime_pop_temp_roots(rt, 2);
-                return uf_val_null();
-            }
-
-            int64_t idx = (int64_t)idx_val.as.number;
             UfValue result = uf_val_null();
 
-            if (target.kind == UF_VAL_ARRAY) {
-                UfArrayObject* arr = target.as.array;
-                if (idx < 0) idx += arr->count;
-                if (idx < 0 || (size_t)idx >= arr->count) {
-                    uf_runtime_error(rt, expr->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
+            if (target.kind == UF_VAL_MAP) {
+                result = uf_map_get(target.as.map, idx_val);
+            } else if (target.kind == UF_VAL_ARRAY) {
+                if (idx_val.kind != UF_VAL_NUMBER) {
+                    uf_runtime_error(rt, expr->span, "Array index must be a number, got '%s'", uf_val_type_name(idx_val));
                 } else {
-                    result = arr->elements[idx];
+                    int64_t idx = (int64_t)idx_val.as.number;
+                    UfArrayObject* arr = target.as.array;
+                    if (idx < 0) idx += arr->count;
+                    if (idx < 0 || (size_t)idx >= arr->count) {
+                        uf_runtime_error(rt, expr->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
+                    } else {
+                        result = arr->elements[idx];
+                    }
                 }
             } else if (target.kind == UF_VAL_STRING) {
-                UfStringObject* str = target.as.string;
-                if (idx < 0) idx += str->length;
-                if (idx < 0 || (size_t)idx >= str->length) {
-                    uf_runtime_error(rt, expr->span, "IndexOutOfBounds: Index %ld out of bounds for string of length %zu", (long)idx, str->length);
+                if (idx_val.kind != UF_VAL_NUMBER) {
+                    uf_runtime_error(rt, expr->span, "String index must be a number, got '%s'", uf_val_type_name(idx_val));
                 } else {
-                    char ch[2] = { str->chars[idx], '\0' };
-                    result = uf_val_string(rt, ch, 1);
+                    int64_t idx = (int64_t)idx_val.as.number;
+                    UfStringObject* str = target.as.string;
+                    if (idx < 0) idx += str->length;
+                    if (idx < 0 || (size_t)idx >= str->length) {
+                        uf_runtime_error(rt, expr->span, "IndexOutOfBounds: Index %ld out of bounds for string of length %zu", (long)idx, str->length);
+                    } else {
+                        char ch[2] = { str->chars[idx], '\0' };
+                        result = uf_val_string(rt, ch, 1);
+                    }
                 }
             } else {
                 uf_runtime_error(rt, expr->span, "Cannot index value of type '%s'", uf_val_type_name(target));
@@ -422,19 +472,27 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             }
             uf_runtime_push_temp_root(rt, val);
 
-            if (target.kind != UF_VAL_ARRAY) {
-                uf_runtime_error(rt, stmt->span, "Cannot assign to index of non-array type '%s'", uf_val_type_name(target));
-            } else if (idx_val.kind != UF_VAL_NUMBER) {
-                uf_runtime_error(rt, stmt->span, "Array index must be a number, got '%s'", uf_val_type_name(idx_val));
-            } else {
-                int64_t idx = (int64_t)idx_val.as.number;
-                UfArrayObject* arr = target.as.array;
-                if (idx < 0) idx += arr->count;
-                if (idx < 0 || (size_t)idx >= arr->count) {
-                    uf_runtime_error(rt, stmt->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
+            if (target.kind == UF_VAL_MAP) {
+                if (idx_val.kind != UF_VAL_STRING && idx_val.kind != UF_VAL_NUMBER && idx_val.kind != UF_VAL_BOOL && idx_val.kind != UF_VAL_NULL) {
+                    uf_runtime_error(rt, stmt->span, "Map key must be a string or number, got '%s'", uf_val_type_name(idx_val));
                 } else {
-                    arr->elements[idx] = val;
+                    uf_map_set(rt, target.as.map, idx_val, val);
                 }
+            } else if (target.kind == UF_VAL_ARRAY) {
+                if (idx_val.kind != UF_VAL_NUMBER) {
+                    uf_runtime_error(rt, stmt->span, "Array index must be a number, got '%s'", uf_val_type_name(idx_val));
+                } else {
+                    int64_t idx = (int64_t)idx_val.as.number;
+                    UfArrayObject* arr = target.as.array;
+                    if (idx < 0) idx += arr->count;
+                    if (idx < 0 || (size_t)idx >= arr->count) {
+                        uf_runtime_error(rt, stmt->span, "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", (long)idx, arr->count);
+                    } else {
+                        arr->elements[idx] = val;
+                    }
+                }
+            } else {
+                uf_runtime_error(rt, stmt->span, "Cannot assign to index of type '%s'", uf_val_type_name(target));
             }
 
             uf_runtime_pop_temp_roots(rt, 3);
@@ -488,8 +546,10 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             for (;;) {
                 UfValue cond = uf_evaluate_expression(rt, env, stmt->as.while_stmt.condition);
                 if (rt->had_runtime_error) return exec_error();
-                bool truthy = uf_val_is_truthy(cond);
-                if (!truthy) break;
+
+                if (!uf_val_is_truthy(cond)) {
+                    break;
+                }
 
                 UfEnv* block_env = uf_env_create(rt, env);
                 UfEnv* prev_env = rt->current_env;
@@ -557,6 +617,23 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                     }
                     if (res.status == EXEC_BREAK) break;
                 }
+            } else if (iter_val.kind == UF_VAL_MAP) {
+                UfMapObject* map = iter_val.as.map;
+                for (size_t i = 0; i < map->order_count; ++i) {
+                    UfEnv* loop_env = uf_env_create(rt, env);
+                    uf_env_declare(loop_env, stmt->as.for_stmt.var_name, map->order_keys[i]);
+
+                    UfEnv* prev_env = rt->current_env;
+                    rt->current_env = loop_env;
+                    ExecResult res = execute_statement(rt, loop_env, stmt->as.for_stmt.body);
+                    rt->current_env = prev_env;
+
+                    if (res.status == EXEC_RETURN || res.status == EXEC_ERROR) {
+                        uf_runtime_pop_temp_root(rt);
+                        return res;
+                    }
+                    if (res.status == EXEC_BREAK) break;
+                }
             } else if (iter_val.kind == UF_VAL_STRING) {
                 UfStringObject* str = iter_val.as.string;
                 for (size_t i = 0; i < str->length; ++i) {
@@ -577,7 +654,7 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                     if (res.status == EXEC_BREAK) break;
                 }
             } else {
-                uf_runtime_error(rt, stmt->span, "'for' loop expects iterable (array or string), got '%s'", uf_val_type_name(iter_val));
+                uf_runtime_error(rt, stmt->span, "'for' loop expects iterable (array, map, or string), got '%s'", uf_val_type_name(iter_val));
                 uf_runtime_pop_temp_root(rt);
                 return exec_error();
             }

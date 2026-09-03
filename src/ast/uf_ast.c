@@ -94,6 +94,16 @@ UfExpr* uf_expr_index(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* i
     return expr;
 }
 
+UfExpr* uf_expr_map(UfArena* arena, SourceSpan span, UfExpr** keys, UfExpr** values, size_t count) {
+    UfExpr* expr = (UfExpr*)uf_arena_alloc(arena, sizeof(UfExpr));
+    expr->kind = UF_EXPR_MAP;
+    expr->span = span;
+    expr->as.map_lit.keys = keys;
+    expr->as.map_lit.values = values;
+    expr->as.map_lit.count = count;
+    return expr;
+}
+
 UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init) {
     UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
     stmt->kind = UF_STMT_LET;
@@ -283,6 +293,17 @@ void uf_ast_print_expr(const UfExpr* expr, FILE* out) {
             uf_ast_print_expr(expr->as.index_expr.target, out);
             fprintf(out, " ");
             uf_ast_print_expr(expr->as.index_expr.index, out);
+            fprintf(out, ")");
+            break;
+        case UF_EXPR_MAP:
+            fprintf(out, "(map");
+            for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                fprintf(out, " (pair ");
+                uf_ast_print_expr(expr->as.map_lit.keys[i], out);
+                fprintf(out, " ");
+                uf_ast_print_expr(expr->as.map_lit.values[i], out);
+                fprintf(out, ")");
+            }
             fprintf(out, ")");
             break;
     }

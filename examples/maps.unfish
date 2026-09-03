@@ -1,0 +1,36 @@
+# Unfish - Hash Maps and Property Access Example
+
+say "=== Student Record System ==="
+
+let student = {
+    name: "Ada Lovelace",
+    age: 28,
+    scores: [95, 98, 100],
+    address: {
+        city: "London",
+        country: "UK"
+    }
+}
+
+say "Student Name: " + student.name
+say "Location: " + student.address.city + ", " + student.address.country
+
+# Update record
+student.age = 29
+student.address.city = "Ockham"
+
+say "Updated Age: " + student.age
+say "New City: " + student.address.city
+
+# Iterating keys and values
+say ""
+say "Record Fields:"
+for field in keys(student):
+    say "- " + field
+
+# Checking presence
+say ""
+say "Has email? " + has_key(student, "email")
+student.email = "ada@analyticalengine.org"
+say "Has email now? " + has_key(student, "email")
+say "Email: " + student.email

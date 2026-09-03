@@ -7,7 +7,8 @@ typedef enum {
     UF_OBJ_STRING,
     UF_OBJ_FUNCTION,
     UF_OBJ_ENV,
-    UF_OBJ_ARRAY
+    UF_OBJ_ARRAY,
+    UF_OBJ_MAP
 } UfObjKind;
 
 typedef struct UfObj {

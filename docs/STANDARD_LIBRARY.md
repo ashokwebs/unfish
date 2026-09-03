@@ -39,6 +39,22 @@
 * **Description**: Generates an array of numbers from `start` (default: 0) up to (exclusive) `end` with step `step` (default: 1). Capped at 1,000,000 elements for safety.
 * **Returns**: `Array`.
 
+### `keys(map)`
+* **Description**: Returns an array of all keys in `map` in insertion order.
+* **Returns**: `Array`.
+
+### `values(map)`
+* **Description**: Returns an array of all values in `map` in insertion order.
+* **Returns**: `Array`.
+
+### `has_key(map, key)`
+* **Description**: Returns `true` if `key` exists in `map`, or `false` otherwise.
+* **Returns**: `Boolean`.
+
+### `delete(map, key)`
+* **Description**: Removes `key` and its associated value from `map`. Returns `true` if the key was present and deleted, or `false` otherwise.
+* **Returns**: `Boolean`.
+
 ### `clock()`
 * **Description**: Returns elapsed wall-clock time in seconds as a high-resolution `Number`. Useful for benchmarking student algorithms.
 * **Returns**: `Number`.

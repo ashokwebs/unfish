@@ -45,8 +45,11 @@ static UfValue native_len(UfRuntime* rt, int argc, UfValue* args) {
     if (args[0].kind == UF_VAL_ARRAY) {
         return uf_val_number((double)args[0].as.array->count);
     }
+    if (args[0].kind == UF_VAL_MAP) {
+        return uf_val_number((double)args[0].as.map->count);
+    }
     SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
-    uf_runtime_error(rt, source_span_make(loc, loc), "'len()' argument must be a string or array, got '%s'", uf_val_type_name(args[0]));
+    uf_runtime_error(rt, source_span_make(loc, loc), "'len()' argument must be a string, array, or map, got '%s'", uf_val_type_name(args[0]));
     return uf_val_null();
 }
 
@@ -151,6 +154,57 @@ static UfValue native_assert(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_null();
 }
 
+static UfValue native_keys(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_MAP) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'keys()' expects a map");
+        return uf_val_null();
+    }
+    UfMapObject* map = args[0].as.map;
+    UfValue arr = uf_val_array(rt, map->order_count);
+    uf_runtime_push_temp_root(rt, arr);
+    for (size_t i = 0; i < map->order_count; ++i) {
+        uf_array_push(rt, arr.as.array, map->order_keys[i]);
+    }
+    uf_runtime_pop_temp_roots(rt, 1);
+    return arr;
+}
+
+static UfValue native_values(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_MAP) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'values()' expects a map");
+        return uf_val_null();
+    }
+    UfMapObject* map = args[0].as.map;
+    UfValue arr = uf_val_array(rt, map->order_count);
+    uf_runtime_push_temp_root(rt, arr);
+    for (size_t i = 0; i < map->order_count; ++i) {
+        UfValue val = uf_map_get(map, map->order_keys[i]);
+        uf_array_push(rt, arr.as.array, val);
+    }
+    uf_runtime_pop_temp_roots(rt, 1);
+    return arr;
+}
+
+static UfValue native_has_key(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_MAP) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'has_key()' expects a map and a key");
+        return uf_val_null();
+    }
+    return uf_val_bool(uf_map_has(args[0].as.map, args[1]));
+}
+
+static UfValue native_delete(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_MAP) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'delete()' expects a map and a key");
+        return uf_val_null();
+    }
+    return uf_val_bool(uf_map_delete(args[0].as.map, args[1]));
+}
+
 static void register_builtins(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "say",     uf_val_native("say",     native_say,     1));
     uf_env_declare(rt->global_env, "print",   uf_val_native("print",   native_print,   1));
@@ -159,6 +213,10 @@ static void register_builtins(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "push",    uf_val_native("push",    native_push,    2));
     uf_env_declare(rt->global_env, "pop",     uf_val_native("pop",     native_pop,     1));
     uf_env_declare(rt->global_env, "range",   uf_val_native("range",   native_range,   -1));
+    uf_env_declare(rt->global_env, "keys",    uf_val_native("keys",    native_keys,    1));
+    uf_env_declare(rt->global_env, "values",  uf_val_native("values",  native_values,  1));
+    uf_env_declare(rt->global_env, "has_key", uf_val_native("has_key", native_has_key, 2));
+    uf_env_declare(rt->global_env, "delete",  uf_val_native("delete",  native_delete,  2));
     uf_env_declare(rt->global_env, "clock",   uf_val_native("clock",   native_clock,   0));
     uf_env_declare(rt->global_env, "assert",  uf_val_native("assert",  native_assert,  -1));
 }
@@ -209,6 +267,20 @@ void uf_gc_mark_value(UfValue val) {
                 uf_gc_mark_value(val.as.array->elements[i]);
             }
         }
+    } else if (val.kind == UF_VAL_MAP) {
+        if (val.as.map && !val.as.map->obj.marked) {
+            val.as.map->obj.marked = true;
+            UfMapObject* map = val.as.map;
+            for (size_t i = 0; i < map->capacity; ++i) {
+                if (map->entries[i].occupied && !map->entries[i].tombstone) {
+                    uf_gc_mark_value(map->entries[i].key);
+                    uf_gc_mark_value(map->entries[i].value);
+                }
+            }
+            for (size_t i = 0; i < map->order_count; ++i) {
+                uf_gc_mark_value(map->order_keys[i]);
+            }
+        }
     }
 }
 
@@ -255,6 +327,11 @@ void uf_gc_collect(UfRuntime* rt) {
                 UfArrayObject* arr = (UfArrayObject*)obj;
                 free(arr->elements);
                 free(arr);
+            } else if (obj->kind == UF_OBJ_MAP) {
+                UfMapObject* map = (UfMapObject*)obj;
+                free(map->entries);
+                free(map->order_keys);
+                free(map);
             } else {
                 free(obj);
             }
@@ -300,6 +377,11 @@ void uf_runtime_free(UfRuntime* rt) {
             UfArrayObject* arr = (UfArrayObject*)obj;
             free(arr->elements);
             free(arr);
+        } else if (obj->kind == UF_OBJ_MAP) {
+            UfMapObject* map = (UfMapObject*)obj;
+            free(map->entries);
+            free(map->order_keys);
+            free(map);
         } else {
             free(obj);
         }

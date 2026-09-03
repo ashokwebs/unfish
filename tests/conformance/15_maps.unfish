@@ -1,0 +1,58 @@
+# expect: 0
+# expect: true
+# expect: Alice
+# expect: 30
+# expect: 2
+# expect: true
+# expect: 31
+# expect: Paris
+# expect: 3
+# expect: 10
+# expect: 20
+# expect: true
+# expect: false
+# expect: true
+# expect: false
+# expect: 2
+# expect: true
+# expect: false
+
+let empty = {}
+say len(empty)
+say empty == {}
+
+let person = {"name": "Alice", "age": 30}
+say person["name"]
+say person["age"]
+say len(person)
+
+# Missing key returns null (Tier 1 Error Model)
+say person["missing"] == null
+
+# Subscript assignment: update existing and add new
+person["age"] = 31
+person["city"] = "Paris"
+say person["age"]
+say person["city"]
+say len(person)
+
+# Identifier keys syntax sugar {x: 10, y: 20}
+let point = {x: 10, y: 20}
+say point["x"]
+say point["y"]
+
+# Built-ins: has_key, delete
+say has_key(person, "name")
+say has_key(person, "country")
+
+let deleted = delete(person, "name")
+say deleted
+say has_key(person, "name")
+say len(person)
+
+# Structural equality
+let m1 = {"a": 1, "b": 2}
+let m2 = {"b": 2, "a": 1}
+say m1 == m2
+m2["c"] = 3
+say m1 == m2

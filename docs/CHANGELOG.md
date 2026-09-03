@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0-alpha] - 2026-09-04
+
+### Added
+- **First-Class Hash Maps**: Key-value associative collections (`UF_OBJ_MAP` / `UF_VAL_MAP`) implemented via open-addressing hash table with linear probing and 75% load factor (ADR 014).
+- **Map Literal Syntax**: `{key: value, ...}` syntax supporting both string expression keys and unquoted identifier keys (`{name: "Alice"}`).
+- **Dot Property Access Sugar**: Pratt parser desugars `target.prop` into `target["prop"]` (`UF_EXPR_INDEX`) and `target.prop = val` into `target["prop"] = val` (`UF_STMT_INDEX_ASSIGN`).
+- **Insertion-Order Iteration**: Parallel `order_keys` array maintains deterministic key insertion order across `keys()`, `values()`, and direct `for key in map:` traversal.
+- **Deep Structural Equality**: Full recursive structural equality check across nested maps, arrays, strings, and primitives.
+- **Map Built-ins**: Added `keys(map)`, `values(map)`, `has_key(map, key)`, `delete(map, key)`, and extended `len(map)` to return map entry count.
+- **Map GC Integration**: Full mark-and-sweep tracking of keys, values, and order buffers with zero memory leaks.
+- **Stress & Conformance Tests**: Added `test_map_gc_stress` in unit tests, and 4 new conformance tests (`15_maps`, `16_map_iteration`, `17_dot_access`, `err_map_invalid_key_type`), bringing the conformance suite to 27 tests.
+- **Universal Value Call Interface**: Exported `uf_call_value` in `uf_interpreter.h` to enable clean native call dispatch.
+- **Documentation**: Recorded ADR 014 in `docs/DECISIONS.md`; updated `LANGUAGE_SPEC.md`, `TYPE_SYSTEM.md`, `STANDARD_LIBRARY.md`, `PROJECT_STATE.md`.
+
+---
+
 ## [0.3.0-alpha] - 2026-09-04
 
 ### Added

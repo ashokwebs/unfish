@@ -206,6 +206,60 @@ static UfExpr* parse_index(UfParser* parser, UfExpr* left) {
     return uf_expr_index(parser->arena, span, left, index);
 }
 
+static UfExpr* parse_map(UfParser* parser) {
+    SourceSpan start_span = parser->previous.span;
+    UfExpr* keys[256];
+    UfExpr* values[256];
+    size_t count = 0;
+
+    if (!check(parser, UF_TOK_RBRACE)) {
+        do {
+            if (check(parser, UF_TOK_RBRACE)) break;
+            if (count >= 256) {
+                error_current(parser, "Cannot have more than 256 entries in map literal", NULL);
+                break;
+            }
+            UfExpr* key = NULL;
+            if (check(parser, UF_TOK_IDENTIFIER)) {
+                advance(parser);
+                key = uf_expr_literal_string(parser->arena, parser->previous.span, parser->previous.as.string_val);
+            } else {
+                key = uf_parse_expression(parser);
+            }
+
+            consume(parser, UF_TOK_COLON, "Expected ':' after map key", "Syntax: '{ key: value }'");
+            UfExpr* val = uf_parse_expression(parser);
+
+            keys[count] = key;
+            values[count] = val;
+            count++;
+        } while (match(parser, UF_TOK_COMMA));
+    }
+
+    consume(parser, UF_TOK_RBRACE, "Expected '}' after map entries", "Close map literal with '}'");
+
+    UfExpr** keys_copy = NULL;
+    UfExpr** vals_copy = NULL;
+    if (count > 0) {
+        keys_copy = (UfExpr**)uf_arena_alloc(parser->arena, count * sizeof(UfExpr*));
+        memcpy(keys_copy, keys, count * sizeof(UfExpr*));
+        vals_copy = (UfExpr**)uf_arena_alloc(parser->arena, count * sizeof(UfExpr*));
+        memcpy(vals_copy, values, count * sizeof(UfExpr*));
+    }
+
+    SourceSpan span = source_span_join(start_span, parser->previous.span);
+    return uf_expr_map(parser->arena, span, keys_copy, vals_copy, count);
+}
+
+static UfExpr* parse_dot(UfParser* parser, UfExpr* left) {
+    /* parser->previous is UF_TOK_DOT */
+    consume(parser, UF_TOK_IDENTIFIER, "Expected property name after '.'", "Property names must be identifiers, e.g., obj.field");
+    UfToken prop_tok = parser->previous;
+    SourceSpan span = source_span_join(left->span, prop_tok.span);
+    UfExpr* index = uf_expr_literal_string(parser->arena, prop_tok.span, prop_tok.as.string_val);
+    return uf_expr_index(parser->arena, span, left, index);
+}
+
 static const ParseRule rules[] = {
     [UF_TOK_EOF]        = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_ERROR]      = { NULL,             NULL,         PREC_NONE },
@@ -252,6 +306,9 @@ static const ParseRule rules[] = {
     [UF_TOK_COMMA]      = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_LBRACKET]   = { parse_array,      parse_index,  PREC_CALL },
     [UF_TOK_RBRACKET]   = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_LBRACE]     = { parse_map,        NULL,         PREC_NONE },
+    [UF_TOK_RBRACE]     = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_DOT]        = { NULL,             parse_dot,    PREC_CALL },
 };
 
 static const ParseRule* get_rule(UfTokenKind kind) {

@@ -1,0 +1,33 @@
+# expect: Direct for-in:
+# expect: apples
+# expect: 5
+# expect: oranges
+# expect: 12
+# expect: bananas
+# expect: 8
+# expect: keys():
+# expect: apples
+# expect: oranges
+# expect: bananas
+# expect: values():
+# expect: 5
+# expect: 12
+# expect: 8
+
+let inventory = {"apples": 5, "oranges": 12, "bananas": 8}
+
+# Direct iteration iterates keys in insertion order
+say "Direct for-in:"
+for item in inventory:
+    say item
+    say inventory[item]
+
+say "keys():"
+let ks = keys(inventory)
+for k in ks:
+    say k
+
+say "values():"
+let vs = values(inventory)
+for v in vs:
+    say v

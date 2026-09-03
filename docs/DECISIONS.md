@@ -115,3 +115,17 @@
   3. Opcodes are partitioned into: Literal loading, Local/Global variable access, Closure/Upvalue capture, Binary/Unary operations, Conditional/Unconditional jumps, Collection construction/indexing, and Function call/return.
   4. Bytecode chunks bundle bytecode arrays, constant pools (`UfValue`), and debug line-mapping tables.
 * **Consequences**: Establishes a concrete contract for Phase 7 VM implementation without breaking the current AST interpreter.
+
+## ADR 014: Hash Map Data Structure, Dot Property Access, and Iteration
+* **Date**: Milestone 4 (Phase 3 Part 2)
+* **Status**: Accepted
+* **Context**: Algorithmic and general-purpose programming requires first-class associative key-value dictionaries. Additionally, ergonomic record manipulation benefits from property-style dot syntax (`user.name`).
+* **Decision**:
+  1. **Data Structure**: Implement `UfMapObject` (`UF_OBJ_MAP` / `UF_VAL_MAP`) as an open-addressing hash table with linear probing and power-of-two capacities, resizing at 75% load factor.
+  2. **Hashing**: Use the 32-bit FNV-1a hash algorithm for strings and bitwise IEEE 754 float hashing for numbers.
+  3. **Order Preservation**: Maintain a parallel `order_keys` array in `UfMapObject` to guarantee deterministic insertion-order iteration for `keys()`, `values()`, and `for-in` traversal.
+  4. **Syntax**: Support `{key: value}` literals with both string expressions and identifier keys (`{name: "Alice"}`).
+  5. **Dot Property Sugar**: In the Pratt parser, desugar `target.field` into `target["field"]` (`UF_EXPR_INDEX`) and `target.field = val` into `target["field"] = val` (`UF_STMT_INDEX_ASSIGN`).
+  6. **Error Semantics**: Adhere to Tier 1 of the Error Model (ADR 011) — querying a nonexistent key returns `null` rather than throwing an unhandled runtime error. Provide `has_key(map, key)` for explicit containment checks and `delete(map, key)` for deletion.
+  7. **Garbage Collection**: Integrate `UF_OBJ_MAP` directly into mark-and-sweep GC by traversing both `entries` (keys and values) and `order_keys`.
+* **Consequences**: Unifies object-like records and dictionaries under a single high-performance, memory-safe data structure with zero external dependencies, fully verified under ASan/UBSan.

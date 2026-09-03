@@ -12,5 +12,6 @@ typedef enum {
 
 UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program);
 UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr);
+UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span);
 
 #endif /* UF_INTERPRETER_H */

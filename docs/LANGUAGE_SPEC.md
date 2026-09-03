@@ -132,7 +132,7 @@ Comparison     = Term , { ( "<" | "<=" | ">" | ">=" ) , Term } ;
 Term           = Factor , { ( "+" | "-" ) , Factor } ;
 Factor         = Unary , { ( "*" | "/" | "%" ) , Unary } ;
 Unary          = ( "-" | "not" ) , Unary | Postfix ;
-Postfix        = Primary , { ( "(" , [ ArgList ] , ")" ) | ( "[" , Expression , "]" ) } ;
+Postfix        = Primary , { ( "(" , [ ArgList ] , ")" ) | ( "[" , Expression , "]" ) | ( "." , identifier ) } ;
 
 Primary        = number_literal
                | string_literal
@@ -141,9 +141,12 @@ Primary        = number_literal
                | "null"
                | identifier
                | ArrayLiteral
+               | MapLiteral
                | "(" , Expression , ")" ;
 
-ArrayLiteral   = "[" , [ Expression , { "," , Expression } ] , "]" ;
+ArrayLiteral   = "[" , [ Expression , { "," , Expression } ] , [ "," ] , "]" ;
+MapLiteral     = "{" , [ MapEntry , { "," , MapEntry } ] , [ "," ] , "}" ;
+MapEntry       = ( identifier | Expression ) , ":" , Expression ;
 ```
 
 ---
@@ -159,5 +162,5 @@ ArrayLiteral   = "[" , [ Expression , { "," , Expression } ] , "]" ;
 | 5 | `+`, `-` | Addition, Subtraction, String Concatenation | Left |
 | 6 | `*`, `/`, `%` | Multiplication, Division, Modulo | Left |
 | 7 | `-` (prefix), `not` | Unary negation, Logical NOT | Right |
-| 8 | `()` (call), `[]` (index) | Function Call, Subscript Indexing | Left |
-| 9 | Literals, `[]`, `(expr)` | Array Literals, Grouping, Primaries | N/A |
+| 8 | `()` (call), `[]` (index), `.` (dot) | Function Call, Subscript Indexing, Property Access | Left |
+| 9 | Literals, `[]`, `{}`, `(expr)` | Array/Map Literals, Grouping, Primaries | N/A |

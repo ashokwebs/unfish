@@ -56,7 +56,10 @@ typedef enum {
     UF_TOK_COLON,      /* : */
     UF_TOK_COMMA,      /* , */
     UF_TOK_LBRACKET,   /* [ */
-    UF_TOK_RBRACKET    /* ] */
+    UF_TOK_RBRACKET,   /* ] */
+    UF_TOK_LBRACE,     /* { */
+    UF_TOK_RBRACE,     /* } */
+    UF_TOK_DOT         /* . */
 } UfTokenKind;
 
 typedef struct {
