@@ -55,6 +55,38 @@
 * **Description**: Removes `key` and its associated value from `map`. Returns `true` if the key was present and deleted, or `false` otherwise.
 * **Returns**: `Boolean`.
 
+### `map(array, function)`
+* **Description**: Returns a new array resulting from applying `function(element)` to each element of `array`.
+* **Returns**: `Array`.
+
+### `filter(array, function)`
+* **Description**: Returns a new array containing all elements of `array` for which `function(element)` evaluates to a truthy value.
+* **Returns**: `Array`.
+
+### `reduce(array, function, [initial])`
+* **Description**: Applies `function(accumulator, element)` across `array` from left to right to reduce it to a single value. If `initial` is omitted, the first element is used as the initial accumulator.
+* **Returns**: `Any`.
+
+### `sort(array, [comparator])`
+* **Description**: Returns a new sorted array. If `comparator(a, b)` is omitted, sorts numbers and strings in natural ascending order. If provided, sorts using the comparator function (returning a negative number if `a < b`, positive if `a > b`, or 0 if equal).
+* **Returns**: `Array`.
+
+### `reverse(array)`
+* **Description**: Returns a new array with elements in reversed order.
+* **Returns**: `Array`.
+
+### `find(array, function)`
+* **Description**: Returns the first element in `array` for which `function(element)` evaluates to truthy, or `null` if no element matches.
+* **Returns**: `Any` or `null`.
+
+### `every(array, function)`
+* **Description**: Returns `true` if `function(element)` evaluates to truthy for every element in `array`, or `false` otherwise. Returns `true` for empty arrays.
+* **Returns**: `Boolean`.
+
+### `some(array, function)`
+* **Description**: Returns `true` if `function(element)` evaluates to truthy for at least one element in `array`, or `false` otherwise.
+* **Returns**: `Boolean`.
+
 ### `clock()`
 * **Description**: Returns elapsed wall-clock time in seconds as a high-resolution `Number`. Useful for benchmarking student algorithms.
 * **Returns**: `Number`.

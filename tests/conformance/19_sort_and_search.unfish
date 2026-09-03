@@ -1,0 +1,31 @@
+# expect: [1, 2, 5, 8, 9]
+# expect: [9, 8, 5, 2, 1]
+# expect: [apple, banana, cherry, date]
+# expect: Charlie
+# expect: Alice
+# expect: Bob
+
+let nums = [5, 2, 9, 1, 8]
+
+# 1. Default numeric sort
+let sorted_asc = sort(nums)
+say sorted_asc
+
+# 2. Custom comparator: descending
+let sorted_desc = sort(nums, function(a, b): return b - a)
+say sorted_desc
+
+# 3. String sorting
+let fruits = ["date", "banana", "apple", "cherry"]
+say sort(fruits)
+
+# 4. Sorting objects by field
+let students = [
+    {name: "Alice", score: 85},
+    {name: "Bob", score: 92},
+    {name: "Charlie", score: 78}
+]
+
+let by_score = sort(students, function(s1, s2): return s1.score - s2.score)
+for s in by_score:
+    say s.name

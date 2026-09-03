@@ -104,6 +104,17 @@ UfExpr* uf_expr_map(UfArena* arena, SourceSpan span, UfExpr** keys, UfExpr** val
     return expr;
 }
 
+UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, UfStmt* body) {
+    UfExpr* expr = (UfExpr*)uf_arena_alloc(arena, sizeof(UfExpr));
+    expr->kind = UF_EXPR_FUNCTION;
+    expr->span = span;
+    expr->as.fn_expr.name = name;
+    expr->as.fn_expr.params = params;
+    expr->as.fn_expr.param_count = param_count;
+    expr->as.fn_expr.body = body;
+    return expr;
+}
+
 UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init) {
     UfStmt* stmt = (UfStmt*)uf_arena_alloc(arena, sizeof(UfStmt));
     stmt->kind = UF_STMT_LET;
@@ -304,6 +315,15 @@ void uf_ast_print_expr(const UfExpr* expr, FILE* out) {
                 uf_ast_print_expr(expr->as.map_lit.values[i], out);
                 fprintf(out, ")");
             }
+            fprintf(out, ")");
+            break;
+        case UF_EXPR_FUNCTION:
+            fprintf(out, "(fn %s (params", expr->as.fn_expr.name ? expr->as.fn_expr.name : "<anonymous>");
+            for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
+                fprintf(out, " %s", expr->as.fn_expr.params[i]);
+            }
+            fprintf(out, ") ");
+            uf_ast_print_stmt(expr->as.fn_expr.body, out, 0);
             fprintf(out, ")");
             break;
     }

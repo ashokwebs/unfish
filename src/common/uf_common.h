@@ -19,6 +19,6 @@
 
 #define UF_UNUSED(x) ((void)(x))
 
-#define UF_VERSION_STRING "0.4.0-alpha"
+#define UF_VERSION_STRING "0.5.0-alpha"
 
 #endif /* UF_COMMON_H */

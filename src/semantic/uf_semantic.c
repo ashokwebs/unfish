@@ -135,6 +135,14 @@ static void register_builtins(UfSemanticAnalyzer* analyzer) {
     add_symbol(analyzer, "values",  UF_SYM_BUILTIN, span, 1);
     add_symbol(analyzer, "has_key", UF_SYM_BUILTIN, span, 2);
     add_symbol(analyzer, "delete",  UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "map",     UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "filter",  UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "reduce",  UF_SYM_BUILTIN, span, -1);
+    add_symbol(analyzer, "sort",    UF_SYM_BUILTIN, span, -1);
+    add_symbol(analyzer, "reverse", UF_SYM_BUILTIN, span, 1);
+    add_symbol(analyzer, "find",    UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "every",   UF_SYM_BUILTIN, span, 2);
+    add_symbol(analyzer, "some",    UF_SYM_BUILTIN, span, 2);
     add_symbol(analyzer, "clock",   UF_SYM_BUILTIN, span, 0);
     add_symbol(analyzer, "assert",  UF_SYM_BUILTIN, span, -1);
 }
@@ -241,6 +249,32 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
                 analyze_expr(analyzer, expr->as.map_lit.values[i]);
             }
             break;
+
+        case UF_EXPR_FUNCTION: {
+            const char* fn_name = expr->as.fn_expr.name;
+            if (fn_name) {
+                add_symbol(analyzer, fn_name, UF_SYM_FUNCTION, expr->span, (int)expr->as.fn_expr.param_count);
+            }
+
+            push_scope(analyzer, true);
+
+            for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
+                const char* param = expr->as.fn_expr.params[i];
+                UfSymbol* existing = find_symbol_in_scope(analyzer->current_scope, param);
+                if (existing) {
+                    analyzer->had_error = true;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Duplicate parameter name '%s' in function", param);
+                    uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, expr->span, msg, NULL);
+                } else {
+                    add_symbol(analyzer, param, UF_SYM_VAR, expr->span, -1);
+                }
+            }
+
+            analyze_stmt(analyzer, expr->as.fn_expr.body);
+            pop_scope(analyzer);
+            break;
+        }
     }
 }
 

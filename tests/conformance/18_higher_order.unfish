@@ -1,0 +1,47 @@
+# expect: [2, 4, 6, 8, 10]
+# expect: [2, 4]
+# expect: 15
+# expect: 115
+# expect: [5, 4, 3, 2, 1]
+# expect: 4
+# expect: null
+# expect: false
+# expect: true
+# expect: true
+# expect: false
+
+let nums = [1, 2, 3, 4, 5]
+
+# 1. map
+let doubled = map(nums, function(x): return x * 2)
+say doubled
+
+# 2. filter
+let evens = filter(nums, function(x): return x % 2 == 0)
+say evens
+
+# 3. reduce (without and with initial value)
+let sum = reduce(nums, function(acc, x): return acc + x)
+say sum
+
+let sum_with_init = reduce(nums, function(acc, x): return acc + x, 100)
+say sum_with_init
+
+# 4. reverse
+let rev = reverse(nums)
+say rev
+
+# 5. find
+let found = find(nums, function(x): return x > 3)
+say found
+
+let not_found = find(nums, function(x): return x > 10)
+say not_found
+
+# 6. every
+say every(nums, function(x): return x > 2)
+say every(nums, function(x): return x > 0)
+
+# 7. some
+say some(nums, function(x): return x == 3)
+say some(nums, function(x): return x == 42)

@@ -129,3 +129,25 @@
   6. **Error Semantics**: Adhere to Tier 1 of the Error Model (ADR 011) — querying a nonexistent key returns `null` rather than throwing an unhandled runtime error. Provide `has_key(map, key)` for explicit containment checks and `delete(map, key)` for deletion.
   7. **Garbage Collection**: Integrate `UF_OBJ_MAP` directly into mark-and-sweep GC by traversing both `entries` (keys and values) and `order_keys`.
 * **Consequences**: Unifies object-like records and dictionaries under a single high-performance, memory-safe data structure with zero external dependencies, fully verified under ASan/UBSan.
+
+## ADR 015: Higher-Order Functions, Anonymous Lambdas, and Runtime Invocation Protocol
+* **Date**: Milestone 5 (Phase 3 Part 3)
+* **Status**: Accepted
+* **Context**: Functional programming idioms (`map`, `filter`, `reduce`, `sort`) require first-class functions that can be constructed inline as anonymous lambdas and passed to native standard library procedures.
+* **Decision**:
+  1. **Runtime Invocability**: Export a decoupled callback interface `uf_runtime_call` via `UfCallValueFn call_fn` in `UfRuntime`, enabling C native functions to invoke user-defined closures and native functions uniformly.
+  2. **Core Functional Built-ins**: Implement 8 native functions operating on arrays:
+     - `map(arr, fn)`: transforms every element.
+     - `filter(arr, fn)`: retains truthy predicate matches.
+     - `reduce(arr, fn, [init])`: left fold with optional accumulator initialization.
+     - `sort(arr, [cmp])`: stable sorting with default or custom binary comparator.
+     - `reverse(arr)`: reversed array shallow copy.
+     - `find(arr, fn)`: first predicate match or `null`.
+     - `every(arr, fn)`: universal quantifier predicate check.
+     - `some(arr, fn)`: existential quantifier predicate check.
+  3. **Anonymous Function Syntax**: Support `function([params]): body` in expression positions.
+     - Support inline expression bodies with implicit return: `function(x): x * 2`.
+     - Support inline statements with explicit return: `function(x): return x * 2`.
+     - Support full multiline indented blocks: `function(x):\n    let y = x + 1\n    return y`.
+  4. **Self-Recursive Named Function Expressions**: Named function expressions (`let fact = function factorial(n): ...`) bind the function name inside its own call scope, permitting self-recursion without polluting the outer namespace.
+* **Consequences**: Enables clean, modern data pipeline construction and functional algorithms with zero external dependencies, 100% verified under ASan/UBSan.

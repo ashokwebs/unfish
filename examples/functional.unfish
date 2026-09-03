@@ -1,0 +1,38 @@
+# Unfish - Higher-Order and Functional Programming Example
+
+say "=== Data Pipeline Example ==="
+
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# Pipeline: filter evens -> map square -> reduce sum
+let evens = filter(numbers, function(n): n % 2 == 0)
+let squares = map(evens, function(n): n * n)
+let total = reduce(squares, function(acc, x): acc + x, 0)
+
+say "Original: " + numbers
+say "Evens:    " + evens
+say "Squares:  " + squares
+say "Sum:      " + total
+
+# Predicate checks
+say ""
+say "Every number > 0? " + every(numbers, function(n): n > 0)
+say "Any number > 8?   " + some(numbers, function(n): n > 8)
+
+# Find first matching element
+let first_big = find(numbers, function(n): n > 5)
+say "First number > 5: " + first_big
+
+# Custom Sorting
+say ""
+say "=== Inventory Sorting ==="
+let products = [
+    {name: "Keyboard", price: 75},
+    {name: "Mouse", price: 25},
+    {name: "Monitor", price: 300},
+    {name: "USB Cable", price: 10}
+]
+
+let by_price = sort(products, function(p1, p2): p1.price - p2.price)
+for p in by_price:
+    say "$" + p.price + " - " + p.name

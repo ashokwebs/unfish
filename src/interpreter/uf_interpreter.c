@@ -73,6 +73,9 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
                 UfEnv* prev_env = rt->current_env;
                 rt->current_env = call_env;
 
+                if (fn->name) {
+                    uf_env_declare(call_env, fn->name, callee);
+                }
                 for (size_t i = 0; i < argc; ++i) {
                     uf_env_declare(call_env, fn->params[i], args[i]);
                 }
@@ -131,6 +134,9 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
 UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
     if (!expr || rt->had_runtime_error) {
         return uf_val_null();
+    }
+    if (!rt->call_fn) {
+        rt->call_fn = uf_call_value;
     }
 
     switch (expr->kind) {
@@ -398,6 +404,16 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
 
             uf_runtime_pop_temp_roots(rt, 2);
             return result;
+        }
+
+        case UF_EXPR_FUNCTION: {
+            UfValue fn = uf_val_function(rt,
+                                         expr->as.fn_expr.name,
+                                         expr->as.fn_expr.params,
+                                         expr->as.fn_expr.param_count,
+                                         expr->as.fn_expr.body,
+                                         env);
+            return fn;
         }
     }
 
@@ -697,6 +713,7 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
 }
 
 UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) {
+    rt->call_fn = uf_call_value;
     UfEnv* prev_env = rt->current_env;
     rt->current_env = rt->global_env;
 

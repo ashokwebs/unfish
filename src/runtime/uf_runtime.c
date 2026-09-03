@@ -205,6 +205,249 @@ static UfValue native_delete(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_bool(uf_map_delete(args[0].as.map, args[1]));
 }
 
+static UfValue native_map(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'map()' expects an array and a function");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue fn = args[1];
+    UfValue res = uf_val_array(rt, src->count);
+    uf_runtime_push_temp_root(rt, res);
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    for (size_t i = 0; i < src->count; ++i) {
+        UfValue arg = src->elements[i];
+        UfValue item = uf_runtime_call(rt, fn, 1, &arg, span);
+        if (rt->had_runtime_error) {
+            uf_runtime_pop_temp_roots(rt, 1);
+            return uf_val_null();
+        }
+        uf_array_push(rt, res.as.array, item);
+    }
+    uf_runtime_pop_temp_roots(rt, 1);
+    return res;
+}
+
+static UfValue native_filter(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'filter()' expects an array and a function");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue fn = args[1];
+    UfValue res = uf_val_array(rt, src->count);
+    uf_runtime_push_temp_root(rt, res);
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    for (size_t i = 0; i < src->count; ++i) {
+        UfValue arg = src->elements[i];
+        UfValue keep = uf_runtime_call(rt, fn, 1, &arg, span);
+        if (rt->had_runtime_error) {
+            uf_runtime_pop_temp_roots(rt, 1);
+            return uf_val_null();
+        }
+        if (uf_val_is_truthy(keep)) {
+            uf_array_push(rt, res.as.array, arg);
+        }
+    }
+    uf_runtime_pop_temp_roots(rt, 1);
+    return res;
+}
+
+static UfValue native_reduce(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'reduce()' expects an array, a function, and an optional initial value");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue fn = args[1];
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    if (src->count == 0 && argc < 3) {
+        uf_runtime_error(rt, span, "'reduce()' of empty array with no initial value");
+        return uf_val_null();
+    }
+
+    size_t start_idx = 0;
+    UfValue acc;
+    if (argc >= 3) {
+        acc = args[2];
+    } else {
+        acc = src->elements[0];
+        start_idx = 1;
+    }
+    uf_runtime_push_temp_root(rt, acc);
+
+    for (size_t i = start_idx; i < src->count; ++i) {
+        UfValue call_args[2] = { acc, src->elements[i] };
+        acc = uf_runtime_call(rt, fn, 2, call_args, span);
+        if (rt->had_runtime_error) {
+            uf_runtime_pop_temp_roots(rt, 1);
+            return uf_val_null();
+        }
+        rt->temp_roots[rt->temp_root_count - 1] = acc;
+    }
+    uf_runtime_pop_temp_roots(rt, 1);
+    return acc;
+}
+
+static int default_compare_values(UfValue a, UfValue b) {
+    if (a.kind == UF_VAL_NUMBER && b.kind == UF_VAL_NUMBER) {
+        if (a.as.number < b.as.number) return -1;
+        if (a.as.number > b.as.number) return 1;
+        return 0;
+    }
+    if (a.kind == UF_VAL_STRING && b.kind == UF_VAL_STRING) {
+        return strcmp(a.as.string->chars, b.as.string->chars);
+    }
+    if (a.kind == UF_VAL_BOOL && b.kind == UF_VAL_BOOL) {
+        return (int)a.as.boolean - (int)b.as.boolean;
+    }
+    return (int)a.kind - (int)b.kind;
+}
+
+static UfValue native_sort(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'sort()' expects an array");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue res = uf_val_array(rt, src->count);
+    uf_runtime_push_temp_root(rt, res);
+    for (size_t i = 0; i < src->count; ++i) {
+        uf_array_push(rt, res.as.array, src->elements[i]);
+    }
+
+    bool has_cmp = (argc >= 2 && args[1].kind != UF_VAL_NULL);
+    UfValue cmp_fn = has_cmp ? args[1] : uf_val_null();
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    for (size_t i = 1; i < res.as.array->count; ++i) {
+        UfValue key = res.as.array->elements[i];
+        size_t j = i;
+        while (j > 0) {
+            int cmp = 0;
+            if (has_cmp) {
+                UfValue call_args[2] = { res.as.array->elements[j - 1], key };
+                UfValue cres = uf_runtime_call(rt, cmp_fn, 2, call_args, span);
+                if (rt->had_runtime_error) {
+                    uf_runtime_pop_temp_roots(rt, 1);
+                    return uf_val_null();
+                }
+                if (cres.kind == UF_VAL_NUMBER) {
+                    cmp = (cres.as.number > 0) ? 1 : ((cres.as.number < 0) ? -1 : 0);
+                } else if (cres.kind == UF_VAL_BOOL) {
+                    cmp = cres.as.boolean ? -1 : 1;
+                }
+            } else {
+                cmp = default_compare_values(res.as.array->elements[j - 1], key);
+            }
+
+            if (cmp > 0) {
+                res.as.array->elements[j] = res.as.array->elements[j - 1];
+                j--;
+            } else {
+                break;
+            }
+        }
+        res.as.array->elements[j] = key;
+    }
+
+    uf_runtime_pop_temp_roots(rt, 1);
+    return res;
+}
+
+static UfValue native_reverse(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'reverse()' expects an array");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue res = uf_val_array(rt, src->count);
+    uf_runtime_push_temp_root(rt, res);
+    for (size_t i = src->count; i > 0; --i) {
+        uf_array_push(rt, res.as.array, src->elements[i - 1]);
+    }
+    uf_runtime_pop_temp_roots(rt, 1);
+    return res;
+}
+
+static UfValue native_find(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'find()' expects an array and a function");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue fn = args[1];
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    for (size_t i = 0; i < src->count; ++i) {
+        UfValue arg = src->elements[i];
+        UfValue match_res = uf_runtime_call(rt, fn, 1, &arg, span);
+        if (rt->had_runtime_error) return uf_val_null();
+        if (uf_val_is_truthy(match_res)) {
+            return arg;
+        }
+    }
+    return uf_val_null();
+}
+
+static UfValue native_every(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'every()' expects an array and a function");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue fn = args[1];
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    for (size_t i = 0; i < src->count; ++i) {
+        UfValue arg = src->elements[i];
+        UfValue res = uf_runtime_call(rt, fn, 1, &arg, span);
+        if (rt->had_runtime_error) return uf_val_null();
+        if (!uf_val_is_truthy(res)) {
+            return uf_val_bool(false);
+        }
+    }
+    return uf_val_bool(true);
+}
+
+static UfValue native_some(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_ARRAY) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'some()' expects an array and a function");
+        return uf_val_null();
+    }
+    UfArrayObject* src = args[0].as.array;
+    UfValue fn = args[1];
+    SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+    SourceSpan span = source_span_make(loc, loc);
+
+    for (size_t i = 0; i < src->count; ++i) {
+        UfValue arg = src->elements[i];
+        UfValue res = uf_runtime_call(rt, fn, 1, &arg, span);
+        if (rt->had_runtime_error) return uf_val_null();
+        if (uf_val_is_truthy(res)) {
+            return uf_val_bool(true);
+        }
+    }
+    return uf_val_bool(false);
+}
+
 static void register_builtins(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "say",     uf_val_native("say",     native_say,     1));
     uf_env_declare(rt->global_env, "print",   uf_val_native("print",   native_print,   1));
@@ -217,6 +460,14 @@ static void register_builtins(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "values",  uf_val_native("values",  native_values,  1));
     uf_env_declare(rt->global_env, "has_key", uf_val_native("has_key", native_has_key, 2));
     uf_env_declare(rt->global_env, "delete",  uf_val_native("delete",  native_delete,  2));
+    uf_env_declare(rt->global_env, "map",     uf_val_native("map",     native_map,     2));
+    uf_env_declare(rt->global_env, "filter",  uf_val_native("filter",  native_filter,  2));
+    uf_env_declare(rt->global_env, "reduce",  uf_val_native("reduce",  native_reduce,  -1));
+    uf_env_declare(rt->global_env, "sort",    uf_val_native("sort",    native_sort,    -1));
+    uf_env_declare(rt->global_env, "reverse", uf_val_native("reverse", native_reverse, 1));
+    uf_env_declare(rt->global_env, "find",    uf_val_native("find",    native_find,    2));
+    uf_env_declare(rt->global_env, "every",   uf_val_native("every",   native_every,   2));
+    uf_env_declare(rt->global_env, "some",    uf_val_native("some",    native_some,    2));
     uf_env_declare(rt->global_env, "clock",   uf_val_native("clock",   native_clock,   0));
     uf_env_declare(rt->global_env, "assert",  uf_val_native("assert",  native_assert,  -1));
 }
@@ -356,6 +607,7 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->step_count = 0;
     rt->max_steps = 10000000;
     rt->had_runtime_error = false;
+    rt->call_fn = NULL;
     rt->out_stream = stdout;
     rt->err_stream = stderr;
     rt->reporter = reporter;
@@ -435,4 +687,12 @@ void uf_runtime_error(UfRuntime* rt, SourceSpan span, const char* fmt, ...) {
         }
         fprintf(rt->err_stream, "\n");
     }
+}
+
+UfValue uf_runtime_call(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span) {
+    if (!rt->call_fn) {
+        uf_runtime_error(rt, span, "Call handler not registered in runtime");
+        return uf_val_null();
+    }
+    return rt->call_fn(rt, callee, argc, args, span);
 }

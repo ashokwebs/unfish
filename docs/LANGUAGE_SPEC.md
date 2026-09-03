@@ -142,11 +142,13 @@ Primary        = number_literal
                | identifier
                | ArrayLiteral
                | MapLiteral
+               | FunctionExpr
                | "(" , Expression , ")" ;
 
 ArrayLiteral   = "[" , [ Expression , { "," , Expression } ] , [ "," ] , "]" ;
 MapLiteral     = "{" , [ MapEntry , { "," , MapEntry } ] , [ "," ] , "}" ;
 MapEntry       = ( identifier | Expression ) , ":" , Expression ;
+FunctionExpr   = "function" , [ identifier ] , "(" , [ ParamList ] , ")" , ":" , ( Block | Expression | ReturnStmt ) ;
 ```
 
 ---

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0-alpha] - 2026-09-04
+
+### Added
+- **First-Class Anonymous Functions / Lambdas**: `function([params]): body` expression syntax (`UF_EXPR_FUNCTION`) supporting inline expressions with implicit return (`function(x): x * 2`), inline explicit return (`function(x): return x * 2`), and multiline indented closure bodies (ADR 015).
+- **Self-Recursive Named Function Expressions**: Named lambda expressions (`let fact = function factorial(n): ...`) bind the function identifier within the closure's call scope for self-recursion.
+- **Universal Runtime Call Callback**: Decoupled `uf_runtime_call` via `UfCallValueFn` pointer in `UfRuntime`, allowing C native functions to invoke user-defined closures seamlessly.
+- **Higher-Order Standard Library Functions**:
+  * `map(arr, fn)`: element-wise array transformation.
+  * `filter(arr, fn)`: predicate-based element retention.
+  * `reduce(arr, fn, [init])`: left fold reduction with optional initial accumulator.
+  * `sort(arr, [cmp])`: stable array sorting supporting numbers, strings, and custom comparator callbacks `cmp(a, b)`.
+  * `reverse(arr)`: reversed array shallow copy.
+  * `find(arr, fn)`: first predicate match or `null`.
+  * `every(arr, fn)`: universal quantification check.
+  * `some(arr, fn)`: existential quantification check.
+- **Functional Conformance Tests**: Added `18_higher_order.unfish`, `19_sort_and_search.unfish`, `20_anonymous_functions.unfish`, expanding the conformance suite to 30 tests.
+- **Functional Pipeline Example**: `examples/functional.unfish` demonstrating map/filter/reduce, predicate searches, and custom object sorting.
+- **Documentation**: Recorded ADR 015 in `docs/DECISIONS.md`; updated `LANGUAGE_SPEC.md`, `STANDARD_LIBRARY.md`, `PROJECT_STATE.md`.
+
+---
+
 ## [0.4.0-alpha] - 2026-09-04
 
 ### Added

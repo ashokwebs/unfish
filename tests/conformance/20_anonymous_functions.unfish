@@ -1,0 +1,34 @@
+# expect: 20
+# expect: 30
+# expect: 11
+# expect: 101
+# expect: 102
+# expect: 120
+
+# 1. Inline anonymous function with explicit return
+let double = function(x): return x * 2
+say double(10)
+
+# 2. Inline anonymous function with expression body (implicit return)
+let triple = function(x): x * 3
+say triple(10)
+
+# 3. Immediately invoked function expression (IIFE)
+let inc = (function(x): return x + 1)(10)
+say inc
+
+# 4. Multiline closure capturing outer variable
+let base = 100
+let adder = function(n):
+    return base + n
+
+say adder(1)
+say adder(2)
+
+# 5. Named function expression for self-recursion
+let fact = function factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+say fact(5)

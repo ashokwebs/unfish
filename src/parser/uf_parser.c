@@ -99,6 +99,8 @@ static void synchronize(UfParser* parser) {
 
 /* --- Pratt Parser Expression Rules --- */
 
+static UfStmt* parse_statement(UfParser* parser);
+
 static UfExpr* parse_literal(UfParser* parser) {
     UfToken tok = parser->previous;
     switch (tok.kind) {
@@ -260,18 +262,97 @@ static UfExpr* parse_dot(UfParser* parser, UfExpr* left) {
     return uf_expr_index(parser->arena, span, left, index);
 }
 
+static UfExpr* parse_function_expr(UfParser* parser) {
+    SourceLoc start = parser->previous.span.start;
+    const char* fn_name = NULL;
+    if (check(parser, UF_TOK_IDENTIFIER)) {
+        advance(parser);
+        fn_name = parser->previous.as.string_val;
+    }
+
+    consume(parser, UF_TOK_LPAREN, "Expected '(' after 'function'", NULL);
+
+    const char* params[32];
+    size_t param_count = 0;
+
+    if (!check(parser, UF_TOK_RPAREN)) {
+        do {
+            if (param_count >= 32) {
+                error_current(parser, "Functions cannot have more than 32 parameters", NULL);
+                break;
+            }
+            consume(parser, UF_TOK_IDENTIFIER, "Expected parameter name", NULL);
+            params[param_count++] = parser->previous.as.string_val;
+        } while (match(parser, UF_TOK_COMMA));
+    }
+
+    consume(parser, UF_TOK_RPAREN, "Expected ')' after parameters", NULL);
+    consume(parser, UF_TOK_COLON, "Expected ':' after function signature", NULL);
+
+    UfStmt* body = NULL;
+    if (match(parser, UF_TOK_NEWLINE)) {
+        consume(parser, UF_TOK_INDENT, "Expected indented block", "Indent the body of the function with 4 spaces");
+        UfStmt* stmts[256];
+        size_t count = 0;
+        while (!check(parser, UF_TOK_DEDENT) && !check(parser, UF_TOK_EOF)) {
+            if (match(parser, UF_TOK_NEWLINE)) continue;
+            if (count >= 256) {
+                error_current(parser, "Block exceeds maximum statement limit (256)", NULL);
+                break;
+            }
+            UfStmt* stmt = parse_statement(parser);
+            if (stmt) stmts[count++] = stmt;
+        }
+        consume(parser, UF_TOK_DEDENT, "Expected unindent to close block", NULL);
+        UfStmt** stmts_copy = NULL;
+        if (count > 0) {
+            stmts_copy = (UfStmt**)uf_arena_alloc(parser->arena, count * sizeof(UfStmt*));
+            memcpy(stmts_copy, stmts, count * sizeof(UfStmt*));
+        }
+        body = uf_stmt_block(parser->arena, source_span_make(start, parser->previous.span.end), stmts_copy, count);
+    } else {
+        SourceLoc stmt_start = parser->current.span.start;
+        UfStmt* inner_stmt = NULL;
+        if (match(parser, UF_TOK_RETURN)) {
+            UfExpr* val = NULL;
+            if (!check(parser, UF_TOK_COMMA) && !check(parser, UF_TOK_RPAREN) && !check(parser, UF_TOK_RBRACKET) &&
+                !check(parser, UF_TOK_RBRACE) && !check(parser, UF_TOK_NEWLINE) && !check(parser, UF_TOK_EOF)) {
+                val = uf_parse_expression(parser);
+            }
+            SourceSpan sspan = source_span_make(stmt_start, parser->previous.span.end);
+            inner_stmt = uf_stmt_return(parser->arena, sspan, val);
+        } else {
+            UfExpr* val = uf_parse_expression(parser);
+            SourceSpan sspan = source_span_make(stmt_start, parser->previous.span.end);
+            inner_stmt = uf_stmt_return(parser->arena, sspan, val);
+        }
+        UfStmt** stmts_copy = (UfStmt**)uf_arena_alloc(parser->arena, sizeof(UfStmt*));
+        stmts_copy[0] = inner_stmt;
+        body = uf_stmt_block(parser->arena, inner_stmt->span, stmts_copy, 1);
+    }
+
+    SourceSpan span = source_span_make(start, body->span.end);
+    const char** params_copy = NULL;
+    if (param_count > 0) {
+        params_copy = (const char**)uf_arena_alloc(parser->arena, param_count * sizeof(const char*));
+        memcpy(params_copy, params, param_count * sizeof(const char*));
+    }
+
+    return uf_expr_function(parser->arena, span, fn_name, params_copy, param_count, body);
+}
+
 static const ParseRule rules[] = {
-    [UF_TOK_EOF]        = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_ERROR]      = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_NEWLINE]    = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_INDENT]     = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_DEDENT]     = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_IDENTIFIER] = { parse_identifier, NULL,         PREC_NONE },
-    [UF_TOK_NUMBER]     = { parse_literal,    NULL,         PREC_NONE },
-    [UF_TOK_STRING]     = { parse_literal,    NULL,         PREC_NONE },
-    [UF_TOK_LET]        = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_SAY]        = { NULL,             NULL,         PREC_NONE },
-    [UF_TOK_FUNCTION]   = { NULL,             NULL,         PREC_NONE },
+    [UF_TOK_EOF]        = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_ERROR]      = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_NEWLINE]    = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_INDENT]     = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_DEDENT]     = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_IDENTIFIER] = { parse_identifier,     NULL,         PREC_NONE },
+    [UF_TOK_NUMBER]     = { parse_literal,        NULL,         PREC_NONE },
+    [UF_TOK_STRING]     = { parse_literal,        NULL,         PREC_NONE },
+    [UF_TOK_LET]        = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_SAY]        = { NULL,                 NULL,         PREC_NONE },
+    [UF_TOK_FUNCTION]   = { parse_function_expr,  NULL,         PREC_NONE },
     [UF_TOK_RETURN]     = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_IF]         = { NULL,             NULL,         PREC_NONE },
     [UF_TOK_ELSE]       = { NULL,             NULL,         PREC_NONE },
@@ -390,7 +471,11 @@ static UfStmt* parse_let_statement(UfParser* parser) {
         init = uf_parse_expression(parser);
     }
 
-    consume(parser, UF_TOK_NEWLINE, "Expected newline after variable declaration", NULL);
+    if (check(parser, UF_TOK_NEWLINE)) {
+        advance(parser);
+    } else if (!init || init->kind != UF_EXPR_FUNCTION || parser->previous.kind != UF_TOK_DEDENT) {
+        consume(parser, UF_TOK_NEWLINE, "Expected newline after variable declaration", NULL);
+    }
     SourceSpan span = source_span_make(start, parser->previous.span.end);
     return uf_stmt_let(parser->arena, span, name, init);
 }

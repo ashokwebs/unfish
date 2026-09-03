@@ -18,6 +18,8 @@ typedef struct {
     UfEnv* env;
 } UfCallFrame;
 
+typedef UfValue (*UfCallValueFn)(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span);
+
 struct UfRuntime {
     UfEnv* global_env;
     UfEnv* current_env;
@@ -38,6 +40,8 @@ struct UfRuntime {
 
     bool had_runtime_error;
 
+    UfCallValueFn call_fn;
+
     FILE* out_stream;
     FILE* err_stream;
     UfDiagnosticReporter* reporter;
@@ -57,6 +61,8 @@ void uf_gc_collect(UfRuntime* rt);
 
 bool uf_runtime_push_frame(UfRuntime* rt, const char* fn_name, SourceSpan call_span, UfEnv* env);
 void uf_runtime_pop_frame(UfRuntime* rt);
+
+UfValue uf_runtime_call(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span);
 
 void uf_runtime_error(UfRuntime* rt, SourceSpan span, const char* fmt, ...);
 

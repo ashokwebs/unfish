@@ -24,7 +24,8 @@ typedef enum {
     UF_EXPR_GROUPING,
     UF_EXPR_ARRAY,
     UF_EXPR_INDEX,
-    UF_EXPR_MAP
+    UF_EXPR_MAP,
+    UF_EXPR_FUNCTION
 } UfExprKind;
 
 struct UfExpr {
@@ -72,6 +73,13 @@ struct UfExpr {
             UfExpr** values;
             size_t count;
         } map_lit;
+
+        struct {
+            const char* name; /* Optional, may be NULL */
+            const char** params;
+            size_t param_count;
+            struct UfStmt* body;
+        } fn_expr;
     } as;
 };
 
@@ -183,6 +191,7 @@ UfExpr* uf_expr_grouping(UfArena* arena, SourceSpan span, UfExpr* inner);
 UfExpr* uf_expr_array(UfArena* arena, SourceSpan span, UfExpr** elements, size_t count);
 UfExpr* uf_expr_index(UfArena* arena, SourceSpan span, UfExpr* target, UfExpr* index);
 UfExpr* uf_expr_map(UfArena* arena, SourceSpan span, UfExpr** keys, UfExpr** values, size_t count);
+UfExpr* uf_expr_function(UfArena* arena, SourceSpan span, const char* name, const char** params, size_t param_count, struct UfStmt* body);
 
 UfStmt* uf_stmt_let(UfArena* arena, SourceSpan span, const char* name, UfExpr* init);
 UfStmt* uf_stmt_assign(UfArena* arena, SourceSpan span, const char* name, UfExpr* value);
