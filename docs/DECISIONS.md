@@ -344,6 +344,29 @@
      Formally verified: `Text -> AST -> JSON -> AST -> Text == original` across the entire language conformance test suite including structs, pattern matching, closures, and collections.
 * **Consequences**: Enables seamless visual block IDE integration, visual code editors, and automated code transformations with zero external dependencies.
 
+## ADR 026: Bytecode Instruction Set & Chunk Format
+* **Date**: Milestone 16 (Phase 5 Part 1)
+* **Status**: Accepted
+* **Context**: Transitioning from tree-walk AST interpretation to a high-performance stack-based virtual machine requires a formal opcode specification, instruction encoding format, constant pool management, and disassembler.
+* **Decision**:
+  1. **Opcode Architecture (36 instructions)**:
+     - Literals & Constants: `OP_CONSTANT` (16-bit operand), `OP_NULL`, `OP_TRUE`, `OP_FALSE`.
+     - Stack Ops: `OP_POP`, `OP_DUP`.
+     - Variables: `OP_LOAD_LOCAL`, `OP_STORE_LOCAL` (16-bit slot), `OP_LOAD_GLOBAL`, `OP_STORE_GLOBAL`, `OP_DEFINE_GLOBAL` (16-bit constant string name).
+     - Closures: `OP_GET_UPVALUE`, `OP_SET_UPVALUE` (8-bit index), `OP_CLOSURE`, `OP_CLOSE_UPVALUE`.
+     - Arithmetic & Logic: `OP_ADD`, `OP_SUB`, `OP_MUL`, `OP_DIV`, `OP_MOD`, `OP_NEG`, `OP_NOT`.
+     - Comparisons: `OP_EQ`, `OP_NEQ`, `OP_LT`, `OP_LTE`, `OP_GT`, `OP_GTE`.
+     - Control Flow: `OP_JUMP` (16-bit forward), `OP_JUMP_IF_FALSE` (16-bit forward), `OP_LOOP` (16-bit backward).
+     - Subroutines: `OP_CALL` (8-bit arity), `OP_RETURN`.
+     - Collections: `OP_BUILD_ARRAY` (16-bit count), `OP_BUILD_MAP` (16-bit count), `OP_INDEX_GET`, `OP_INDEX_SET`.
+     - Built-in & Records: `OP_SAY`, `OP_STRUCT_DEF`, `OP_INSTANCE`.
+  2. **Chunk Representation (`UfChunk`)**:
+     Dynamic flat byte array for instructions (`code`), dynamic array of `UfValue` for constants (`constants`), and parallel source line mappings (`lines`).
+  3. **Disassembler**:
+     Formatted bytecode dumper (`uf_chunk_disassemble`) mapping offsets, line breaks, opcode mnemonics, operands, jump targets, and constant pool entries.
+* **Consequences**: Provides the foundational intermediate representation for the bytecode compiler (Section S) and virtual machine (Section T).
+
+
 
 
 
