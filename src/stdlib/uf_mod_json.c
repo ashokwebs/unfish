@@ -1,6 +1,7 @@
 #include "uf_mod_json.h"
 #include "../runtime/uf_runtime.h"
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -299,7 +300,11 @@ static bool stringify_value(StringBuilder* sb, UfValue val, UfJsonVisited* vis) 
             return true;
         case UF_VAL_NUMBER: {
             char num_buf[64];
-            if (val.as.number == (double)(int64_t)val.as.number) {
+            /* fabs(...) < 1e15 must be checked before the int64_t cast below:
+             * converting a double outside int64_t's range (or NaN/infinity)
+             * is undefined behavior in C, so it has to be known-safe first. */
+            if (!isnan(val.as.number) && !isinf(val.as.number) &&
+                fabs(val.as.number) < 1e15 && val.as.number == floor(val.as.number)) {
                 snprintf(num_buf, sizeof(num_buf), "%ld", (long)(int64_t)val.as.number);
             } else {
                 snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);

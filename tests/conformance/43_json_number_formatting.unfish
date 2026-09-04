@@ -1,0 +1,18 @@
+# json.stringify on very large/small numbers must format them in
+# scientific notation (matching how say/print/to_string format numbers),
+# not truncate them to a garbled decimal string (a bug that existed only
+# in the native C99 backend's independent stringifier) or invoke
+# undefined behavior converting an out-of-range double to int64_t (a bug
+# that existed in both the interpreter's and the native backend's
+# independent JSON stringifiers).
+# expect: 1.5e+300
+# expect: 6.022e+23
+# expect: {"big": 1.5e+300, "small": 1.5e-10, "normal": 42}
+# expect: [10000000000, 1e-10, 42]
+
+import json
+
+say(json.stringify(1.5e300))
+say(json.stringify(6.022e23))
+say(json.stringify({"big": 1.5e300, "small": 1.5e-10, "normal": 42}))
+say(json.stringify([1e10, 1e-10, 42]))

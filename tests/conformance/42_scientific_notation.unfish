@@ -1,0 +1,30 @@
+# Scientific/exponent notation number literals (1e10, 6.022e23, 1.5e-10,
+# with optional +/- sign and either case of 'e') must lex, parse, and
+# print correctly, including round-tripping through the formatter and
+# printing very large/small values in scientific notation rather than an
+# expanded (or, in the native backend's case, previously truncated)
+# decimal string.
+# expect: 10000000000
+# expect: 1.5e+300
+# expect: 6.022e+23
+# expect: 1.5e-10
+# expect: 100000
+# expect: 2500
+# expect: -15000000000
+# expect: -1.5e-10
+# expect: 3000
+# expect: 1
+
+say(1e10)
+say(1.5e300)
+say(6.022e23)
+say(1.5e-10)
+say(1E5)
+say(2.5E+3)
+say(-1.5e10)
+say(-1.5e-10)
+
+let a = 1e3
+let b = 2e3
+say(a + b)
+say(1e0)

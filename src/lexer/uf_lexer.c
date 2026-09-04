@@ -176,6 +176,28 @@ static UfToken scan_number(UfLexer* lexer) {
         }
     }
 
+    /* Exponent part: e/E, optional sign, then at least one digit
+     * (e.g. 1e10, 6.022e23, 1.5e-10). Speculatively consume and back out if
+     * it turns out not to be followed by a digit, so `1e` followed by an
+     * identifier (unusual, but not our call to reject) still lexes as the
+     * number `1` followed by an `e...` identifier rather than erroring. */
+    if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+        const char* save_current = lexer->current;
+        uint32_t save_col = lexer->col;
+        advance(lexer); /* consume 'e'/'E' */
+        if (peek(lexer) == '+' || peek(lexer) == '-') {
+            advance(lexer);
+        }
+        if (isdigit((unsigned char)peek(lexer))) {
+            while (isdigit((unsigned char)peek(lexer))) {
+                advance(lexer);
+            }
+        } else {
+            lexer->current = save_current;
+            lexer->col = save_col;
+        }
+    }
+
     size_t len = (size_t)(lexer->current - lexer->start);
     char num_buf[64];
     if (len >= sizeof(num_buf)) len = sizeof(num_buf) - 1;

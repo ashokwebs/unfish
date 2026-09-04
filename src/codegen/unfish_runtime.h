@@ -444,7 +444,9 @@ static inline char* uf_to_str_impl(UfVal v, UfToStrVisited* vis) {
         case UF_RT_NULL: return strdup("null");
         case UF_RT_BOOL: return strdup(v.as.boolean ? "true" : "false");
         case UF_RT_NUMBER: {
-            if (floor(v.as.number) == v.as.number && !isnan(v.as.number) && !isinf(v.as.number)) {
+            if (isnan(v.as.number)) return strdup("nan");
+            if (isinf(v.as.number)) return strdup(v.as.number > 0 ? "inf" : "-inf");
+            if (floor(v.as.number) == v.as.number && fabs(v.as.number) < 1e15) {
                 snprintf(buf, sizeof(buf), "%.0f", v.as.number);
             } else {
                 snprintf(buf, sizeof(buf), "%.14g", v.as.number);
@@ -2165,7 +2167,11 @@ static bool _json_stringify_val(UfJsonSb* sb, UfVal val, UfToStrVisited* vis) {
             return true;
         case UF_RT_NUMBER: {
             char num_buf[64];
-            if (val.as.number == (double)(int64_t)val.as.number && !isnan(val.as.number) && !isinf(val.as.number)) {
+            /* fabs(...) < 1e15 must be checked before the int64_t cast below:
+             * converting a double outside int64_t's range is undefined
+             * behavior in C, so the magnitude has to be known-safe first. */
+            if (!isnan(val.as.number) && !isinf(val.as.number) &&
+                fabs(val.as.number) < 1e15 && val.as.number == floor(val.as.number)) {
                 snprintf(num_buf, sizeof(num_buf), "%ld", (long)(int64_t)val.as.number);
             } else {
                 snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);

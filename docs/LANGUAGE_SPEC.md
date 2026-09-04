@@ -79,7 +79,7 @@ try         while
 ```
 
 ### 2.7. Literals [IMPLEMENTED]
-* **Number**: decimal integers or floats (e.g., `0`, `42`, `3.14159`).
+* **Number**: decimal integers or floats, with an optional scientific/exponent suffix (e.g., `0`, `42`, `3.14159`, `1e10`, `6.022e23`, `1.5e-10`, `2.5E+3`).
 * **String**: delimited by `"..."` supporting `\n`, `\t`, `\"`, `\\`.
 * **Boolean**: `true`, `false`.
 * **Null**: `null`.
