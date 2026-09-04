@@ -1,4 +1,5 @@
 #include "uf_runtime.h"
+#include "uf_fiber.h"
 #include "uf_stdlib.h"
 #include "uf_module.h"
 #include "../compiler/uf_chunk.h"
@@ -589,6 +590,33 @@ void uf_gc_mark_value(UfValue val) {
                 }
             }
         }
+    } else if (val.kind == UF_VAL_FIBER) {
+        if (val.as.fiber && !val.as.fiber->obj.marked) {
+            val.as.fiber->obj.marked = true;
+            uf_gc_mark_value(val.as.fiber->callable);
+            uf_gc_mark_value(val.as.fiber->result);
+            for (size_t i = 0; i < val.as.fiber->argc; ++i) {
+                uf_gc_mark_value(val.as.fiber->args[i]);
+            }
+        }
+    } else if (val.kind == UF_VAL_CHANNEL) {
+        if (val.as.channel && !val.as.channel->obj.marked) {
+            val.as.channel->obj.marked = true;
+            UfChannel* ch = val.as.channel;
+            for (size_t i = 0; i < ch->count; ++i) {
+                uf_gc_mark_value(ch->buffer[(ch->head + i) % ch->capacity]);
+            }
+            UfFiber* f = ch->wait_send_head;
+            while (f) {
+                uf_gc_mark_value(uf_val_fiber(NULL, f));
+                f = f->next;
+            }
+            f = ch->wait_recv_head;
+            while (f) {
+                uf_gc_mark_value(uf_val_fiber(NULL, f));
+                f = f->next;
+            }
+        }
     }
 }
 
@@ -638,6 +666,19 @@ void uf_gc_collect(UfRuntime* rt) {
         me = me->next;
     }
 
+    /* Mark fibers in scheduler queue */
+    if (rt->scheduler) {
+        UfScheduler* s = (UfScheduler*)rt->scheduler;
+        if (s->current) {
+            uf_gc_mark_value(uf_val_fiber(rt, s->current));
+        }
+        UfFiber* f = s->run_head;
+        while (f) {
+            uf_gc_mark_value(uf_val_fiber(rt, f));
+            f = f->next;
+        }
+    }
+
     /* 2. Sweep */
     UfObj** curr = &rt->all_objects;
     while (*curr) {
@@ -683,6 +724,10 @@ void uf_gc_collect(UfRuntime* rt) {
                 free(cl);
             } else if (obj->kind == UF_OBJ_UPVALUE) {
                 free(obj);
+            } else if (obj->kind == UF_OBJ_FIBER) {
+                uf_fiber_free((UfFiber*)obj);
+            } else if (obj->kind == UF_OBJ_CHANNEL) {
+                uf_channel_free((UfChannel*)obj);
             } else {
                 free(obj);
             }
@@ -732,6 +777,8 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->debug_user_ctx = NULL;
     rt->argc = 0;
     rt->argv = NULL;
+    rt->scheduler = NULL;
+    uf_scheduler_init(rt);
 
     register_builtins(rt);
     uf_stdlib_register_runtime(rt);
@@ -749,6 +796,7 @@ void uf_runtime_free(UfRuntime* rt) {
     rt->temp_root_count = 0;
 
     uf_module_free_all(rt);
+    uf_scheduler_free(rt);
 
     UfObj* obj = rt->all_objects;
     while (obj) {
@@ -789,6 +837,10 @@ void uf_runtime_free(UfRuntime* rt) {
             free(cl);
         } else if (obj->kind == UF_OBJ_UPVALUE) {
             free(obj);
+        } else if (obj->kind == UF_OBJ_FIBER) {
+            uf_fiber_free((UfFiber*)obj);
+        } else if (obj->kind == UF_OBJ_CHANNEL) {
+            uf_channel_free((UfChannel*)obj);
         } else {
             free(obj);
         }
@@ -901,6 +953,9 @@ void uf_runtime_error(UfRuntime* rt, SourceSpan span, const char* fmt, ...) {
 }
 
 UfValue uf_runtime_call(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span) {
+    if (callee.kind == UF_VAL_NATIVE_FN && callee.as.native_fn.fn) {
+        return callee.as.native_fn.fn(rt, (int)argc, args);
+    }
     if (!rt->call_fn) {
         uf_runtime_error(rt, span, "Call handler not registered in runtime");
         return uf_val_null();

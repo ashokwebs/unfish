@@ -80,6 +80,7 @@ struct UfRuntime {
 
     UfCallValueFn call_fn;
     void* active_vm;
+    void* scheduler;
 
     FILE* out_stream;
     FILE* err_stream;

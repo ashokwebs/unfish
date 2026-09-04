@@ -490,3 +490,26 @@
      - Added comprehensive unit test suite `tests/unit/test_lsp.c` verifying handshakes, diagnostics, hover, completion, and formatting.
      - Clean compilation and execution under ASan and UBSan.
 * **Consequences**: Unfish now provides full first-class editor integration and modern developer ergonomics across all development environments.
+
+## ADR 033: Cooperative Fibers, Channels & Concurrency Runtime
+* **Date**: Milestone 23 (Phase 5 Part 8)
+* **Status**: Accepted
+* **Context**: Modern programming paradigms require asynchronous tasks and inter-task communication without the heavy overhead and race conditions of OS threads. Unfish requires lightweight cooperative multitasking and Communicating Sequential Processes (CSP) channels.
+* **Decision**:
+  1. **Fiber Abstraction (`UfFiber`, `UF_OBJ_FIBER`, `UF_VAL_FIBER`)**:
+     - Lightweight cooperative task representation with dedicated ID, execution state (`NEW`, `RUNNABLE`, `RUNNING`, `WAITING`, `DEAD`), callable object, argument vector, and return value.
+     - Registered in the runtime object graph and collected by mark-sweep GC.
+  2. **Channel Communication (`UfChannel`, `UF_OBJ_CHANNEL`, `UF_VAL_CHANNEL`)**:
+     - CSP-style channels supporting buffered and unbuffered message passing.
+     - Dynamic circular buffer that expands gracefully under load.
+     - Channel state tracking (`closed`) with safe null termination upon channel shutdown.
+  3. **Round-Robin Fiber Scheduler (`UfScheduler`)**:
+     - Embedded in `UfRuntime` with doubly linked task queue (`run_head` / `run_tail`).
+     - Automatic root tracking in `uf_gc_collect()` to protect queued fibers from garbage collection during yields.
+  4. **Standard Library & Built-in Primitives**:
+     - Built-in functions: `spawn(callable, ...)`, `yield(val)`, `channel(capacity)`, `send(ch, val)`, `recv(ch)`, `close_channel(ch)`, and `run_scheduler()`.
+     - Registered in both runtime environment and semantic analyzer table.
+  5. **Verification**:
+     - Added comprehensive unit test suite `tests/unit/test_fiber.c` testing task spawning, buffered FIFO queueing, buffer overflow resizing, full script-level execution with worker fibers communicating over channels, and GC marking under memory collection pressure.
+     - Verified 100% pass across all 15 unit test suites, stress tests, 51/51 conformance tests, and 51/51 differential parity tests under ASan/UBSan with zero leaks.
+* **Consequences**: Unfish supports lightweight, deterministic concurrency and CSP-style message passing with zero data races.

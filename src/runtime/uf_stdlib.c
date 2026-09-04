@@ -2,6 +2,7 @@
 #include "uf_value.h"
 #include "uf_env.h"
 #include "uf_runtime.h"
+#include "uf_fiber.h"
 #include "../semantic/uf_semantic.h"
 #include <ctype.h>
 #include <math.h>
@@ -531,6 +532,79 @@ static UfValue std_error(UfRuntime* rt, int argc, UfValue* args) {
 }
 
 /* ========================================================================= */
+/* CONCURRENCY / FIBER / CHANNEL FUNCTIONS                                   */
+/* ========================================================================= */
+
+static UfValue std_spawn(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'spawn()' expects at least 1 callable argument");
+        return uf_val_null();
+    }
+    UfValue callable = args[0];
+    size_t fiber_argc = (size_t)(argc > 1 ? argc - 1 : 0);
+    UfValue* fiber_args = (argc > 1) ? &args[1] : NULL;
+    UfFiber* fiber = uf_fiber_create(rt, callable, fiber_argc, fiber_args);
+    if (!fiber) return uf_val_null();
+    uf_scheduler_spawn(rt, fiber);
+    return uf_val_fiber(rt, fiber);
+}
+
+static UfValue std_yield(UfRuntime* rt, int argc, UfValue* args) {
+    UfValue val = (argc > 0) ? args[0] : uf_val_null();
+    return uf_scheduler_yield(rt, val);
+}
+
+static UfValue std_channel(UfRuntime* rt, int argc, UfValue* args) {
+    size_t cap = 0;
+    if (argc > 0 && args[0].kind == UF_VAL_NUMBER) {
+        if (args[0].as.number > 0) {
+            cap = (size_t)args[0].as.number;
+        }
+    }
+    UfChannel* ch = uf_channel_create(rt, cap);
+    if (!ch) return uf_val_null();
+    return uf_val_channel(rt, ch);
+}
+
+static UfValue std_send(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_CHANNEL) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'send()' expects a channel and a value");
+        return uf_val_bool(false);
+    }
+    bool ok = uf_channel_send(rt, args[0].as.channel, args[1]);
+    return uf_val_bool(ok);
+}
+
+static UfValue std_recv(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_CHANNEL) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'recv()' expects a channel");
+        return uf_val_null();
+    }
+    UfValue out = uf_val_null();
+    uf_channel_recv(rt, args[0].as.channel, &out);
+    return out;
+}
+
+static UfValue std_close_channel(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_CHANNEL) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'close_channel()' expects a channel");
+        return uf_val_null();
+    }
+    uf_channel_close(rt, args[0].as.channel);
+    return uf_val_null();
+}
+
+static UfValue std_run_scheduler(UfRuntime* rt, int argc, UfValue* args) {
+    (void)argc; (void)args;
+    int count = uf_scheduler_run(rt);
+    return uf_val_number((double)count);
+}
+
+/* ========================================================================= */
 /* REGISTRATION                                                              */
 /* ========================================================================= */
 
@@ -572,6 +646,15 @@ void uf_stdlib_register_runtime(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "PI",       uf_val_number(3.14159265358979323846));
     uf_env_declare(rt->global_env, "E",        uf_val_number(2.71828182845904523536));
     uf_env_declare(rt->global_env, "INFINITY", uf_val_number(HUGE_VAL));
+
+    /* Concurrency functions */
+    uf_env_declare(rt->global_env, "spawn",         uf_val_native("spawn",         std_spawn,         -1));
+    uf_env_declare(rt->global_env, "yield",         uf_val_native("yield",         std_yield,         -1));
+    uf_env_declare(rt->global_env, "channel",       uf_val_native("channel",       std_channel,       -1));
+    uf_env_declare(rt->global_env, "send",          uf_val_native("send",          std_send,          2));
+    uf_env_declare(rt->global_env, "recv",          uf_val_native("recv",          std_recv,          1));
+    uf_env_declare(rt->global_env, "close_channel", uf_val_native("close_channel", std_close_channel, 1));
+    uf_env_declare(rt->global_env, "run_scheduler", uf_val_native("run_scheduler", std_run_scheduler, 0));
 
     /* Error handling */
     uf_env_declare(rt->global_env, "error", uf_val_native("error", std_error, -1));
@@ -618,6 +701,15 @@ void uf_stdlib_register_semantic(struct UfSemanticAnalyzer* analyzer) {
     uf_semantic_add_symbol(analyzer, "PI",       UF_SYM_VAR, span, -1);
     uf_semantic_add_symbol(analyzer, "E",        UF_SYM_VAR, span, -1);
     uf_semantic_add_symbol(analyzer, "INFINITY", UF_SYM_VAR, span, -1);
+
+    /* Concurrency functions */
+    uf_semantic_add_symbol(analyzer, "spawn",         UF_SYM_BUILTIN, span, -1);
+    uf_semantic_add_symbol(analyzer, "yield",         UF_SYM_BUILTIN, span, -1);
+    uf_semantic_add_symbol(analyzer, "channel",       UF_SYM_BUILTIN, span, -1);
+    uf_semantic_add_symbol(analyzer, "send",          UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "recv",          UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "close_channel", UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "run_scheduler", UF_SYM_BUILTIN, span, 0);
 
     /* Error handling */
     uf_semantic_add_symbol(analyzer, "error", UF_SYM_BUILTIN, span, -1);

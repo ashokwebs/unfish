@@ -24,7 +24,9 @@ typedef enum {
     UF_VAL_STRUCT_DEF,
     UF_VAL_INSTANCE,
     UF_VAL_BYTECODE_FN,
-    UF_VAL_CLOSURE
+    UF_VAL_CLOSURE,
+    UF_VAL_FIBER,
+    UF_VAL_CHANNEL
 } UfValueKind;
 
 struct UfBytecodeFunction;
@@ -33,6 +35,10 @@ struct UfClosureObject;
 typedef struct UfClosureObject UfClosureObject;
 struct UfUpvalueCell;
 typedef struct UfUpvalueCell UfUpvalueCell;
+struct UfFiber;
+typedef struct UfFiber UfFiber;
+struct UfChannel;
+typedef struct UfChannel UfChannel;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
 
@@ -106,6 +112,8 @@ struct UfValue {
         UfInstanceObject* instance;
         UfBytecodeFunction* bytecode_fn;
         UfClosureObject* closure;
+        UfFiber* fiber;
+        UfChannel* channel;
     } as;
 };
 
@@ -151,6 +159,8 @@ UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod);
 UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count);
 UfValue uf_val_instance(UfRuntime* rt, UfStructDefObject* def, UfValue* fields, size_t count);
 UfValue uf_val_bytecode_fn(UfRuntime* rt, UfBytecodeFunction* fn);
+UfValue uf_val_fiber(UfRuntime* rt, UfFiber* fiber);
+UfValue uf_val_channel(UfRuntime* rt, UfChannel* channel);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

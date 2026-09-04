@@ -1,5 +1,6 @@
 #include "uf_value.h"
 #include "uf_runtime.h"
+#include "uf_fiber.h"
 #include "uf_env.h"
 #include "uf_module.h"
 #include "../compiler/uf_chunk.h"
@@ -476,6 +477,8 @@ bool uf_val_is_truthy(UfValue val) {
         case UF_VAL_INSTANCE:
         case UF_VAL_BYTECODE_FN:
         case UF_VAL_CLOSURE:
+        case UF_VAL_FIBER:
+        case UF_VAL_CHANNEL:
             return true;
     }
     return false;
@@ -540,6 +543,10 @@ bool uf_val_equal(UfValue a, UfValue b) {
             return a.as.bytecode_fn == b.as.bytecode_fn;
         case UF_VAL_CLOSURE:
             return a.as.closure == b.as.closure;
+        case UF_VAL_FIBER:
+            return a.as.fiber == b.as.fiber;
+        case UF_VAL_CHANNEL:
+            return a.as.channel == b.as.channel;
     }
     return false;
 }
@@ -727,6 +734,19 @@ char* uf_val_to_string(UfValue val) {
             snprintf(fbuf, sizeof(fbuf), "<fn %s>", fname);
             return strdup(fbuf);
         }
+        case UF_VAL_FIBER: {
+            char fbuf[128];
+            snprintf(fbuf, sizeof(fbuf), "<fiber #%lu>",
+                     (unsigned long)(val.as.fiber ? val.as.fiber->id : 0));
+            return strdup(fbuf);
+        }
+        case UF_VAL_CHANNEL: {
+            char cbuf[128];
+            snprintf(cbuf, sizeof(cbuf), "<channel cap=%zu len=%zu>",
+                     val.as.channel ? val.as.channel->capacity : 0,
+                     val.as.channel ? val.as.channel->count : 0);
+            return strdup(cbuf);
+        }
     }
     return strdup("<unknown>");
 }
@@ -747,6 +767,8 @@ const char* uf_val_type_name(UfValue val) {
         case UF_VAL_MODULE:      return "module";
         case UF_VAL_STRUCT_DEF:  return "struct";
         case UF_VAL_INSTANCE:    return (val.as.instance && val.as.instance->def && val.as.instance->def->name) ? val.as.instance->def->name : "instance";
+        case UF_VAL_FIBER:       return "fiber";
+        case UF_VAL_CHANNEL:     return "channel";
     }
     return "<unknown>";
 }
