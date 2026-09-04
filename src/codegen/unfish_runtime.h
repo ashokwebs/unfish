@@ -590,7 +590,45 @@ static inline void uf_print(UfVal v) {
 static inline UfVal uf_get(UfVal target, UfVal index);
 static inline UfVal uf_map_has_key(UfVal target, UfVal key);
 
-static inline bool uf_eq_bool(UfVal a, UfVal b) {
+/* Tracks the (a, b) object-pointer pairs currently being compared on the
+ * current recursive call chain, so comparing two distinct-but-cyclic
+ * structures doesn't recurse forever and crash with a stack overflow. A
+ * pair re-encountered while already being compared is treated as equal
+ * (the standard co-inductive convention for equality on cyclic structures).
+ */
+typedef struct {
+    const void* a;
+    const void* b;
+} UfEqPair;
+
+typedef struct {
+    UfEqPair* pairs;
+    size_t count;
+    size_t cap;
+} UfEqVisited;
+
+static inline bool uf_eq_visit_enter(UfEqVisited* vis, const void* a, const void* b) {
+    for (size_t i = 0; i < vis->count; ++i) {
+        if (vis->pairs[i].a == a && vis->pairs[i].b == b) return false;
+    }
+    if (vis->count == vis->cap) {
+        size_t new_cap = vis->cap == 0 ? 8 : vis->cap * 2;
+        UfEqPair* new_pairs = (UfEqPair*)realloc(vis->pairs, new_cap * sizeof(UfEqPair));
+        if (!new_pairs) return false;
+        vis->pairs = new_pairs;
+        vis->cap = new_cap;
+    }
+    vis->pairs[vis->count].a = a;
+    vis->pairs[vis->count].b = b;
+    vis->count++;
+    return true;
+}
+
+static inline void uf_eq_visit_leave(UfEqVisited* vis) {
+    if (vis->count > 0) vis->count--;
+}
+
+static inline bool uf_eq_bool_impl(UfVal a, UfVal b, UfEqVisited* vis) {
     if (a.kind != b.kind) return false;
     switch (a.kind) {
         case UF_RT_NULL: return true;
@@ -599,33 +637,55 @@ static inline bool uf_eq_bool(UfVal a, UfVal b) {
         case UF_RT_STRING: return strcmp(a.as.string->chars, b.as.string->chars) == 0;
         case UF_RT_ERROR: return a.as.error == b.as.error;
         case UF_RT_ARRAY: {
+            if (a.as.array == b.as.array) return true;
             if (a.as.array->count != b.as.array->count) return false;
+            if (!uf_eq_visit_enter(vis, a.as.array, b.as.array)) return true;
             for (size_t i = 0; i < a.as.array->count; ++i) {
-                if (!uf_eq_bool(a.as.array->elements[i], b.as.array->elements[i])) return false;
+                if (!uf_eq_bool_impl(a.as.array->elements[i], b.as.array->elements[i], vis)) {
+                    uf_eq_visit_leave(vis);
+                    return false;
+                }
             }
+            uf_eq_visit_leave(vis);
             return true;
         }
         case UF_RT_MAP: {
+            if (a.as.map == b.as.map) return true;
             if (a.as.map->count != b.as.map->count) return false;
+            if (!uf_eq_visit_enter(vis, a.as.map, b.as.map)) return true;
             for (size_t i = 0; i < a.as.map->order_count; ++i) {
                 UfVal key = a.as.map->order_keys[i];
-                if (!uf_truthy(uf_map_has_key(b, key))) return false;
+                if (!uf_truthy(uf_map_has_key(b, key))) { uf_eq_visit_leave(vis); return false; }
                 UfVal val_a = uf_get(a, key);
                 UfVal val_b = uf_get(b, key);
-                if (!uf_eq_bool(val_a, val_b)) return false;
+                if (!uf_eq_bool_impl(val_a, val_b, vis)) { uf_eq_visit_leave(vis); return false; }
             }
+            uf_eq_visit_leave(vis);
             return true;
         }
         case UF_RT_INSTANCE: {
+            if (a.as.instance == b.as.instance) return true;
             if (strcmp(a.as.instance->name, b.as.instance->name) != 0) return false;
             if (a.as.instance->field_count != b.as.instance->field_count) return false;
+            if (!uf_eq_visit_enter(vis, a.as.instance, b.as.instance)) return true;
             for (size_t i = 0; i < a.as.instance->field_count; ++i) {
-                if (!uf_eq_bool(a.as.instance->fields[i], b.as.instance->fields[i])) return false;
+                if (!uf_eq_bool_impl(a.as.instance->fields[i], b.as.instance->fields[i], vis)) {
+                    uf_eq_visit_leave(vis);
+                    return false;
+                }
             }
+            uf_eq_visit_leave(vis);
             return true;
         }
         default: return a.as.ptr == b.as.ptr;
     }
+}
+
+static inline bool uf_eq_bool(UfVal a, UfVal b) {
+    UfEqVisited vis = {0};
+    bool result = uf_eq_bool_impl(a, b, &vis);
+    free(vis.pairs);
+    return result;
 }
 
 static inline UfVal uf_eq(UfVal a, UfVal b) { return uf_bool(uf_eq_bool(a, b)); }

@@ -1,11 +1,18 @@
 # A self-referential or mutually-referential array/map/struct must print
 # as "{...}"/"[...]"/"Name(...)" for the repeated container instead of
 # recursing forever (this used to stack-overflow-crash the interpreter,
-# VM, and native binary alike).
+# VM, and native binary alike). Equality (==) on cyclic structures must
+# likewise terminate instead of recursing forever, both for a value
+# compared to itself and for two distinct-but-structurally-cyclic values
+# compared to each other (co-inductively treated as equal, matching how
+# Python's list/dict equality handles cycles).
 # expect: [[...]]
 # expect: {"self": {...}}
 # expect: {"y": {"x": {...}}}
 # expect: Node(val: 1, next: null)
+# expect: true
+# expect: true
+# expect: true
 
 let arr = []
 push(arr, arr)
@@ -27,3 +34,13 @@ struct Node:
 
 let n = Node(1, null)
 say(n)
+
+say(m == m)
+
+let m2 = {}
+m2["self"] = m2
+say(m == m2)
+
+let arr2 = []
+push(arr2, arr2)
+say(arr == arr2)

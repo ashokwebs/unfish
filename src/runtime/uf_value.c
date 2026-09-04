@@ -486,7 +486,46 @@ bool uf_val_is_truthy(UfValue val) {
     return false;
 }
 
-bool uf_val_equal(UfValue a, UfValue b) {
+/* Tracks the (a, b) object-pointer pairs currently being compared on the
+ * current recursive call chain, so comparing two distinct-but-cyclic
+ * structures (e.g. `let m1 = {}; m1["self"] = m1; let m2 = {}; m2["self"] =
+ * m2; m1 == m2`) doesn't recurse forever and crash with a stack overflow.
+ * A pair re-encountered while already being compared is treated as equal
+ * (the standard co-inductive convention for equality on cyclic structures —
+ * the same one Python's list/dict equality uses). */
+typedef struct {
+    const void* a;
+    const void* b;
+} UfEqPair;
+
+typedef struct {
+    UfEqPair* pairs;
+    size_t count;
+    size_t cap;
+} UfEqVisited;
+
+static bool uf_eq_visit_enter(UfEqVisited* vis, const void* a, const void* b) {
+    for (size_t i = 0; i < vis->count; ++i) {
+        if (vis->pairs[i].a == a && vis->pairs[i].b == b) return false;
+    }
+    if (vis->count == vis->cap) {
+        size_t new_cap = vis->cap == 0 ? 8 : vis->cap * 2;
+        UfEqPair* new_pairs = (UfEqPair*)realloc(vis->pairs, new_cap * sizeof(UfEqPair));
+        if (!new_pairs) return false;
+        vis->pairs = new_pairs;
+        vis->cap = new_cap;
+    }
+    vis->pairs[vis->count].a = a;
+    vis->pairs[vis->count].b = b;
+    vis->count++;
+    return true;
+}
+
+static void uf_eq_visit_leave(UfEqVisited* vis) {
+    if (vis->count > 0) vis->count--;
+}
+
+static bool uf_val_equal_impl(UfValue a, UfValue b, UfEqVisited* vis) {
     if (a.kind != b.kind) return false;
 
     switch (a.kind) {
@@ -506,23 +545,28 @@ bool uf_val_equal(UfValue a, UfValue b) {
         case UF_VAL_ARRAY: {
             if (a.as.array == b.as.array) return true;
             if (a.as.array->count != b.as.array->count) return false;
+            if (!uf_eq_visit_enter(vis, a.as.array, b.as.array)) return true;
             for (size_t i = 0; i < a.as.array->count; ++i) {
-                if (!uf_val_equal(a.as.array->elements[i], b.as.array->elements[i])) {
+                if (!uf_val_equal_impl(a.as.array->elements[i], b.as.array->elements[i], vis)) {
+                    uf_eq_visit_leave(vis);
                     return false;
                 }
             }
+            uf_eq_visit_leave(vis);
             return true;
         }
         case UF_VAL_MAP: {
             if (a.as.map == b.as.map) return true;
             if (a.as.map->count != b.as.map->count) return false;
+            if (!uf_eq_visit_enter(vis, a.as.map, b.as.map)) return true;
             for (size_t i = 0; i < a.as.map->order_count; ++i) {
                 UfValue k = a.as.map->order_keys[i];
-                if (!uf_map_has(b.as.map, k)) return false;
+                if (!uf_map_has(b.as.map, k)) { uf_eq_visit_leave(vis); return false; }
                 UfValue va = uf_map_get(a.as.map, k);
                 UfValue vb = uf_map_get(b.as.map, k);
-                if (!uf_val_equal(va, vb)) return false;
+                if (!uf_val_equal_impl(va, vb, vis)) { uf_eq_visit_leave(vis); return false; }
             }
+            uf_eq_visit_leave(vis);
             return true;
         }
         case UF_VAL_ERROR:
@@ -532,13 +576,17 @@ bool uf_val_equal(UfValue a, UfValue b) {
         case UF_VAL_STRUCT_DEF:
             return a.as.struct_def == b.as.struct_def;
         case UF_VAL_INSTANCE: {
+            if (a.as.instance == b.as.instance) return true;
             if (a.as.instance->def != b.as.instance->def) return false;
             if (a.as.instance->field_count != b.as.instance->field_count) return false;
+            if (!uf_eq_visit_enter(vis, a.as.instance, b.as.instance)) return true;
             for (size_t i = 0; i < a.as.instance->field_count; ++i) {
-                if (!uf_val_equal(a.as.instance->fields[i], b.as.instance->fields[i])) {
+                if (!uf_val_equal_impl(a.as.instance->fields[i], b.as.instance->fields[i], vis)) {
+                    uf_eq_visit_leave(vis);
                     return false;
                 }
             }
+            uf_eq_visit_leave(vis);
             return true;
         }
         case UF_VAL_BYTECODE_FN:
@@ -558,6 +606,13 @@ bool uf_val_equal(UfValue a, UfValue b) {
         }
     }
     return false;
+}
+
+bool uf_val_equal(UfValue a, UfValue b) {
+    UfEqVisited vis = {0};
+    bool result = uf_val_equal_impl(a, b, &vis);
+    free(vis.pairs);
+    return result;
 }
 
 /* Tracks the array/map/instance object pointers currently being stringified
