@@ -1,0 +1,46 @@
+{
+  "name": "unfish-language",
+  "displayName": "Unfish Programming Language",
+  "description": "Rich language support and Language Server Protocol for Unfish",
+  "version": "0.1.0",
+  "publisher": "unfish",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:unfish"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "unfish",
+        "aliases": [
+          "Unfish",
+          "unfish"
+        ],
+        "extensions": [
+          ".unfish"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "unfish",
+        "scopeName": "source.unfish",
+        "path": "./syntaxes/unfish.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -b",
+    "watch": "tsc -b -w"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}

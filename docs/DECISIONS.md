@@ -470,3 +470,23 @@
      - Added unit test suite `tests/unit/test_optimize.c` verifying numerical, string, boolean folding, dead code pruning, and disassembled bytecode simplification.
      - Full test suites and differential tests verified with zero leaks under ASan/UBSan.
 * **Consequences**: Improves VM execution throughput and reduces compiled bytecode chunk size with zero semantic divergence.
+
+## ADR 032: Language Server Protocol Engine & Editor Integration
+* **Date**: Milestone 22 (Phase 5 Part 7)
+* **Status**: Accepted
+* **Context**: Professional developer experience requires modern IDE features: real-time diagnostics, hover documentation, go-to-definition, autocomplete, and automated code formatting across VS Code and other LSP-compliant editors.
+* **Decision**:
+  1. **Built-in Language Server (`unfish lsp`)**:
+     - Implemented standard JSON-RPC 2.0 transport over stdin/stdout with `Content-Length` framing (`src/lsp/uf_lsp.h`, `src/lsp/uf_lsp.c`).
+  2. **LSP Protocol Capabilities**:
+     - **Diagnostics (`textDocument/publishDiagnostics`)**: Real-time syntax and semantic errors/warnings reported as documents open and change.
+     - **Hover (`textDocument/hover`)**: Markdown documentation and type signatures for keywords, builtins (`say`, `len`, `push`, etc.), and user-defined functions/variables.
+     - **Definition (`textDocument/definition`)**: Navigates directly to declaration source spans for functions, structs, and variables.
+     - **Completion (`textDocument/completion`)**: Contextual auto-completions for keywords, builtins, and symbols.
+     - **Formatting (`textDocument/formatting`)**: Canonical code formatting via `uf_formatter`.
+  3. **VS Code Extension Skeleton (`editors/vscode/`)**:
+     - Created `package.json`, language configuration, TextMate syntax grammar (`syntaxes/unfish.tmLanguage.json`), and client bootstrap (`extension.js`).
+  4. **Verification**:
+     - Added comprehensive unit test suite `tests/unit/test_lsp.c` verifying handshakes, diagnostics, hover, completion, and formatting.
+     - Clean compilation and execution under ASan and UBSan.
+* **Consequences**: Unfish now provides full first-class editor integration and modern developer ergonomics across all development environments.

@@ -32,7 +32,8 @@ SRCS = src/common/uf_arena.c \
        src/compiler/uf_optimize.c \
        src/vm/uf_vm.c \
        src/vm/uf_disasm.c \
-       src/codegen/uf_emit_c.c
+       src/codegen/uf_emit_c.c \
+       src/lsp/uf_lsp.c
 
 CLI_SRC = src/cli/main.c
 
@@ -68,6 +69,7 @@ test: $(BIN_DIR)/unfish
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_disasm.c $(LDFLAGS) -o $(BIN_DIR)/test_disasm
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_emit_c.c $(LDFLAGS) -o $(BIN_DIR)/test_emit_c
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_optimize.c $(LDFLAGS) -o $(BIN_DIR)/test_optimize
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_lsp.c $(LDFLAGS) -o $(BIN_DIR)/test_lsp
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	@echo "=== Running Unit Tests ==="
 	@$(BIN_DIR)/test_lexer
@@ -83,6 +85,7 @@ test: $(BIN_DIR)/unfish
 	@$(BIN_DIR)/test_disasm
 	@$(BIN_DIR)/test_emit_c
 	@$(BIN_DIR)/test_optimize
+	@$(BIN_DIR)/test_lsp
 	@echo "=== Running Stress Tests ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests ==="
@@ -105,6 +108,7 @@ test-asan:
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_disasm.c $(LDFLAGS) -o $(BIN_DIR)/test_disasm
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_emit_c.c $(LDFLAGS) -o $(BIN_DIR)/test_emit_c
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_optimize.c $(LDFLAGS) -o $(BIN_DIR)/test_optimize
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_lsp.c $(LDFLAGS) -o $(BIN_DIR)/test_lsp
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) $(CLI_SRC) $(LDFLAGS) -o $(BIN_DIR)/unfish
 	@echo "=== Running Unit Tests with ASan/UBSan ==="
@@ -121,6 +125,7 @@ test-asan:
 	@$(BIN_DIR)/test_disasm
 	@$(BIN_DIR)/test_emit_c
 	@$(BIN_DIR)/test_optimize
+	@$(BIN_DIR)/test_lsp
 	@echo "=== Running Stress Tests with ASan/UBSan ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests with ASan/UBSan ==="

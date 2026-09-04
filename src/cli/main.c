@@ -17,6 +17,7 @@
 #include "../vm/uf_vm.h"
 #include "../vm/uf_disasm.h"
 #include "../codegen/uf_emit_c.h"
+#include "../lsp/uf_lsp.h"
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -63,6 +64,7 @@ static void print_usage(const char* prog) {
     printf("  %s build [-o <output>] <file.unfish> Compile program to native executable\n", prog);
     printf("  %s ast <file.unfish>              Dump parsed Abstract Syntax Tree\n", prog);
     printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
+    printf("  %s lsp                            Launch Language Server Protocol (LSP) server\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
     printf("  %s version                        Display version and build information\n", prog);
     printf("  %s [--strict] [--vm] [--debug] <file.unfish> Shorthand for 'run <file.unfish>'\n", prog);
@@ -839,6 +841,10 @@ int main(int argc, char* argv[]) {
             return 64;
         }
         return cmd_build(file_path, out_bin_path);
+    }
+
+    if (strcmp(cmd, "lsp") == 0) {
+        return uf_lsp_run(stdin, stdout);
     }
 
     if (strcmp(cmd, "run") == 0) {

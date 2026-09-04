@@ -8,6 +8,8 @@ void uf_diag_reporter_init(UfDiagnosticReporter* reporter, const char* file_name
     reporter->use_color = isatty(fileno(stderr));
     reporter->error_count = 0;
     reporter->warning_count = 0;
+    reporter->callback = NULL;
+    reporter->user_data = NULL;
 }
 
 static const char* diag_kind_str(UfDiagKind kind) {
@@ -42,6 +44,11 @@ void uf_report_diag(UfDiagnosticReporter* reporter, UfDiagKind kind, SourceSpan 
         reporter->warning_count++;
     } else if (kind != UF_DIAG_NOTE) {
         reporter->error_count++;
+    }
+
+    if (reporter->callback) {
+        reporter->callback(reporter->user_data, kind, span, message, hint);
+        return;
     }
 
     const char* reset = reporter->use_color ? "\033[0m" : "";
