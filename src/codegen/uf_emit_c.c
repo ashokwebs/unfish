@@ -34,8 +34,13 @@ typedef struct {
     const UfExpr* fn_expr;
     const UfStmt* fn_stmt;
     int id;
+    int parent_id;              /* id of nearest enclosing lambda, or -1 if
+                                  * nested directly in a top-level function */
     const char* captures[32];
     size_t capture_count;
+    const char* own_locals[64]; /* names let/for/catch-bound directly in this
+                                  * lambda's own body (not in nested lambdas) */
+    size_t own_local_count;
 } UfLambdaInfo;
 
 static const char* lambda_name(const UfLambdaInfo* l) {
@@ -214,131 +219,143 @@ static bool is_builtin_name(const char* name) {
     return false;
 }
 
-static void collect_lambdas_expr(const UfExpr* expr);
-static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel);
+static void collect_lambdas_expr(const UfExpr* expr, int parent_id);
+static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel, int parent_id);
 
-static void collect_lambdas_expr(const UfExpr* expr) {
+static void collect_lambdas_expr(const UfExpr* expr, int parent_id) {
     if (!expr || !g_ctx) return;
     if (expr->kind == UF_EXPR_FUNCTION) {
+        int this_id = -1;
         if (g_ctx->lambda_count < 256) {
+            this_id = (int)g_ctx->lambda_count;
             g_ctx->lambdas[g_ctx->lambda_count].fn_expr = expr;
             g_ctx->lambdas[g_ctx->lambda_count].fn_stmt = NULL;
-            g_ctx->lambdas[g_ctx->lambda_count].id = (int)g_ctx->lambda_count;
+            g_ctx->lambdas[g_ctx->lambda_count].id = this_id;
+            g_ctx->lambdas[g_ctx->lambda_count].parent_id = parent_id;
             g_ctx->lambdas[g_ctx->lambda_count].capture_count = 0;
+            g_ctx->lambdas[g_ctx->lambda_count].own_local_count = 0;
             g_ctx->lambda_count++;
         }
-        collect_lambdas_stmt(expr->as.fn_expr.body, false);
+        collect_lambdas_stmt(expr->as.fn_expr.body, false, this_id);
         return;
     }
     switch (expr->kind) {
         case UF_EXPR_UNARY:
-            collect_lambdas_expr(expr->as.unary.operand);
+            collect_lambdas_expr(expr->as.unary.operand, parent_id);
             break;
         case UF_EXPR_BINARY:
-            collect_lambdas_expr(expr->as.binary.left);
-            collect_lambdas_expr(expr->as.binary.right);
+            collect_lambdas_expr(expr->as.binary.left, parent_id);
+            collect_lambdas_expr(expr->as.binary.right, parent_id);
             break;
         case UF_EXPR_CALL:
-            collect_lambdas_expr(expr->as.call.callee);
+            collect_lambdas_expr(expr->as.call.callee, parent_id);
             for (size_t i = 0; i < expr->as.call.argc; ++i) {
-                collect_lambdas_expr(expr->as.call.args[i]);
+                collect_lambdas_expr(expr->as.call.args[i], parent_id);
             }
             break;
         case UF_EXPR_GROUPING:
-            collect_lambdas_expr(expr->as.grouping.inner);
+            collect_lambdas_expr(expr->as.grouping.inner, parent_id);
             break;
         case UF_EXPR_ARRAY:
             for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
-                collect_lambdas_expr(expr->as.array_lit.elements[i]);
+                collect_lambdas_expr(expr->as.array_lit.elements[i], parent_id);
             }
             break;
         case UF_EXPR_MAP:
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
-                collect_lambdas_expr(expr->as.map_lit.keys[i]);
-                collect_lambdas_expr(expr->as.map_lit.values[i]);
+                collect_lambdas_expr(expr->as.map_lit.keys[i], parent_id);
+                collect_lambdas_expr(expr->as.map_lit.values[i], parent_id);
             }
             break;
         case UF_EXPR_INDEX:
-            collect_lambdas_expr(expr->as.index_expr.target);
-            collect_lambdas_expr(expr->as.index_expr.index);
+            collect_lambdas_expr(expr->as.index_expr.target, parent_id);
+            collect_lambdas_expr(expr->as.index_expr.index, parent_id);
             break;
         default:
             break;
     }
 }
 
-static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel) {
+static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel, int parent_id) {
     if (!stmt || !g_ctx) return;
     switch (stmt->kind) {
         case UF_STMT_LET:
-            collect_lambdas_expr(stmt->as.let_stmt.init);
+            collect_lambdas_expr(stmt->as.let_stmt.init, parent_id);
             break;
         case UF_STMT_ASSIGN:
-            collect_lambdas_expr(stmt->as.assign_stmt.value);
+            collect_lambdas_expr(stmt->as.assign_stmt.value, parent_id);
             break;
         case UF_STMT_INDEX_ASSIGN:
-            collect_lambdas_expr(stmt->as.index_assign.target);
-            collect_lambdas_expr(stmt->as.index_assign.index);
-            collect_lambdas_expr(stmt->as.index_assign.value);
+            collect_lambdas_expr(stmt->as.index_assign.target, parent_id);
+            collect_lambdas_expr(stmt->as.index_assign.index, parent_id);
+            collect_lambdas_expr(stmt->as.index_assign.value, parent_id);
             break;
         case UF_STMT_SAY:
-            collect_lambdas_expr(stmt->as.say_stmt.expr);
+            collect_lambdas_expr(stmt->as.say_stmt.expr, parent_id);
             break;
         case UF_STMT_EXPR:
-            collect_lambdas_expr(stmt->as.expr_stmt.expr);
+            collect_lambdas_expr(stmt->as.expr_stmt.expr, parent_id);
             break;
         case UF_STMT_IF:
-            collect_lambdas_expr(stmt->as.if_stmt.condition);
-            collect_lambdas_stmt(stmt->as.if_stmt.then_branch, is_toplevel);
-            if (stmt->as.if_stmt.else_branch) collect_lambdas_stmt(stmt->as.if_stmt.else_branch, is_toplevel);
+            collect_lambdas_expr(stmt->as.if_stmt.condition, parent_id);
+            collect_lambdas_stmt(stmt->as.if_stmt.then_branch, is_toplevel, parent_id);
+            if (stmt->as.if_stmt.else_branch) collect_lambdas_stmt(stmt->as.if_stmt.else_branch, is_toplevel, parent_id);
             break;
         case UF_STMT_WHILE:
-            collect_lambdas_expr(stmt->as.while_stmt.condition);
-            collect_lambdas_stmt(stmt->as.while_stmt.body, is_toplevel);
+            collect_lambdas_expr(stmt->as.while_stmt.condition, parent_id);
+            collect_lambdas_stmt(stmt->as.while_stmt.body, is_toplevel, parent_id);
             break;
         case UF_STMT_REPEAT:
-            collect_lambdas_expr(stmt->as.repeat_stmt.count_expr);
-            collect_lambdas_stmt(stmt->as.repeat_stmt.body, is_toplevel);
+            collect_lambdas_expr(stmt->as.repeat_stmt.count_expr, parent_id);
+            collect_lambdas_stmt(stmt->as.repeat_stmt.body, is_toplevel, parent_id);
             break;
         case UF_STMT_FOR:
-            collect_lambdas_expr(stmt->as.for_stmt.iterable);
-            collect_lambdas_stmt(stmt->as.for_stmt.body, is_toplevel);
+            collect_lambdas_expr(stmt->as.for_stmt.iterable, parent_id);
+            collect_lambdas_stmt(stmt->as.for_stmt.body, is_toplevel, parent_id);
             break;
-        case UF_STMT_FUNCTION:
+        case UF_STMT_FUNCTION: {
+            int this_id = is_toplevel ? -1 : parent_id;
             if (!is_toplevel) {
                 if (g_ctx->lambda_count < 256) {
+                    this_id = (int)g_ctx->lambda_count;
                     g_ctx->lambdas[g_ctx->lambda_count].fn_expr = NULL;
                     g_ctx->lambdas[g_ctx->lambda_count].fn_stmt = stmt;
-                    g_ctx->lambdas[g_ctx->lambda_count].id = (int)g_ctx->lambda_count;
+                    g_ctx->lambdas[g_ctx->lambda_count].id = this_id;
+                    g_ctx->lambdas[g_ctx->lambda_count].parent_id = parent_id;
                     g_ctx->lambdas[g_ctx->lambda_count].capture_count = 0;
+                    g_ctx->lambdas[g_ctx->lambda_count].own_local_count = 0;
                     g_ctx->lambda_count++;
                 }
             }
-            collect_lambdas_stmt(stmt->as.function_stmt.body, false);
+            /* A top-level function is never itself a lambda (it has real C
+             * parameters, not an env capture), so its body resets the
+             * nearest-enclosing-lambda chain to none. */
+            collect_lambdas_stmt(stmt->as.function_stmt.body, false, is_toplevel ? -1 : this_id);
             break;
+        }
         case UF_STMT_RETURN:
-            if (stmt->as.return_stmt.value) collect_lambdas_expr(stmt->as.return_stmt.value);
+            if (stmt->as.return_stmt.value) collect_lambdas_expr(stmt->as.return_stmt.value, parent_id);
             break;
         case UF_STMT_BLOCK:
             for (size_t i = 0; i < stmt->as.block.count; ++i) {
-                collect_lambdas_stmt(stmt->as.block.stmts[i], is_toplevel);
+                collect_lambdas_stmt(stmt->as.block.stmts[i], is_toplevel, parent_id);
             }
             break;
         case UF_STMT_MATCH:
-            collect_lambdas_expr(stmt->as.match_stmt.expr);
+            collect_lambdas_expr(stmt->as.match_stmt.expr, parent_id);
             for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
                 if (stmt->as.match_stmt.arms[i].guard) {
-                    collect_lambdas_expr(stmt->as.match_stmt.arms[i].guard);
+                    collect_lambdas_expr(stmt->as.match_stmt.arms[i].guard, parent_id);
                 }
-                collect_lambdas_stmt(stmt->as.match_stmt.arms[i].body, is_toplevel);
+                collect_lambdas_stmt(stmt->as.match_stmt.arms[i].body, is_toplevel, parent_id);
             }
             if (stmt->as.match_stmt.else_branch) {
-                collect_lambdas_stmt(stmt->as.match_stmt.else_branch, is_toplevel);
+                collect_lambdas_stmt(stmt->as.match_stmt.else_branch, is_toplevel, parent_id);
             }
             break;
         case UF_STMT_TRY_CATCH:
-            collect_lambdas_stmt(stmt->as.try_catch.try_block, is_toplevel);
-            collect_lambdas_stmt(stmt->as.try_catch.catch_block, is_toplevel);
+            collect_lambdas_stmt(stmt->as.try_catch.try_block, is_toplevel, parent_id);
+            collect_lambdas_stmt(stmt->as.try_catch.catch_block, is_toplevel, parent_id);
             break;
         default:
             break;
@@ -347,6 +364,29 @@ static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel) {
 
 static void find_captures_expr(const UfExpr* expr, const char** locals, size_t local_count, const char** params, size_t param_count, UfLambdaInfo* info);
 static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* p_local_count, const char** params, size_t param_count, UfLambdaInfo* info);
+
+/* Match patterns bind names (`when x:`, `when Point(a, b):`) that are local
+ * to the arm they appear in, just like a let/for/catch binding — record
+ * them so capture analysis doesn't mistake them for free variables that
+ * need to come from an enclosing scope. */
+static void collect_pattern_locals(const UfPattern* pat, const char** locals, size_t* p_local_count) {
+    if (!pat) return;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+        case UF_PAT_LITERAL:
+            break;
+        case UF_PAT_VARIABLE:
+            if (*p_local_count < 64) {
+                locals[(*p_local_count)++] = pat->as.var_name;
+            }
+            break;
+        case UF_PAT_STRUCT:
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                collect_pattern_locals(pat->as.struct_pat.field_patterns[i], locals, p_local_count);
+            }
+            break;
+    }
+}
 
 static void find_captures_expr(const UfExpr* expr, const char** locals, size_t local_count, const char** params, size_t param_count, UfLambdaInfo* info) {
     if (!expr) return;
@@ -471,6 +511,7 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
         case UF_STMT_MATCH:
             find_captures_expr(stmt->as.match_stmt.expr, locals, *p_local_count, params, param_count, info);
             for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
+                collect_pattern_locals(stmt->as.match_stmt.arms[i].pattern, locals, p_local_count);
                 if (stmt->as.match_stmt.arms[i].guard) {
                     find_captures_expr(stmt->as.match_stmt.arms[i].guard, locals, *p_local_count, params, param_count, info);
                 }
@@ -1365,7 +1406,7 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
 
     /* Populate lambdas */
     for (size_t i = 0; i < program->count; ++i) {
-        collect_lambdas_stmt(program->stmts[i], true);
+        collect_lambdas_stmt(program->stmts[i], true, -1);
     }
     for (size_t i = 0; i < ctx->lambda_count; ++i) {
         const char* locals[64];
@@ -1374,6 +1415,37 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
                            lambda_params(&ctx->lambdas[i]),
                            lambda_param_count(&ctx->lambdas[i]),
                            &ctx->lambdas[i]);
+        for (size_t j = 0; j < local_count && j < 64; ++j) {
+            ctx->lambdas[i].own_locals[j] = locals[j];
+        }
+        ctx->lambdas[i].own_local_count = local_count;
+    }
+
+    /* Propagate captures upward through the closure nesting chain: if a
+     * lambda C nested inside lambda P reads a name that isn't resolvable
+     * within P's own scope (not P's local/param/self-name, and not global),
+     * P must also capture that name itself so it has something to pass down
+     * when constructing C. Lambdas are recorded in pre-order (a lambda's id
+     * is always lower than any lambda nested inside it), so a single
+     * highest-to-lowest pass finalizes each lambda's own capture set
+     * (including anything propagated up from its children) before it is
+     * used to propagate further up to its own parent. */
+    for (size_t ii = ctx->lambda_count; ii > 0; --ii) {
+        size_t i = ii - 1;
+        int pid = ctx->lambdas[i].parent_id;
+        if (pid < 0) continue;
+        UfLambdaInfo* parent = &ctx->lambdas[(size_t)pid];
+        for (size_t c = 0; c < ctx->lambdas[i].capture_count; ++c) {
+            const char* name = ctx->lambdas[i].captures[c];
+            if (is_in_list(name, parent->own_locals, parent->own_local_count)) continue;
+            if (is_in_list(name, lambda_params(parent), lambda_param_count(parent))) continue;
+            const char* pname = lambda_name(parent);
+            if (pname && strcmp(name, pname) == 0) continue;
+            if (is_declared_function(name) || is_declared_var(name) || is_builtin_name(name)) continue;
+            if (!is_in_list(name, parent->captures, parent->capture_count) && parent->capture_count < 32) {
+                parent->captures[parent->capture_count++] = name;
+            }
+        }
     }
 
     /* Any name captured by any closure must be boxed at every site where it
@@ -1882,25 +1954,41 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
 
     g_match_id = 0;
 
+    /* UfModuleCollection and UfEmitContext are large fixed-capacity
+     * structures (each UfEmitContext alone holds up to 256 UfLambdaInfo
+     * entries with nested per-lambda arrays); UfModuleCollection embeds up
+     * to UF_MAX_COMPILED_MODULES of them by value. Kept as plain local
+     * variables this comfortably exceeds a typical 8MB thread stack, so
+     * they are heap-allocated instead. */
+    UfModuleCollection* col = (UfModuleCollection*)calloc(1, sizeof(UfModuleCollection));
+    UfEmitContext* main_ctx = (UfEmitContext*)calloc(1, sizeof(UfEmitContext));
+    char (*prefixes)[256] = (char (*)[256])malloc((size_t)UF_MAX_COMPILED_MODULES * 256);
+    if (!col || !main_ctx || !prefixes) {
+        fprintf(stderr, "Out of memory\n");
+        free(col);
+        free(main_ctx);
+        free(prefixes);
+        return false;
+    }
+
     /* 1. Collect all imported modules */
-    UfModuleCollection col;
-    memset(&col, 0, sizeof(col));
-    if (!collect_modules_from_program(&col, program, source_path)) {
-        free_module_collection(&col);
+    if (!collect_modules_from_program(col, program, source_path)) {
+        free_module_collection(col);
+        free(col);
+        free(main_ctx);
+        free(prefixes);
         return false;
     }
 
     /* 2. Initialize emission context for each module */
-    char prefixes[UF_MAX_COMPILED_MODULES][256];
-    for (size_t m = 0; m < col.count; ++m) {
-        UfCompiledModule* mod = &col.modules[m];
-        snprintf(prefixes[m], sizeof(prefixes[m]), "uf_m_%s_", mod->safe_name);
+    for (size_t m = 0; m < col->count; ++m) {
+        UfCompiledModule* mod = &col->modules[m];
+        snprintf(prefixes[m], 256, "uf_m_%s_", mod->safe_name);
         init_emit_context(&mod->ctx, mod->program, prefixes[m], mod->name);
     }
 
     /* 3. Initialize emission context for main program */
-    UfEmitContext main_ctx;
-    init_emit_context(&main_ctx, program, "uf_", NULL);
+    init_emit_context(main_ctx, program, "uf_", NULL);
 
     /* 4. Emit file header */
     fputs("/* ========================================================================= */\n", out);
@@ -1909,34 +1997,34 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     fputs("#include \"unfish_runtime.h\"\n\n", out);
 
     /* 5. Forward declare all module initializers */
-    if (col.count > 0) {
+    if (col->count > 0) {
         fputs("/* Forward declarations of module initializers */\n", out);
-        for (size_t m = 0; m < col.count; ++m) {
-            fprintf(out, "static UfVal uf_init_mod_%s(void);\n", col.modules[m].safe_name);
+        for (size_t m = 0; m < col->count; ++m) {
+            fprintf(out, "static UfVal uf_init_mod_%s(void);\n", col->modules[m].safe_name);
         }
         fputs("\n", out);
     }
 
     /* 6. Emit each compiled module */
-    for (size_t m = 0; m < col.count; ++m) {
-        UfCompiledModule* mod = &col.modules[m];
+    for (size_t m = 0; m < col->count; ++m) {
+        UfCompiledModule* mod = &col->modules[m];
         emit_module_unit(out, &mod->ctx, mod->program, false);
     }
 
     /* 7. Emit main program declarations and functions */
-    emit_module_unit(out, &main_ctx, program, true);
+    emit_module_unit(out, main_ctx, program, true);
 
     /* 8. Emit main() */
-    g_ctx = &main_ctx;
+    g_ctx = main_ctx;
     fputs("int main(int argc, char** argv) {\n", out);
     fputs("    uf_init(argc, argv);\n", out);
     fputs("    UfCatchFrame* _fn_catch_entry = g_catch_stack;\n", out);
     fputs("    (void)_fn_catch_entry;\n\n", out);
 
     /* Register modules */
-    for (size_t m = 0; m < col.count; ++m) {
+    for (size_t m = 0; m < col->count; ++m) {
         fprintf(out, "    uf_register_module(\"%s\", uf_init_mod_%s);\n",
-                col.modules[m].name, col.modules[m].safe_name);
+                col->modules[m].name, col->modules[m].safe_name);
     }
 
     for (size_t i = 0; i < program->count; ++i) {
@@ -1950,7 +2038,10 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     fputs("    return 0;\n", out);
     fputs("}\n", out);
 
-    free_module_collection(&col);
+    free_module_collection(col);
+    free(col);
+    free(main_ctx);
+    free(prefixes);
     return true;
 }
 

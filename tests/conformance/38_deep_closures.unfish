@@ -1,0 +1,56 @@
+# Test transitive closure capture (a closure reaching through an
+# intermediate closure to a grandparent's variable) and closures over
+# match-pattern-bound variables, including nested inside another closure.
+# expect: 11
+# expect: positive: 5
+# expect: non-positive
+# expect: positive: 7
+# expect: 101
+# expect: 103
+# expect: 106
+
+function outer():
+    let x = 10
+    function middle():
+        function inner():
+            return x + 1
+        return inner()
+    return middle()
+
+say(outer())
+
+function describe(n):
+    match n:
+        when x if x > 0:
+            function show():
+                return "positive: " + to_string(x)
+            say(show())
+        else:
+            say("non-positive")
+
+describe(5)
+describe(-2)
+
+function outer_match():
+    function process(n):
+        match n:
+            when x if x > 0:
+                function show():
+                    return "positive: " + to_string(x)
+                return show()
+            else:
+                return "non-positive"
+    return process(7)
+
+say(outer_match())
+
+function make_acc(start):
+    function add(n):
+        start = start + n
+        return start
+    return add
+
+let acc = make_acc(100)
+say(acc(1))
+say(acc(2))
+say(acc(3))
