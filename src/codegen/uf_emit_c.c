@@ -426,11 +426,19 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
         if (sname && strcmp(name, sname) == 0) {
             return;
         }
+        /* Note: no is_builtin_name() exclusion here. A name matching one of
+         * the ~80 builtin function names (len, min, max, log, sort, keys,
+         * ...) is an entirely ordinary, legal local/parameter name — e.g.
+         * `let log = []` — and must still be captured when a nested closure
+         * reads it as a value. The only place a builtin name should ever be
+         * treated as "resolved, no capture needed" is when it's the direct
+         * callee of a call that will actually be builtin-dispatched, which
+         * the UF_EXPR_CALL case below special-cases by not recursing into
+         * the callee at all in that situation. */
         if (!is_in_list(name, params, param_count) &&
             !is_in_list(name, locals, local_count) &&
             !is_declared_function(name) &&
             !is_declared_var(name) &&
-            !is_builtin_name(name) &&
             !is_in_list(name, info->captures, info->capture_count)) {
             if (info->capture_count < 32) {
                 info->captures[info->capture_count++] = name;
@@ -452,7 +460,18 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
             find_captures_expr(expr->as.binary.right, locals, local_count, params, param_count, info);
             break;
         case UF_EXPR_CALL:
-            find_captures_expr(expr->as.call.callee, locals, local_count, params, param_count, info);
+            /* A call whose callee is a bare identifier matching a builtin
+             * name is always builtin-dispatched by emit_expr (see the
+             * UF_EXPR_CALL case there), regardless of any local/captured
+             * variable that might otherwise shadow that name — so capture
+             * analysis must skip the callee in that exact situation to
+             * match, rather than needlessly (and, for a name with no
+             * matching enclosing binding at all, invalidly) capturing it. */
+            if (!(expr->as.call.callee &&
+                  expr->as.call.callee->kind == UF_EXPR_IDENTIFIER &&
+                  is_builtin_name(expr->as.call.callee->as.identifier_name))) {
+                find_captures_expr(expr->as.call.callee, locals, local_count, params, param_count, info);
+            }
             for (size_t i = 0; i < expr->as.call.argc; ++i) {
                 find_captures_expr(expr->as.call.args[i], locals, local_count, params, param_count, info);
             }

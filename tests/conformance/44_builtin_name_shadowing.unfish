@@ -1,0 +1,55 @@
+# A local variable named the same as a builtin function (log, min, max,
+# keys, sort, ...) is an ordinary, legal binding and must still be
+# captured correctly when read (as a plain value, not called) from a
+# nested closure. This used to fail to compile in the native C99 backend
+# ('uf_var_log' undeclared) because capture analysis treated any name
+# matching a builtin as always resolved to that builtin, never as a
+# possibly-shadowing local.
+# expect: 3
+# expect: 5
+# expect: -1
+# expect: 3
+# expect: [5, error:negative, 3]
+
+function outer():
+    let log = [1, 2, 3]
+    function show():
+        return len(log)
+    return show()
+
+say(outer())
+
+function make_safe_divider():
+    let calls = 0
+    function safe_div(a, b):
+        calls = calls + 1
+        try:
+            if b == 0:
+                error("Division by zero in safe_div", "DivByZero")
+            return a / b
+        catch e:
+            return -1
+    return safe_div
+
+let div = make_safe_divider()
+say(div(10, 2))
+say(div(10, 0))
+say(div(9, 3))
+
+function collect():
+    let log = []
+    function risky(n):
+        try:
+            if n < 0:
+                error("negative", "ValueError")
+            push(log, n)
+            return n * 2
+        catch e:
+            push(log, "error:" + e.message)
+            return -1
+    risky(5)
+    risky(-1)
+    risky(3)
+    return log
+
+say(collect())
