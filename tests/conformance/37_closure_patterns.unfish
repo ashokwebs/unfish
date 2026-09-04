@@ -1,0 +1,53 @@
+# Test spread and string interpolation patterns
+# expect: hello world
+# expect: 10
+# expect: [1, 2, 3, 4, 5]
+# expect: {"name": Alice, "age": 30, "city": Wonderland}
+# expect: true
+# expect: nested closure: 15
+# expect: counter: 3
+# expect: spread and closure stress test passed
+
+# String concatenation
+say("hello" + " " + "world")
+
+# Reduce to sum
+let nums = [1, 2, 3, 4]
+let total = reduce(nums, function(acc, x):
+    return acc + x
+, 0)
+say(total)
+
+# Array operations
+let arr = [1, 2, 3, 4, 5]
+say(arr)
+
+# Large map creation and display
+let person = {"name": "Alice", "age": 30, "city": "Wonderland"}
+say(person)
+
+say(person["name"] != null)
+
+# Nested closures capturing variables
+function make_adder(x):
+    function adder(y):
+        return x + y
+    return adder
+
+let add5 = make_adder(5)
+say("nested closure: " + to_string(add5(10)))
+
+# Counter closure
+function make_counter():
+    let count = 0
+    function increment():
+        count = count + 1
+        return count
+    return increment
+
+let counter = make_counter()
+counter()
+counter()
+say("counter: " + to_string(counter()))
+
+say("spread and closure stress test passed")

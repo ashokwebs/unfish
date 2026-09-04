@@ -11,6 +11,9 @@
 #include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
+#include <time.h>
+#include <ctype.h>
+#include <unistd.h>
 
 #ifndef HUGE_VAL
 #define HUGE_VAL (__builtin_huge_val())
@@ -24,7 +27,9 @@ typedef enum {
     UF_RT_ARRAY,
     UF_RT_MAP,
     UF_RT_BUFFER,
-    UF_RT_CLOSURE
+    UF_RT_CLOSURE,
+    UF_RT_INSTANCE,
+    UF_RT_ERROR
 } UfRtKind;
 
 typedef struct UfRtHeader {
@@ -40,6 +45,16 @@ typedef struct {
 
 typedef struct UfRtArray UfRtArray;
 typedef struct UfRtMap UfRtMap;
+typedef struct UfRtVal UfVal;
+typedef struct UfRtError UfRtError;
+
+typedef struct {
+    UfRtHeader header;
+    const char* name;
+    const char** field_names;
+    size_t field_count;
+    UfVal* fields;
+} UfRtInstance;
 
 typedef struct {
     UfRtHeader header;
@@ -47,7 +62,6 @@ typedef struct {
     uint8_t* data;
 } UfRtBuffer;
 
-typedef struct UfRtVal UfVal;
 typedef UfVal (*UfRtNativeFn)(void* env, size_t argc, UfVal* args);
 
 typedef struct {
@@ -67,9 +81,17 @@ typedef struct UfRtVal {
         UfRtMap* map;
         UfRtBuffer* buffer;
         UfRtClosure* closure;
+        UfRtInstance* instance;
+        UfRtError* error;
         void* ptr;
     } as;
 } UfVal;
+
+struct UfRtError {
+    UfRtHeader header;
+    UfVal message;
+    UfVal kind;
+};
 
 struct UfRtArray {
     UfRtHeader header;
@@ -93,14 +115,43 @@ struct UfRtMap {
     size_t order_count;
 };
 
+/* A heap cell for a captured mutable variable, tracked separately from
+ * UfRtHeader objects (it is not a first-class UfVal itself, just backing
+ * storage a UfVal* points into) so it can still be freed at program exit. */
+typedef struct UfRtBoxNode {
+    struct UfRtBoxNode* next;
+    UfVal value;
+} UfRtBoxNode;
+
 /* Runtime context */
 typedef struct {
     UfRtHeader* all_objects;
     int argc;
     char** argv;
+    UfRtBoxNode* all_boxes;
 } UfRtContext;
 
-static UfRtContext g_uf_rt = { NULL, 0, NULL };
+static UfRtContext g_uf_rt = { NULL, 0, NULL, NULL };
+
+typedef struct UfCatchFrame {
+    jmp_buf buf;
+    UfVal error;
+    struct UfCatchFrame* prev;
+} UfCatchFrame;
+
+static UfCatchFrame* g_catch_stack = NULL;
+
+static inline void uf_catch_push(UfCatchFrame* frame) {
+    frame->prev = g_catch_stack;
+    frame->error.kind = UF_RT_NULL;
+    g_catch_stack = frame;
+}
+
+static inline void uf_catch_pop(void) {
+    if (g_catch_stack) {
+        g_catch_stack = g_catch_stack->prev;
+    }
+}
 
 static void* uf_rt_alloc(UfRtKind kind, size_t size) {
     UfRtHeader* obj = (UfRtHeader*)malloc(size);
@@ -118,6 +169,8 @@ static inline void uf_init(int argc, char** argv) {
     g_uf_rt.all_objects = NULL;
     g_uf_rt.argc = argc;
     g_uf_rt.argv = argv;
+    g_uf_rt.all_boxes = NULL;
+    g_catch_stack = NULL;
 }
 
 static inline void uf_cleanup(void) {
@@ -137,11 +190,61 @@ static inline void uf_cleanup(void) {
         } else if (curr->kind == UF_RT_CLOSURE) {
             UfRtClosure* cl = (UfRtClosure*)curr;
             free(cl->env);
+        } else if (curr->kind == UF_RT_INSTANCE) {
+            UfRtInstance* inst = (UfRtInstance*)curr;
+            free(inst->fields);
         }
         free(curr);
         curr = next;
     }
     g_uf_rt.all_objects = NULL;
+
+    UfRtBoxNode* bcurr = g_uf_rt.all_boxes;
+    while (bcurr) {
+        UfRtBoxNode* bnext = bcurr->next;
+        free(bcurr);
+        bcurr = bnext;
+    }
+    g_uf_rt.all_boxes = NULL;
+
+    g_catch_stack = NULL;
+}
+
+/* Heap cell for a captured mutable variable, shared by reference between a
+ * closure's defining scope and every invocation of that closure (and any
+ * further closures nested inside it), so writes to the variable from one
+ * side are visible on the other. Tracked in g_uf_rt.all_boxes and freed by
+ * uf_cleanup. */
+static inline UfVal* uf_box_new(UfVal v) {
+    UfRtBoxNode* node = (UfRtBoxNode*)malloc(sizeof(UfRtBoxNode));
+    if (!node) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    node->value = v;
+    node->next = g_uf_rt.all_boxes;
+    g_uf_rt.all_boxes = node;
+    return &node->value;
+}
+
+static inline UfVal uf_instance_new(const char* name, const char** field_names, size_t field_count, size_t argc, UfVal* args) {
+    if (argc != field_count) {
+        fprintf(stderr, "Runtime Error: Struct '%s' expects %zu fields, but %zu provided\n", name, field_count, argc);
+        exit(3);
+    }
+    UfRtInstance* inst = (UfRtInstance*)uf_rt_alloc(UF_RT_INSTANCE, sizeof(UfRtInstance));
+    inst->name = name;
+    inst->field_names = field_names;
+    inst->field_count = field_count;
+    if (field_count > 0) {
+        inst->fields = (UfVal*)malloc(sizeof(UfVal) * field_count);
+        for (size_t i = 0; i < field_count; ++i) {
+            inst->fields[i] = args[i];
+        }
+    } else {
+        inst->fields = NULL;
+    }
+    UfVal v; v.kind = UF_RT_INSTANCE; v.as.instance = inst; return v;
 }
 
 static inline UfVal uf_closure_new(UfRtNativeFn fn, const void* env, size_t env_size) {
@@ -160,14 +263,21 @@ static inline UfVal uf_closure_new(UfRtNativeFn fn, const void* env, size_t env_
 static inline UfVal uf_call_val(UfVal callee, size_t argc, ...) {
     va_list va;
     va_start(va, argc);
-    UfVal args[16];
-    for (size_t i = 0; i < argc && i < 16; ++i) {
+    UfVal stack_args[16];
+    UfVal* args = stack_args;
+    if (argc > 16) {
+        args = (UfVal*)malloc(sizeof(UfVal) * argc);
+    }
+    for (size_t i = 0; i < argc; ++i) {
         args[i] = va_arg(va, UfVal);
     }
     va_end(va);
     if (callee.kind == UF_RT_CLOSURE && callee.as.closure != NULL) {
-        return callee.as.closure->fn(callee.as.closure->env, argc, args);
+        UfVal result = callee.as.closure->fn(callee.as.closure->env, argc, args);
+        if (args != stack_args) free(args);
+        return result;
     }
+    if (args != stack_args) free(args);
     fprintf(stderr, "Runtime Error: Attempted to call non-callable value\n");
     exit(3);
 }
@@ -192,6 +302,39 @@ static inline UfVal uf_str(const char* s) {
     if (len > 0) memcpy(str->chars, s, len);
     str->chars[len] = '\0';
     UfVal v; v.kind = UF_RT_STRING; v.as.string = str; return v;
+}
+
+static inline UfVal uf_val_error(UfVal message, UfVal kind) {
+    UfRtError* err = (UfRtError*)uf_rt_alloc(UF_RT_ERROR, sizeof(UfRtError));
+    err->message = message;
+    err->kind = kind;
+    UfVal v;
+    v.kind = UF_RT_ERROR;
+    v.as.error = err;
+    return v;
+}
+
+static inline void uf_throw(UfVal err) {
+    if (g_catch_stack) {
+        UfCatchFrame* target = g_catch_stack;
+        g_catch_stack = target->prev;
+        target->error = err;
+        longjmp(target->buf, 1);
+    }
+    if (err.kind == UF_RT_ERROR) {
+        UfRtError* e = err.as.error;
+        const char* msg = (e->message.kind == UF_RT_STRING) ? e->message.as.string->chars : "Error";
+        fprintf(stderr, "Runtime Error: %s\n", msg);
+    } else {
+        fprintf(stderr, "Runtime Error: Uncaught exception\n");
+    }
+    exit(3);
+}
+
+static inline void uf_raise(const char* msg, const char* kind) {
+    UfVal m = uf_str(msg ? msg : "");
+    UfVal k = uf_str(kind ? kind : "RuntimeError");
+    uf_throw(uf_val_error(m, k));
 }
 
 static inline UfVal uf_array_new(size_t capacity) {
@@ -260,6 +403,7 @@ static inline bool uf_truthy(UfVal v) {
         case UF_RT_MAP: return v.as.map->count > 0;
         case UF_RT_BUFFER: return v.as.buffer->size > 0;
         case UF_RT_CLOSURE: return true;
+        case UF_RT_INSTANCE: return true;
         default: return false;
     }
 }
@@ -282,6 +426,31 @@ static inline char* uf_to_str(UfVal v) {
             char b_buf[64];
             snprintf(b_buf, sizeof(b_buf), "<buffer size=%zu>", v.as.buffer->size);
             return strdup(b_buf);
+        }
+        case UF_RT_INSTANCE: {
+            UfRtInstance* inst = v.as.instance;
+            size_t cap = 128;
+            char* res = (char*)malloc(cap);
+            snprintf(res, cap, "%s(", inst->name);
+            for (size_t i = 0; i < inst->field_count; ++i) {
+                if (i > 0) {
+                    if (strlen(res) + 3 >= cap) { cap *= 2; res = (char*)realloc(res, cap); }
+                    strcat(res, ", ");
+                }
+                char* s = uf_to_str(inst->fields[i]);
+                const char* fname = inst->field_names ? inst->field_names[i] : "?";
+                size_t need = strlen(fname) + strlen(s) + 4;
+                if (strlen(res) + need >= cap) {
+                    cap = (cap + need) * 2;
+                    res = (char*)realloc(res, cap);
+                }
+                strcat(res, fname);
+                strcat(res, ": ");
+                strcat(res, s);
+                free(s);
+            }
+            strcat(res, ")");
+            return res;
         }
         case UF_RT_ARRAY: {
             size_t cap = 64;
@@ -312,7 +481,16 @@ static inline char* uf_to_str(UfVal v) {
                     if (strlen(res) + 3 >= cap) { cap *= 2; res = (char*)realloc(res, cap); }
                     strcat(res, ", ");
                 }
-                char* k = uf_to_str(v.as.map->order_keys[i]);
+                /* Quote string keys to match interpreter format */
+                UfVal order_key = v.as.map->order_keys[i];
+                char* k;
+                if (order_key.kind == UF_RT_STRING) {
+                    size_t klen = order_key.as.string->length + 3;
+                    k = (char*)malloc(klen);
+                    snprintf(k, klen, "\"%s\"", order_key.as.string->chars);
+                } else {
+                    k = uf_to_str(order_key);
+                }
                 if (strlen(res) + strlen(k) + 6 >= cap) {
                     cap = (cap + strlen(k)) * 2;
                     res = (char*)realloc(res, cap);
@@ -339,6 +517,12 @@ static inline char* uf_to_str(UfVal v) {
             return res;
         }
         case UF_RT_CLOSURE: return strdup("<function>");
+        case UF_RT_ERROR: {
+            char e_buf[256];
+            const char* msg = (v.as.error->message.kind == UF_RT_STRING) ? v.as.error->message.as.string->chars : "";
+            snprintf(e_buf, sizeof(e_buf), "<error: %s>", msg);
+            return strdup(e_buf);
+        }
         default: return strdup("<object>");
     }
 }
@@ -355,6 +539,9 @@ static inline void uf_print(UfVal v) {
     free(s);
 }
 
+static inline UfVal uf_get(UfVal target, UfVal index);
+static inline UfVal uf_map_has_key(UfVal target, UfVal key);
+
 static inline bool uf_eq_bool(UfVal a, UfVal b) {
     if (a.kind != b.kind) return false;
     switch (a.kind) {
@@ -362,6 +549,33 @@ static inline bool uf_eq_bool(UfVal a, UfVal b) {
         case UF_RT_BOOL: return a.as.boolean == b.as.boolean;
         case UF_RT_NUMBER: return a.as.number == b.as.number;
         case UF_RT_STRING: return strcmp(a.as.string->chars, b.as.string->chars) == 0;
+        case UF_RT_ERROR: return a.as.error == b.as.error;
+        case UF_RT_ARRAY: {
+            if (a.as.array->count != b.as.array->count) return false;
+            for (size_t i = 0; i < a.as.array->count; ++i) {
+                if (!uf_eq_bool(a.as.array->elements[i], b.as.array->elements[i])) return false;
+            }
+            return true;
+        }
+        case UF_RT_MAP: {
+            if (a.as.map->count != b.as.map->count) return false;
+            for (size_t i = 0; i < a.as.map->order_count; ++i) {
+                UfVal key = a.as.map->order_keys[i];
+                if (!uf_truthy(uf_map_has_key(b, key))) return false;
+                UfVal val_a = uf_get(a, key);
+                UfVal val_b = uf_get(b, key);
+                if (!uf_eq_bool(val_a, val_b)) return false;
+            }
+            return true;
+        }
+        case UF_RT_INSTANCE: {
+            if (strcmp(a.as.instance->name, b.as.instance->name) != 0) return false;
+            if (a.as.instance->field_count != b.as.instance->field_count) return false;
+            for (size_t i = 0; i < a.as.instance->field_count; ++i) {
+                if (!uf_eq_bool(a.as.instance->fields[i], b.as.instance->fields[i])) return false;
+            }
+            return true;
+        }
         default: return a.as.ptr == b.as.ptr;
     }
 }
@@ -410,18 +624,20 @@ static inline UfVal uf_mul(UfVal a, UfVal b) {
 
 static inline UfVal uf_div(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) {
-        if (b.as.number == 0.0) { fprintf(stderr, "Runtime Error: Division by zero\n"); exit(3); }
+        if (b.as.number == 0.0) { uf_raise("Division by zero", "DivisionByZero"); return uf_null(); }
         return uf_num(a.as.number / b.as.number);
     }
-    fprintf(stderr, "Runtime Error: Operands to '/' must be numbers\n"); exit(3);
+    uf_raise("Operands to '/' must be numbers", "TypeError");
+    return uf_null();
 }
 
 static inline UfVal uf_mod(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) {
-        if (b.as.number == 0.0) { fprintf(stderr, "Runtime Error: Division by zero\n"); exit(3); }
+        if (b.as.number == 0.0) { uf_raise("Division by zero in modulo", "DivisionByZero"); return uf_null(); }
         return uf_num(fmod(a.as.number, b.as.number));
     }
-    fprintf(stderr, "Runtime Error: Operands to '%%' must be numbers\n"); exit(3);
+    uf_raise("Operands to '%' must be numbers", "TypeError");
+    return uf_null();
 }
 
 static inline UfVal uf_neg(UfVal a) {
@@ -468,45 +684,75 @@ static inline UfVal uf_len(UfVal v) {
 static inline UfVal uf_type_of(UfVal v) {
     switch (v.kind) {
         case UF_RT_NULL: return uf_str("null");
-        case UF_RT_BOOL: return uf_str("bool");
+        case UF_RT_BOOL: return uf_str("boolean");
         case UF_RT_NUMBER: return uf_str("number");
         case UF_RT_STRING: return uf_str("string");
         case UF_RT_ARRAY: return uf_str("array");
         case UF_RT_MAP: return uf_str("map");
         case UF_RT_BUFFER: return uf_str("buffer");
         case UF_RT_CLOSURE: return uf_str("function");
+        case UF_RT_INSTANCE: return uf_str(v.as.instance->name);
+        case UF_RT_ERROR: return uf_str("error");
         default: return uf_str("object");
     }
 }
 
 static inline UfVal uf_get(UfVal target, UfVal index) {
+    if (target.kind == UF_RT_ERROR) {
+        if (index.kind == UF_RT_STRING) {
+            const char* fname = index.as.string->chars;
+            if (strcmp(fname, "message") == 0) return target.as.error->message;
+            if (strcmp(fname, "kind") == 0) return target.as.error->kind;
+        }
+        return uf_null();
+    }
+    if (target.kind == UF_RT_INSTANCE) {
+        if (index.kind != UF_RT_STRING) {
+            fprintf(stderr, "Runtime Error: Struct field access expects a string name\n");
+            exit(3);
+        }
+        const char* fname = index.as.string->chars;
+        UfRtInstance* inst = target.as.instance;
+        for (size_t i = 0; i < inst->field_count; ++i) {
+            if (strcmp(inst->field_names[i], fname) == 0) {
+                return inst->fields[i];
+            }
+        }
+        fprintf(stderr, "Runtime Error: Struct '%s' has no field '%s'\n", inst->name, fname);
+        exit(3);
+    }
     if (target.kind == UF_RT_ARRAY) {
-        if (index.kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: Array index must be a number\n"); exit(3); }
+        if (index.kind != UF_RT_NUMBER) { uf_raise("Array index must be a number", "TypeError"); return uf_null(); }
         long idx = (long)index.as.number;
         if (idx < 0) idx += target.as.array->count;
         if (idx < 0 || (size_t)idx >= target.as.array->count) {
-            fprintf(stderr, "Runtime Error: IndexOutOfBounds: Index %ld out of bounds for array of length %zu\n", idx, target.as.array->count);
-            exit(3);
+            char buf[128];
+            snprintf(buf, sizeof(buf), "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", idx, target.as.array->count);
+            uf_raise(buf, "IndexOutOfBounds");
+            return uf_null();
         }
         return target.as.array->elements[idx];
     }
     if (target.kind == UF_RT_STRING) {
-        if (index.kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: String index must be a number\n"); exit(3); }
+        if (index.kind != UF_RT_NUMBER) { uf_raise("String index must be a number", "TypeError"); return uf_null(); }
         long idx = (long)index.as.number;
         if (idx < 0) idx += target.as.string->length;
         if (idx < 0 || (size_t)idx >= target.as.string->length) {
-            fprintf(stderr, "Runtime Error: String index out of bounds\n"); exit(3);
+            uf_raise("String index out of bounds", "IndexOutOfBounds");
+            return uf_null();
         }
         char ch[2] = { target.as.string->chars[idx], '\0' };
         return uf_str(ch);
     }
     if (target.kind == UF_RT_BUFFER) {
-        if (index.kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: Buffer index must be a number\n"); exit(3); }
+        if (index.kind != UF_RT_NUMBER) { uf_raise("Buffer index must be a number", "TypeError"); return uf_null(); }
         long idx = (long)index.as.number;
         if (idx < 0) idx += target.as.buffer->size;
         if (idx < 0 || (size_t)idx >= target.as.buffer->size) {
-            fprintf(stderr, "Runtime Error: IndexOutOfBounds: Index %ld out of bounds for buffer of size %zu\n", idx, target.as.buffer->size);
-            exit(3);
+            char buf[128];
+            snprintf(buf, sizeof(buf), "IndexOutOfBounds: Index %ld out of bounds for buffer of size %zu", idx, target.as.buffer->size);
+            uf_raise(buf, "IndexOutOfBounds");
+            return uf_null();
         }
         return uf_num((double)target.as.buffer->data[idx]);
     }
@@ -524,25 +770,45 @@ static inline UfVal uf_get(UfVal target, UfVal index) {
 }
 
 static inline void uf_set(UfVal target, UfVal index, UfVal value) {
+    if (target.kind == UF_RT_INSTANCE) {
+        if (index.kind != UF_RT_STRING) {
+            fprintf(stderr, "Runtime Error: Struct field name must be a string\n");
+            exit(3);
+        }
+        const char* fname = index.as.string->chars;
+        UfRtInstance* inst = target.as.instance;
+        for (size_t i = 0; i < inst->field_count; ++i) {
+            if (strcmp(inst->field_names[i], fname) == 0) {
+                inst->fields[i] = value;
+                return;
+            }
+        }
+        fprintf(stderr, "Runtime Error: Struct '%s' has no field '%s'\n", inst->name, fname);
+        exit(3);
+    }
     if (target.kind == UF_RT_ARRAY) {
-        if (index.kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: Array index must be a number\n"); exit(3); }
+        if (index.kind != UF_RT_NUMBER) { uf_raise("Array index must be a number", "TypeError"); return; }
         long idx = (long)index.as.number;
         if (idx < 0) idx += target.as.array->count;
         if (idx < 0 || (size_t)idx >= target.as.array->count) {
-            fprintf(stderr, "Runtime Error: IndexOutOfBounds: Index %ld out of bounds for array of length %zu\n", idx, target.as.array->count);
-            exit(3);
+            char buf[128];
+            snprintf(buf, sizeof(buf), "IndexOutOfBounds: Index %ld out of bounds for array of length %zu", idx, target.as.array->count);
+            uf_raise(buf, "IndexOutOfBounds");
+            return;
         }
         target.as.array->elements[idx] = value;
         return;
     }
     if (target.kind == UF_RT_BUFFER) {
-        if (index.kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: Buffer index must be a number\n"); exit(3); }
-        if (value.kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: Buffer byte value must be a number\n"); exit(3); }
+        if (index.kind != UF_RT_NUMBER) { uf_raise("Buffer index must be a number", "TypeError"); return; }
+        if (value.kind != UF_RT_NUMBER) { uf_raise("Buffer byte value must be a number", "TypeError"); return; }
         long idx = (long)index.as.number;
         if (idx < 0) idx += target.as.buffer->size;
         if (idx < 0 || (size_t)idx >= target.as.buffer->size) {
-            fprintf(stderr, "Runtime Error: IndexOutOfBounds: Index %ld out of bounds for buffer of size %zu\n", idx, target.as.buffer->size);
-            exit(3);
+            char buf[128];
+            snprintf(buf, sizeof(buf), "IndexOutOfBounds: Index %ld out of bounds for buffer of size %zu", idx, target.as.buffer->size);
+            uf_raise(buf, "IndexOutOfBounds");
+            return;
         }
         target.as.buffer->data[idx] = (uint8_t)(int64_t)value.as.number;
         return;
@@ -550,19 +816,50 @@ static inline void uf_set(UfVal target, UfVal index, UfVal value) {
     if (target.kind == UF_RT_MAP) {
         if (index.kind != UF_RT_STRING) { fprintf(stderr, "Runtime Error: Map key must be string\n"); exit(3); }
         UfRtMap* m = target.as.map;
+        /* Update existing key */
         for (size_t i = 0; i < m->capacity; ++i) {
             if (m->entries[i].occupied && strcmp(m->entries[i].key.as.string->chars, index.as.string->chars) == 0) {
                 m->entries[i].value = value;
                 return;
             }
         }
-        /* Insert */
+        /* Grow if at 75% load factor or completely full */
+        if (m->count * 4 >= m->capacity * 3) {
+            size_t old_cap = m->capacity;
+            UfRtMapEntry* old_entries = m->entries;
+            m->capacity = old_cap * 2;
+            m->entries = (UfRtMapEntry*)calloc(m->capacity, sizeof(UfRtMapEntry));
+            m->count = 0;
+            /* Reinsert existing entries */
+            for (size_t i = 0; i < old_cap; ++i) {
+                if (old_entries[i].occupied) {
+                    /* Find empty slot in new table */
+                    for (size_t j = 0; j < m->capacity; ++j) {
+                        if (!m->entries[j].occupied) {
+                            m->entries[j] = old_entries[i];
+                            m->count++;
+                            break;
+                        }
+                    }
+                }
+            }
+            free(old_entries);
+            /* Grow order_keys too */
+            m->order_keys = (UfVal*)realloc(m->order_keys, sizeof(UfVal) * m->capacity);
+        }
+        /* Insert into first empty slot */
         for (size_t i = 0; i < m->capacity; ++i) {
             if (!m->entries[i].occupied) {
                 m->entries[i].occupied = true;
                 m->entries[i].key = index;
                 m->entries[i].value = value;
                 m->count++;
+                if (m->order_count >= m->capacity) {
+                    m->capacity *= 2;
+                    m->entries = (UfRtMapEntry*)realloc(m->entries, sizeof(UfRtMapEntry) * m->capacity);
+                    memset(&m->entries[m->capacity / 2], 0, sizeof(UfRtMapEntry) * (m->capacity / 2));
+                    m->order_keys = (UfVal*)realloc(m->order_keys, sizeof(UfVal) * m->capacity);
+                }
                 m->order_keys[m->order_count++] = index;
                 return;
             }
@@ -853,6 +1150,23 @@ static inline UfVal uf_str_to_string(UfVal v) {
     return res;
 }
 
+static inline UfVal uf_builtin_error(size_t argc, ...) {
+    va_list va;
+    va_start(va, argc);
+    UfVal msg = argc > 0 ? va_arg(va, UfVal) : uf_str("");
+    UfVal kind = argc > 1 ? va_arg(va, UfVal) : uf_str("UserError");
+    va_end(va);
+
+    if (msg.kind != UF_RT_STRING) {
+        msg = uf_str_to_string(msg);
+    }
+    if (kind.kind != UF_RT_STRING) {
+        kind = uf_str("UserError");
+    }
+    uf_throw(uf_val_error(msg, kind));
+    return uf_null();
+}
+
 static inline UfVal uf_str_repeat(UfVal s, UfVal count) {
     if (s.kind != UF_RT_STRING || count.kind != UF_RT_NUMBER) return uf_str("");
     long cnt = (long)count.as.number;
@@ -975,6 +1289,925 @@ static inline UfVal uf_str_replace(UfVal s, UfVal target, UfVal repl) {
     UfVal v = uf_str(res);
     free(res);
     return v;
+}
+
+/* Collection and Array Builtins */
+static inline UfVal uf_array_pop(UfVal arr) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'pop()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* a = arr.as.array;
+    if (a->count == 0) return uf_null();
+    return a->elements[--a->count];
+}
+
+static inline UfVal uf_range(size_t argc, ...) {
+    if (argc == 0) {
+        fprintf(stderr, "Runtime Error: 'range()' expects at least 1 argument\n");
+        exit(3);
+    }
+    va_list va;
+    va_start(va, argc);
+    UfVal args[3];
+    for (size_t i = 0; i < argc && i < 3; ++i) {
+        args[i] = va_arg(va, UfVal);
+    }
+    va_end(va);
+
+    double start = 0;
+    double end = 0;
+    double step = 1;
+    if (argc == 1) {
+        if (args[0].kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: 'range()' argument must be a number\n"); exit(3); }
+        end = args[0].as.number;
+    } else {
+        if (args[0].kind != UF_RT_NUMBER || args[1].kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: 'range()' arguments must be numbers\n"); exit(3); }
+        start = args[0].as.number;
+        end = args[1].as.number;
+        if (argc >= 3) {
+            if (args[2].kind != UF_RT_NUMBER || args[2].as.number == 0) { fprintf(stderr, "Runtime Error: 'range()' step must be a non-zero number\n"); exit(3); }
+            step = args[2].as.number;
+        }
+    }
+    size_t count = 0;
+    if (step > 0 && start < end) {
+        count = (size_t)ceil((end - start) / step);
+    } else if (step < 0 && start > end) {
+        count = (size_t)ceil((start - end) / (-step));
+    }
+    UfVal arr = uf_array_new(count);
+    double curr = start;
+    if (step > 0) {
+        while (curr < end) {
+            uf_array_push(arr, uf_num(curr));
+            curr += step;
+        }
+    } else {
+        while (curr > end) {
+            uf_array_push(arr, uf_num(curr));
+            curr += step;
+        }
+    }
+    return arr;
+}
+
+static inline UfVal uf_map_keys(UfVal target) {
+    if (target.kind != UF_RT_MAP) {
+        fprintf(stderr, "Runtime Error: 'keys()' expects a map\n");
+        exit(3);
+    }
+    UfRtMap* m = target.as.map;
+    UfVal arr = uf_array_new(m->order_count);
+    for (size_t i = 0; i < m->order_count; ++i) {
+        uf_array_push(arr, m->order_keys[i]);
+    }
+    return arr;
+}
+
+static inline UfVal uf_map_values(UfVal target) {
+    if (target.kind != UF_RT_MAP) {
+        fprintf(stderr, "Runtime Error: 'values()' expects a map\n");
+        exit(3);
+    }
+    UfRtMap* m = target.as.map;
+    UfVal arr = uf_array_new(m->order_count);
+    for (size_t i = 0; i < m->order_count; ++i) {
+        UfVal key = m->order_keys[i];
+        for (size_t j = 0; j < m->capacity; ++j) {
+            if (m->entries[j].occupied && strcmp(m->entries[j].key.as.string->chars, key.as.string->chars) == 0) {
+                uf_array_push(arr, m->entries[j].value);
+                break;
+            }
+        }
+    }
+    return arr;
+}
+
+static inline UfVal uf_map_has_key(UfVal target, UfVal key) {
+    if (target.kind != UF_RT_MAP || key.kind != UF_RT_STRING) return uf_bool(false);
+    UfRtMap* m = target.as.map;
+    for (size_t i = 0; i < m->capacity; ++i) {
+        if (m->entries[i].occupied && strcmp(m->entries[i].key.as.string->chars, key.as.string->chars) == 0) {
+            return uf_bool(true);
+        }
+    }
+    return uf_bool(false);
+}
+
+static inline UfVal uf_map_delete(UfVal target, UfVal key) {
+    if (target.kind != UF_RT_MAP || key.kind != UF_RT_STRING) return uf_bool(false);
+    UfRtMap* m = target.as.map;
+    for (size_t i = 0; i < m->capacity; ++i) {
+        if (m->entries[i].occupied && strcmp(m->entries[i].key.as.string->chars, key.as.string->chars) == 0) {
+            m->entries[i].occupied = false;
+            m->count--;
+            for (size_t k = 0; k < m->order_count; ++k) {
+                if (strcmp(m->order_keys[k].as.string->chars, key.as.string->chars) == 0) {
+                    for (size_t p = k; p + 1 < m->order_count; ++p) {
+                        m->order_keys[p] = m->order_keys[p + 1];
+                    }
+                    m->order_count--;
+                    break;
+                }
+            }
+            return uf_bool(true);
+        }
+    }
+    return uf_bool(false);
+}
+
+static inline UfVal uf_iter_get(UfVal target, long idx) {
+    if (target.kind == UF_RT_MAP) {
+        if (idx >= 0 && (size_t)idx < target.as.map->order_count) {
+            return target.as.map->order_keys[idx];
+        }
+        return uf_null();
+    }
+    return uf_get(target, uf_num((double)idx));
+}
+
+static inline UfVal uf_array_map(UfVal arr, UfVal fn) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'map()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* a = arr.as.array;
+    UfVal res = uf_array_new(a->count);
+    for (size_t i = 0; i < a->count; ++i) {
+        UfVal item = a->elements[i];
+        uf_array_push(res, uf_call_val(fn, 1, item));
+    }
+    return res;
+}
+
+static inline UfVal uf_array_filter(UfVal arr, UfVal fn) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'filter()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* a = arr.as.array;
+    UfVal res = uf_array_new(a->count);
+    for (size_t i = 0; i < a->count; ++i) {
+        UfVal item = a->elements[i];
+        if (uf_truthy(uf_call_val(fn, 1, item))) {
+            uf_array_push(res, item);
+        }
+    }
+    return res;
+}
+
+static inline UfVal uf_array_reduce(size_t argc, ...) {
+    if (argc < 2) {
+        fprintf(stderr, "Runtime Error: 'reduce()' expects an array and a function\n");
+        exit(3);
+    }
+    va_list va;
+    va_start(va, argc);
+    UfVal args[3];
+    for (size_t i = 0; i < argc && i < 3; ++i) {
+        args[i] = va_arg(va, UfVal);
+    }
+    va_end(va);
+
+    if (args[0].kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'reduce()' expects an array and a function\n");
+        exit(3);
+    }
+    UfRtArray* a = args[0].as.array;
+    UfVal fn = args[1];
+    if (a->count == 0) {
+        if (argc >= 3) return args[2];
+        return uf_null();
+    }
+    size_t start_idx = 0;
+    UfVal acc;
+    if (argc >= 3) {
+        acc = args[2];
+    } else {
+        acc = a->elements[0];
+        start_idx = 1;
+    }
+    for (size_t i = start_idx; i < a->count; ++i) {
+        acc = uf_call_val(fn, 2, acc, a->elements[i]);
+    }
+    return acc;
+}
+
+static inline int uf_default_compare(UfVal a, UfVal b) {
+    if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) {
+        return (a.as.number > b.as.number) - (a.as.number < b.as.number);
+    }
+    if (a.kind == UF_RT_STRING && b.kind == UF_RT_STRING) {
+        return strcmp(a.as.string->chars, b.as.string->chars);
+    }
+    return 0;
+}
+
+static inline UfVal uf_array_sort(size_t argc, ...) {
+    if (argc < 1) {
+        fprintf(stderr, "Runtime Error: 'sort()' expects an array\n");
+        exit(3);
+    }
+    va_list va;
+    va_start(va, argc);
+    UfVal args[2];
+    for (size_t i = 0; i < argc && i < 2; ++i) {
+        args[i] = va_arg(va, UfVal);
+    }
+    va_end(va);
+
+    if (args[0].kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'sort()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* src = args[0].as.array;
+    UfVal res = uf_array_new(src->count);
+    for (size_t i = 0; i < src->count; ++i) {
+        uf_array_push(res, src->elements[i]);
+    }
+    bool has_cmp = (argc >= 2 && args[1].kind != UF_RT_NULL);
+    UfVal cmp_fn = has_cmp ? args[1] : uf_null();
+    UfRtArray* r = res.as.array;
+    for (size_t i = 1; i < r->count; ++i) {
+        UfVal key = r->elements[i];
+        size_t j = i;
+        while (j > 0) {
+            int cmp = 0;
+            if (has_cmp) {
+                UfVal cres = uf_call_val(cmp_fn, 2, r->elements[j - 1], key);
+                if (cres.kind == UF_RT_NUMBER) {
+                    cmp = (cres.as.number > 0) ? 1 : ((cres.as.number < 0) ? -1 : 0);
+                } else if (cres.kind == UF_RT_BOOL) {
+                    cmp = cres.as.boolean ? -1 : 1;
+                }
+            } else {
+                cmp = uf_default_compare(r->elements[j - 1], key);
+            }
+            if (cmp > 0) {
+                r->elements[j] = r->elements[j - 1];
+                j--;
+            } else {
+                break;
+            }
+        }
+        r->elements[j] = key;
+    }
+    return res;
+}
+
+static inline UfVal uf_array_reverse(UfVal arr) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'reverse()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* src = arr.as.array;
+    UfVal res = uf_array_new(src->count);
+    for (size_t i = src->count; i > 0; --i) {
+        uf_array_push(res, src->elements[i - 1]);
+    }
+    return res;
+}
+
+static inline UfVal uf_array_find(UfVal arr, UfVal fn) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'find()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* a = arr.as.array;
+    for (size_t i = 0; i < a->count; ++i) {
+        if (uf_truthy(uf_call_val(fn, 1, a->elements[i]))) {
+            return a->elements[i];
+        }
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_array_every(UfVal arr, UfVal fn) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'every()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* a = arr.as.array;
+    for (size_t i = 0; i < a->count; ++i) {
+        if (!uf_truthy(uf_call_val(fn, 1, a->elements[i]))) {
+            return uf_bool(false);
+        }
+    }
+    return uf_bool(true);
+}
+
+static inline UfVal uf_array_some(UfVal arr, UfVal fn) {
+    if (arr.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'some()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* a = arr.as.array;
+    for (size_t i = 0; i < a->count; ++i) {
+        if (uf_truthy(uf_call_val(fn, 1, a->elements[i]))) {
+            return uf_bool(true);
+        }
+    }
+    return uf_bool(false);
+}
+
+static inline UfVal uf_sys_clock(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return uf_num((double)ts.tv_sec + (double)ts.tv_nsec * 1e-9);
+}
+
+static inline UfVal uf_sys_assert(size_t argc, ...) {
+    if (argc < 1) {
+        uf_raise("Assertion failed", "AssertionError");
+        return uf_null();
+    }
+    va_list va;
+    va_start(va, argc);
+    UfVal args[2];
+    for (size_t i = 0; i < argc && i < 2; ++i) {
+        args[i] = va_arg(va, UfVal);
+    }
+    va_end(va);
+
+    if (!uf_truthy(args[0])) {
+        const char* msg = (argc >= 2 && args[1].kind == UF_RT_STRING) ? args[1].as.string->chars : "Assertion failed";
+        uf_raise(msg, "AssertionError");
+        return uf_null();
+    }
+    return uf_null();
+}
+
+/* ========================================================================= */
+/* BUILT-IN STDLIB MODULES                                                   */
+/* ========================================================================= */
+
+static inline UfVal _wrap_math_abs(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_abs(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_floor(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_floor(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_ceil(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_ceil(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_round(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_round(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_sqrt(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_sqrt(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_pow(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_math_pow(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_math_min(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_math_min(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_math_max(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_math_max(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_math_log(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_log(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_sin(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_sin(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_cos(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_cos(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_tan(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_math_tan(a[0]) : uf_null(); }
+static inline UfVal _wrap_math_random(void* e, size_t n, UfVal* a) { (void)e; (void)n; (void)a; return uf_math_random(); }
+static inline UfVal _wrap_math_random_int(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_math_random_int(a[0], a[1]) : uf_null(); }
+
+static inline UfVal uf_mod_math(void) {
+    UfVal m = uf_map_new(20);
+    uf_set(m, uf_str("PI"), uf_num(3.14159265358979323846));
+    uf_set(m, uf_str("E"), uf_num(2.71828182845904523536));
+    uf_set(m, uf_str("INFINITY"), uf_num(HUGE_VAL));
+    uf_set(m, uf_str("abs"), uf_closure_new(_wrap_math_abs, NULL, 0));
+    uf_set(m, uf_str("floor"), uf_closure_new(_wrap_math_floor, NULL, 0));
+    uf_set(m, uf_str("ceil"), uf_closure_new(_wrap_math_ceil, NULL, 0));
+    uf_set(m, uf_str("round"), uf_closure_new(_wrap_math_round, NULL, 0));
+    uf_set(m, uf_str("sqrt"), uf_closure_new(_wrap_math_sqrt, NULL, 0));
+    uf_set(m, uf_str("pow"), uf_closure_new(_wrap_math_pow, NULL, 0));
+    uf_set(m, uf_str("min"), uf_closure_new(_wrap_math_min, NULL, 0));
+    uf_set(m, uf_str("max"), uf_closure_new(_wrap_math_max, NULL, 0));
+    uf_set(m, uf_str("log"), uf_closure_new(_wrap_math_log, NULL, 0));
+    uf_set(m, uf_str("sin"), uf_closure_new(_wrap_math_sin, NULL, 0));
+    uf_set(m, uf_str("cos"), uf_closure_new(_wrap_math_cos, NULL, 0));
+    uf_set(m, uf_str("tan"), uf_closure_new(_wrap_math_tan, NULL, 0));
+    uf_set(m, uf_str("random"), uf_closure_new(_wrap_math_random, NULL, 0));
+    uf_set(m, uf_str("random_int"), uf_closure_new(_wrap_math_random_int, NULL, 0));
+    return m;
+}
+
+static inline UfVal _wrap_str_split(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_split(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_join(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_join(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_trim(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_trim(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_replace(void* e, size_t n, UfVal* a) { (void)e; return n > 2 ? uf_str_replace(a[0], a[1], a[2]) : uf_null(); }
+static inline UfVal _wrap_str_to_upper(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_to_upper(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_to_lower(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_to_lower(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_contains(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_contains(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_starts_with(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_starts_with(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_ends_with(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_ends_with(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_char_at(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_char_at(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_to_number(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_to_number(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_to_string(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_to_string(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_repeat(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_repeat(a[0], a[1]) : uf_null(); }
+static inline UfVal _wrap_str_substring(void* e, size_t n, UfVal* a) { (void)e; return n > 2 ? uf_str_substring(a[0], a[1], a[2]) : (n > 1 ? uf_str_substring(a[0], a[1], uf_null()) : uf_null()); }
+static inline UfVal _wrap_str_index_of(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_index_of(a[0], a[1]) : uf_null(); }
+
+static inline UfVal uf_mod_strings(void) {
+    UfVal m = uf_map_new(20);
+    uf_set(m, uf_str("split"), uf_closure_new(_wrap_str_split, NULL, 0));
+    uf_set(m, uf_str("join"), uf_closure_new(_wrap_str_join, NULL, 0));
+    uf_set(m, uf_str("trim"), uf_closure_new(_wrap_str_trim, NULL, 0));
+    uf_set(m, uf_str("replace"), uf_closure_new(_wrap_str_replace, NULL, 0));
+    uf_set(m, uf_str("to_upper"), uf_closure_new(_wrap_str_to_upper, NULL, 0));
+    uf_set(m, uf_str("to_lower"), uf_closure_new(_wrap_str_to_lower, NULL, 0));
+    uf_set(m, uf_str("contains"), uf_closure_new(_wrap_str_contains, NULL, 0));
+    uf_set(m, uf_str("starts_with"), uf_closure_new(_wrap_str_starts_with, NULL, 0));
+    uf_set(m, uf_str("ends_with"), uf_closure_new(_wrap_str_ends_with, NULL, 0));
+    uf_set(m, uf_str("char_at"), uf_closure_new(_wrap_str_char_at, NULL, 0));
+    uf_set(m, uf_str("to_number"), uf_closure_new(_wrap_str_to_number, NULL, 0));
+    uf_set(m, uf_str("to_string"), uf_closure_new(_wrap_str_to_string, NULL, 0));
+    uf_set(m, uf_str("repeat_string"), uf_closure_new(_wrap_str_repeat, NULL, 0));
+    uf_set(m, uf_str("substring"), uf_closure_new(_wrap_str_substring, NULL, 0));
+    uf_set(m, uf_str("index_of"), uf_closure_new(_wrap_str_index_of, NULL, 0));
+    return m;
+}
+
+static inline UfVal _wrap_sys_platform(void* e, size_t n, UfVal* a) {
+    (void)e; (void)n; (void)a;
+    #if defined(_WIN32)
+    return uf_str("windows");
+    #elif defined(__APPLE__)
+    return uf_str("macos");
+    #elif defined(__linux__)
+    return uf_str("linux");
+    #else
+    return uf_str("unknown");
+    #endif
+}
+
+static inline UfVal _wrap_sys_args(void* e, size_t n, UfVal* a) {
+    (void)e; (void)n; (void)a;
+    UfVal arr = uf_array_new(g_uf_rt.argc > 0 ? (size_t)g_uf_rt.argc : 1);
+    for (int i = 0; i < g_uf_rt.argc; ++i) {
+        uf_array_push(arr, uf_str(g_uf_rt.argv[i]));
+    }
+    if (g_uf_rt.argc == 0) {
+        uf_array_push(arr, uf_str("unfish"));
+    }
+    return arr;
+}
+
+static inline UfVal _wrap_sys_env(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_null();
+    const char* val = getenv(a[0].as.string->chars);
+    return val ? uf_str(val) : uf_null();
+}
+
+static inline UfVal _wrap_sys_exit(void* e, size_t n, UfVal* a) {
+    (void)e;
+    int code = 0;
+    if (n > 0 && a[0].kind == UF_RT_NUMBER) code = (int)a[0].as.number;
+    exit(code);
+    return uf_null();
+}
+
+static inline UfVal uf_mod_sys(void) {
+    UfVal m = uf_map_new(8);
+    uf_set(m, uf_str("platform"), uf_closure_new(_wrap_sys_platform, NULL, 0));
+    uf_set(m, uf_str("args"), uf_closure_new(_wrap_sys_args, NULL, 0));
+    uf_set(m, uf_str("env"), uf_closure_new(_wrap_sys_env, NULL, 0));
+    uf_set(m, uf_str("exit"), uf_closure_new(_wrap_sys_exit, NULL, 0));
+    return m;
+}
+
+static inline UfVal _wrap_fs_write_text(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 2 || a[0].kind != UF_RT_STRING || a[1].kind != UF_RT_STRING) return uf_bool(false);
+    FILE* f = fopen(a[0].as.string->chars, "wb");
+    if (!f) return uf_bool(false);
+    size_t len = a[1].as.string->length;
+    size_t written = fwrite(a[1].as.string->chars, 1, len, f);
+    fclose(f);
+    return uf_bool(written == len);
+}
+
+static inline UfVal _wrap_fs_read_text(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_null();
+    FILE* f = fopen(a[0].as.string->chars, "rb");
+    if (!f) return uf_null();
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size < 0) { fclose(f); return uf_null(); }
+    char* buf = (char*)malloc((size_t)size + 1);
+    if (!buf) { fclose(f); return uf_null(); }
+    size_t r = fread(buf, 1, (size_t)size, f);
+    buf[r] = '\0';
+    fclose(f);
+    UfVal res = uf_str(buf);
+    free(buf);
+    return res;
+}
+
+static inline UfVal _wrap_fs_exists(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+    return uf_bool(access(a[0].as.string->chars, F_OK) == 0);
+}
+
+static inline UfVal _wrap_fs_delete_file(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+    return uf_bool(remove(a[0].as.string->chars) == 0);
+}
+
+static inline UfVal uf_mod_fs(void) {
+    UfVal m = uf_map_new(8);
+    uf_set(m, uf_str("write_text"), uf_closure_new(_wrap_fs_write_text, NULL, 0));
+    uf_set(m, uf_str("read_text"), uf_closure_new(_wrap_fs_read_text, NULL, 0));
+    uf_set(m, uf_str("exists"), uf_closure_new(_wrap_fs_exists, NULL, 0));
+    uf_set(m, uf_str("delete_file"), uf_closure_new(_wrap_fs_delete_file, NULL, 0));
+    return m;
+}
+
+static inline UfVal _wrap_mod_random_random(void* e, size_t n, UfVal* a) { (void)e; (void)n; (void)a; return uf_math_random(); }
+static inline UfVal _wrap_mod_random_random_int(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_math_random_int(a[0], a[1]) : uf_num(0); }
+static inline UfVal _wrap_mod_random_choice(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_ARRAY || a[0].as.array->count == 0) return uf_null();
+    size_t idx = (size_t)(rand() % a[0].as.array->count);
+    return a[0].as.array->elements[idx];
+}
+static inline UfVal _wrap_mod_random_shuffle(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_ARRAY) return uf_array_new(0);
+    UfRtArray* src = a[0].as.array;
+    UfVal res = uf_array_new(src->count);
+    for (size_t i = 0; i < src->count; ++i) {
+        uf_array_push(res, src->elements[i]);
+    }
+    UfRtArray* dst = res.as.array;
+    for (size_t i = dst->count; i > 1; --i) {
+        size_t j = (size_t)(rand() % i);
+        UfVal tmp = dst->elements[i - 1];
+        dst->elements[i - 1] = dst->elements[j];
+        dst->elements[j] = tmp;
+    }
+    return res;
+}
+
+static inline UfVal uf_mod_random(void) {
+    UfVal m = uf_map_new(8);
+    uf_set(m, uf_str("random"), uf_closure_new(_wrap_mod_random_random, NULL, 0));
+    uf_set(m, uf_str("random_int"), uf_closure_new(_wrap_mod_random_random_int, NULL, 0));
+    uf_set(m, uf_str("choice"), uf_closure_new(_wrap_mod_random_choice, NULL, 0));
+    uf_set(m, uf_str("shuffle"), uf_closure_new(_wrap_mod_random_shuffle, NULL, 0));
+    return m;
+}
+
+static inline UfVal _wrap_time_clock(void* e, size_t n, UfVal* a) { (void)e; (void)n; (void)a; return uf_sys_clock(); }
+static inline UfVal _wrap_time_sleep(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n > 0 && a[0].kind == UF_RT_NUMBER && a[0].as.number > 0) {
+        struct timespec req;
+        double s = a[0].as.number;
+        req.tv_sec = (time_t)s;
+        req.tv_nsec = (long)((s - (time_t)s) * 1e9);
+        nanosleep(&req, NULL);
+    }
+    return uf_null();
+}
+static inline UfVal _wrap_time_timestamp(void* e, size_t n, UfVal* a) { (void)e; (void)n; (void)a; return uf_num((double)time(NULL)); }
+
+static inline UfVal uf_mod_time(void) {
+    UfVal m = uf_map_new(8);
+    uf_set(m, uf_str("clock"), uf_closure_new(_wrap_time_clock, NULL, 0));
+    uf_set(m, uf_str("sleep"), uf_closure_new(_wrap_time_sleep, NULL, 0));
+    uf_set(m, uf_str("timestamp"), uf_closure_new(_wrap_time_timestamp, NULL, 0));
+    return m;
+}
+
+/* JSON Parser and Stringifier */
+typedef struct {
+    const char* src;
+    size_t pos;
+    size_t len;
+    bool has_error;
+} UfJsonParser;
+
+static void uf_json_skip_ws(UfJsonParser* p) {
+    while (p->pos < p->len && isspace((unsigned char)p->src[p->pos])) p->pos++;
+}
+
+static char uf_json_peek(UfJsonParser* p) {
+    uf_json_skip_ws(p);
+    return (p->pos < p->len) ? p->src[p->pos] : '\0';
+}
+
+static char uf_json_advance(UfJsonParser* p) {
+    uf_json_skip_ws(p);
+    return (p->pos < p->len) ? p->src[p->pos++] : '\0';
+}
+
+static UfVal uf_json_parse_val(UfJsonParser* p);
+
+static UfVal uf_json_parse_str(UfJsonParser* p) {
+    if (uf_json_advance(p) != '"') { p->has_error = true; return uf_null(); }
+    size_t cap = 64, len = 0;
+    char* buf = (char*)malloc(cap);
+    while (p->pos < p->len) {
+        char c = p->src[p->pos++];
+        if (c == '"') {
+            buf[len] = '\0';
+            UfVal v = uf_str(buf);
+            free(buf);
+            return v;
+        }
+        if (c == '\\') {
+            if (p->pos >= p->len) break;
+            char esc = p->src[p->pos++];
+            switch (esc) {
+                case '"':  c = '"'; break;
+                case '\\': c = '\\'; break;
+                case '/':  c = '/'; break;
+                case 'b':  c = '\b'; break;
+                case 'f':  c = '\f'; break;
+                case 'n':  c = '\n'; break;
+                case 'r':  c = '\r'; break;
+                case 't':  c = '\t'; break;
+                default:   c = esc; break;
+            }
+        }
+        if (len + 1 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        buf[len++] = c;
+    }
+    free(buf);
+    p->has_error = true;
+    return uf_null();
+}
+
+static UfVal uf_json_parse_num(UfJsonParser* p) {
+    uf_json_skip_ws(p);
+    char* endptr = NULL;
+    double n = strtod(p->src + p->pos, &endptr);
+    if (endptr == p->src + p->pos) { p->has_error = true; return uf_null(); }
+    p->pos = (size_t)(endptr - p->src);
+    return uf_num(n);
+}
+
+static UfVal uf_json_parse_arr(UfJsonParser* p) {
+    if (uf_json_advance(p) != '[') { p->has_error = true; return uf_null(); }
+    UfVal arr = uf_array_new(8);
+    uf_json_skip_ws(p);
+    if (uf_json_peek(p) == ']') { uf_json_advance(p); return arr; }
+    while (!p->has_error && p->pos < p->len) {
+        UfVal elem = uf_json_parse_val(p);
+        if (p->has_error) break;
+        uf_array_push(arr, elem);
+        uf_json_skip_ws(p);
+        if (uf_json_peek(p) == ',') {
+            uf_json_advance(p);
+        } else if (uf_json_peek(p) == ']') {
+            uf_json_advance(p);
+            break;
+        } else {
+            p->has_error = true;
+            break;
+        }
+    }
+    return arr;
+}
+
+static UfVal uf_json_parse_obj(UfJsonParser* p) {
+    if (uf_json_advance(p) != '{') { p->has_error = true; return uf_null(); }
+    UfVal map = uf_map_new(8);
+    uf_json_skip_ws(p);
+    if (uf_json_peek(p) == '}') { uf_json_advance(p); return map; }
+    while (!p->has_error && p->pos < p->len) {
+        uf_json_skip_ws(p);
+        if (uf_json_peek(p) != '"') { p->has_error = true; break; }
+        UfVal key = uf_json_parse_str(p);
+        if (p->has_error) break;
+        uf_json_skip_ws(p);
+        if (uf_json_advance(p) != ':') { p->has_error = true; break; }
+        UfVal val = uf_json_parse_val(p);
+        if (p->has_error) break;
+        uf_set(map, key, val);
+        uf_json_skip_ws(p);
+        if (uf_json_peek(p) == ',') {
+            uf_json_advance(p);
+        } else if (uf_json_peek(p) == '}') {
+            uf_json_advance(p);
+            break;
+        } else {
+            p->has_error = true;
+            break;
+        }
+    }
+    return map;
+}
+
+static UfVal uf_json_parse_val(UfJsonParser* p) {
+    uf_json_skip_ws(p);
+    char c = uf_json_peek(p);
+    if (c == '"') return uf_json_parse_str(p);
+    if (c == '{') return uf_json_parse_obj(p);
+    if (c == '[') return uf_json_parse_arr(p);
+    if (c == '-' || isdigit((unsigned char)c)) return uf_json_parse_num(p);
+    if (strncmp(p->src + p->pos, "true", 4) == 0) { p->pos += 4; return uf_bool(true); }
+    if (strncmp(p->src + p->pos, "false", 5) == 0) { p->pos += 5; return uf_bool(false); }
+    if (strncmp(p->src + p->pos, "null", 4) == 0) { p->pos += 4; return uf_null(); }
+    p->has_error = true;
+    return uf_null();
+}
+
+static inline UfVal _wrap_json_parse(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_null();
+    UfJsonParser p;
+    p.src = a[0].as.string->chars;
+    p.pos = 0;
+    p.len = a[0].as.string->length;
+    p.has_error = false;
+    UfVal val = uf_json_parse_val(&p);
+    uf_json_skip_ws(&p);
+    if (p.has_error || p.pos < p.len) return uf_null();
+    return val;
+}
+
+typedef struct {
+    char* data;
+    size_t len;
+    size_t cap;
+} UfJsonSb;
+
+static void _json_sb_init(UfJsonSb* sb) {
+    sb->cap = 128;
+    sb->len = 0;
+    sb->data = (char*)malloc(sb->cap);
+    sb->data[0] = '\0';
+}
+
+static void _json_sb_append(UfJsonSb* sb, const char* str, size_t len) {
+    while (sb->len + len + 1 >= sb->cap) {
+        sb->cap *= 2;
+        sb->data = (char*)realloc(sb->data, sb->cap);
+    }
+    memcpy(sb->data + sb->len, str, len);
+    sb->len += len;
+    sb->data[sb->len] = '\0';
+}
+
+static void _json_stringify_val(UfJsonSb* sb, UfVal val) {
+    switch (val.kind) {
+        case UF_RT_NULL: _json_sb_append(sb, "null", 4); break;
+        case UF_RT_BOOL:
+            if (val.as.boolean) _json_sb_append(sb, "true", 4);
+            else _json_sb_append(sb, "false", 5);
+            break;
+        case UF_RT_NUMBER: {
+            char num_buf[64];
+            if (val.as.number == (double)(int64_t)val.as.number && !isnan(val.as.number) && !isinf(val.as.number)) {
+                snprintf(num_buf, sizeof(num_buf), "%ld", (long)(int64_t)val.as.number);
+            } else {
+                snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);
+            }
+            _json_sb_append(sb, num_buf, strlen(num_buf));
+            break;
+        }
+        case UF_RT_STRING: {
+            _json_sb_append(sb, "\"", 1);
+            const char* s = val.as.string->chars;
+            size_t slen = val.as.string->length;
+            for (size_t i = 0; i < slen; ++i) {
+                char c = s[i];
+                switch (c) {
+                    case '"':  _json_sb_append(sb, "\\\"", 2); break;
+                    case '\\': _json_sb_append(sb, "\\\\", 2); break;
+                    case '\b': _json_sb_append(sb, "\\b", 2); break;
+                    case '\f': _json_sb_append(sb, "\\f", 2); break;
+                    case '\n': _json_sb_append(sb, "\\n", 2); break;
+                    case '\r': _json_sb_append(sb, "\\r", 2); break;
+                    case '\t': _json_sb_append(sb, "\\t", 2); break;
+                    default:   _json_sb_append(sb, &c, 1); break;
+                }
+            }
+            _json_sb_append(sb, "\"", 1);
+            break;
+        }
+        case UF_RT_ARRAY: {
+            _json_sb_append(sb, "[", 1);
+            UfRtArray* arr = val.as.array;
+            for (size_t i = 0; i < arr->count; ++i) {
+                if (i > 0) _json_sb_append(sb, ", ", 2);
+                _json_stringify_val(sb, arr->elements[i]);
+            }
+            _json_sb_append(sb, "]", 1);
+            break;
+        }
+        case UF_RT_MAP: {
+            _json_sb_append(sb, "{", 1);
+            UfRtMap* map = val.as.map;
+            for (size_t i = 0; i < map->order_count; ++i) {
+                if (i > 0) _json_sb_append(sb, ", ", 2);
+                UfVal k = map->order_keys[i];
+                _json_sb_append(sb, "\"", 1);
+                const char* ks = (k.kind == UF_RT_STRING) ? k.as.string->chars : "";
+                _json_sb_append(sb, ks, strlen(ks));
+                _json_sb_append(sb, "\": ", 3);
+                UfVal v = uf_get(val, k);
+                _json_stringify_val(sb, v);
+            }
+            _json_sb_append(sb, "}", 1);
+            break;
+        }
+        default:
+            _json_sb_append(sb, "null", 4);
+            break;
+    }
+}
+
+static inline UfVal _wrap_json_stringify(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1) return uf_str("null");
+    UfJsonSb sb;
+    _json_sb_init(&sb);
+    _json_stringify_val(&sb, a[0]);
+    UfVal res = uf_str(sb.data);
+    free(sb.data);
+    return res;
+}
+
+static inline UfVal uf_mod_json(void) {
+    UfVal m = uf_map_new(4);
+    uf_set(m, uf_str("parse"), uf_closure_new(_wrap_json_parse, NULL, 0));
+    uf_set(m, uf_str("stringify"), uf_closure_new(_wrap_json_stringify, NULL, 0));
+    return m;
+}
+
+/* Module Registry */
+typedef UfVal (*UfModuleInitFn)(void);
+typedef struct {
+    const char* name;
+    UfModuleInitFn init_fn;
+    UfVal cached_exports;
+    bool is_cached;
+    bool is_loading;
+} UfModuleEntry;
+
+#define UF_MAX_MODULES 64
+static UfModuleEntry g_module_registry[UF_MAX_MODULES];
+static size_t g_module_registry_count = 0;
+
+static inline void uf_register_module(const char* name, UfModuleInitFn init_fn) {
+    if (g_module_registry_count < UF_MAX_MODULES) {
+        g_module_registry[g_module_registry_count].name = name;
+        g_module_registry[g_module_registry_count].init_fn = init_fn;
+        g_module_registry[g_module_registry_count].cached_exports.kind = UF_RT_NULL;
+        g_module_registry[g_module_registry_count].is_cached = false;
+        g_module_registry[g_module_registry_count].is_loading = false;
+        g_module_registry_count++;
+    }
+}
+
+static inline UfVal uf_load_module(const char* name) {
+    for (size_t i = 0; i < g_module_registry_count; ++i) {
+        if (strcmp(g_module_registry[i].name, name) == 0) {
+            if (g_module_registry[i].is_cached) {
+                return g_module_registry[i].cached_exports;
+            }
+            if (g_module_registry[i].is_loading) {
+                char err_buf[128];
+                snprintf(err_buf, sizeof(err_buf), "Circular dependency detected while importing module '%s'", name);
+                uf_raise(err_buf, "CircularImportError");
+                return uf_null();
+            }
+            g_module_registry[i].is_loading = true;
+            UfVal mod = g_module_registry[i].init_fn();
+            g_module_registry[i].cached_exports = mod;
+            g_module_registry[i].is_cached = true;
+            g_module_registry[i].is_loading = false;
+            return mod;
+        }
+    }
+    if (strcmp(name, "math") == 0) return uf_mod_math();
+    if (strcmp(name, "strings") == 0) return uf_mod_strings();
+    if (strcmp(name, "sys") == 0) return uf_mod_sys();
+    if (strcmp(name, "fs") == 0) return uf_mod_fs();
+    if (strcmp(name, "random") == 0) return uf_mod_random();
+    if (strcmp(name, "time") == 0) return uf_mod_time();
+    if (strcmp(name, "json") == 0) return uf_mod_json();
+
+    char err_buf[128];
+    snprintf(err_buf, sizeof(err_buf), "Module '%s' not found", name);
+    uf_raise(err_buf, "ModuleNotFoundError");
+    return uf_null();
+}
+
+static inline UfVal uf_import_symbol(UfVal mod, const char* mod_name, const char* sym) {
+    if (mod.kind != UF_RT_MAP) {
+        char err[128];
+        snprintf(err, sizeof(err), "Cannot import from non-module '%s'", mod_name);
+        uf_raise(err, "ImportError");
+        return uf_null();
+    }
+    UfRtMap* m = mod.as.map;
+    for (size_t i = 0; i < m->capacity; ++i) {
+        if (m->entries[i].occupied &&
+            m->entries[i].key.kind == UF_RT_STRING &&
+            strcmp(m->entries[i].key.as.string->chars, sym) == 0) {
+            return m->entries[i].value;
+        }
+    }
+    char err[128];
+    snprintf(err, sizeof(err), "Cannot import name '%s' from module '%s'", sym, mod_name);
+    uf_raise(err, "ImportError");
+    return uf_null();
 }
 
 #endif /* UNFISH_RUNTIME_H */

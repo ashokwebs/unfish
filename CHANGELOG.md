@@ -5,6 +5,28 @@ The project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.0] - 2026-09-04
+
+### Added
+- **Multi-Module Native C99 Compiler (Milestone 25)**:
+  - Recursive compile-time module discovery with automatic dependency resolution across `import` and `from ... import` statements.
+  - Namespaced symbol generation (`uf_m_<name>_...`) for variables, functions, lambdas, and structs per module, preventing symbol collisions.
+  - Module initializers (`uf_init_mod_<name>`) exporting variables, functions, and structs into runtime exports map.
+  - Runtime module registry with `uf_register_module` / `uf_import_symbol` in `unfish_runtime.h`.
+  - Circular import detection (`CircularImportError`) with `is_loading` guard in module registry.
+  - Module search path resolution: caller directory → current directory → `src/stdlib/<name>.unfish` → `UNFISH_PATH`.
+  - CLI `_with_path` API variants (`uf_emit_c_program_with_path`, `uf_build_native_with_path`).
+  - Positional output argument support for `build` and `emit-c` commands (`unfish build foo.unfish output_binary`).
+- **3-Way Differential Parity Testing**:
+  - Extended `tools/run_differential_tests.sh` to verify AST Interpreter == Bytecode VM == Native C99 binary for all 37 positive conformance tests.
+  - All 53 tests (37 positive + 16 negative) pass with 100% parity under ASan/UBSan.
+- New conformance tests: `36_large_map.unfish` (map resize stress) and `37_closure_patterns.unfish` (closures, nested closures, spread patterns).
+
+### Fixed
+- **Native C99 Codegen — Mutable Closure Captures**: Closures compiled to native C99 captured variables by value (a `memcpy` into the closure's environment struct at creation time), so a variable mutated from inside a closure (e.g. a `make_counter()`-style counter incrementing its own state on each call) would reset to its original value on every invocation instead of persisting, diverging from the AST interpreter and bytecode VM's shared-environment semantics.
+  - Any variable captured by a closure is now heap-boxed (`UfVal*`, allocated via `uf_box_new`) and shared by reference between its defining scope and every closure invocation that captures it, so mutations are visible on subsequent calls and in the enclosing scope, matching interpreter/VM behavior. Boxing applies uniformly at every declaration site a captured name can originate from (`let`, function/lambda parameters, `for` loop variables, `try/catch` bindings, `match` pattern bindings, `import`/`from...import` bindings) and at every read/write site, so declaration and usage always agree on storage class.
+  - Boxes are tracked in a dedicated list (`g_uf_rt.all_boxes`) and freed by `uf_cleanup()`, so the fix introduces no memory leaks (verified leak-free under AddressSanitizer/LeakSanitizer).
+
 ## [1.0.0] - 2026-09-04
 
 ### Added

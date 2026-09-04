@@ -1,0 +1,27 @@
+# Test large map operations that trigger map resize
+# This tests inserting more entries than the initial map capacity
+# expect: 100
+# expect: true
+# expect: value_50
+# expect: true
+# expect: map resize stress test passed
+
+let big_map = {}
+
+# Insert 100 entries — well beyond initial capacity of 8
+let i = 0
+while i < 100:
+    let key = "key_" + to_string(i)
+    let val = "value_" + to_string(i)
+    big_map[key] = val
+    i = i + 1
+
+# Verify count
+say(len(big_map))
+
+# Verify lookup
+say(big_map["key_0"] == "value_0")
+say(big_map["key_50"])
+say(big_map["key_99"] == "value_99")
+
+say("map resize stress test passed")

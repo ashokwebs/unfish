@@ -506,7 +506,7 @@ static int cmd_build(const char* file_path, const char* out_bin_path) {
         out_bin_path = default_bin;
     }
 
-    bool ok = uf_build_native(program, out_bin_path);
+    bool ok = uf_build_native_with_path(program, file_path, out_bin_path);
     if (ok) {
         printf("Built native binary: %s\n", out_bin_path);
     } else {
@@ -900,6 +900,8 @@ int main(int argc, char* argv[]) {
                 arg_idx += 2;
             } else if (!file_path && argv[arg_idx][0] != '-') {
                 file_path = argv[arg_idx++];
+            } else if (!out_c_path && argv[arg_idx][0] != '-') {
+                out_c_path = argv[arg_idx++];
             } else {
                 break;
             }
@@ -921,6 +923,8 @@ int main(int argc, char* argv[]) {
                 arg_idx += 2;
             } else if (!file_path && argv[arg_idx][0] != '-') {
                 file_path = argv[arg_idx++];
+            } else if (!out_bin_path && argv[arg_idx][0] != '-') {
+                out_bin_path = argv[arg_idx++];
             } else {
                 break;
             }
