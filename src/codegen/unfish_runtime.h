@@ -408,7 +408,37 @@ static inline bool uf_truthy(UfVal v) {
     }
 }
 
-static inline char* uf_to_str(UfVal v) {
+/* Tracks the array/map/instance object pointers currently being
+ * stringified on the current recursive call chain, so a self-referential
+ * structure (e.g. `let m = {}; m["self"] = m`) prints as "{...}" for the
+ * repeated container instead of recursing forever and crashing with a
+ * stack overflow. */
+typedef struct {
+    const void** ptrs;
+    size_t count;
+    size_t cap;
+} UfToStrVisited;
+
+static inline bool uf_to_str_visit_enter(UfToStrVisited* vis, const void* ptr) {
+    for (size_t i = 0; i < vis->count; ++i) {
+        if (vis->ptrs[i] == ptr) return false;
+    }
+    if (vis->count == vis->cap) {
+        size_t new_cap = vis->cap == 0 ? 8 : vis->cap * 2;
+        const void** new_ptrs = (const void**)realloc((void*)vis->ptrs, new_cap * sizeof(const void*));
+        if (!new_ptrs) return false;
+        vis->ptrs = new_ptrs;
+        vis->cap = new_cap;
+    }
+    vis->ptrs[vis->count++] = ptr;
+    return true;
+}
+
+static inline void uf_to_str_visit_leave(UfToStrVisited* vis) {
+    if (vis->count > 0) vis->count--;
+}
+
+static inline char* uf_to_str_impl(UfVal v, UfToStrVisited* vis) {
     char buf[128];
     switch (v.kind) {
         case UF_RT_NULL: return strdup("null");
@@ -429,6 +459,12 @@ static inline char* uf_to_str(UfVal v) {
         }
         case UF_RT_INSTANCE: {
             UfRtInstance* inst = v.as.instance;
+            if (!uf_to_str_visit_enter(vis, inst)) {
+                size_t cap = strlen(inst->name) + 6;
+                char* res = (char*)malloc(cap);
+                snprintf(res, cap, "%s(...)", inst->name);
+                return res;
+            }
             size_t cap = 128;
             char* res = (char*)malloc(cap);
             snprintf(res, cap, "%s(", inst->name);
@@ -437,7 +473,7 @@ static inline char* uf_to_str(UfVal v) {
                     if (strlen(res) + 3 >= cap) { cap *= 2; res = (char*)realloc(res, cap); }
                     strcat(res, ", ");
                 }
-                char* s = uf_to_str(inst->fields[i]);
+                char* s = uf_to_str_impl(inst->fields[i], vis);
                 const char* fname = inst->field_names ? inst->field_names[i] : "?";
                 size_t need = strlen(fname) + strlen(s) + 4;
                 if (strlen(res) + need >= cap) {
@@ -450,9 +486,11 @@ static inline char* uf_to_str(UfVal v) {
                 free(s);
             }
             strcat(res, ")");
+            uf_to_str_visit_leave(vis);
             return res;
         }
         case UF_RT_ARRAY: {
+            if (!uf_to_str_visit_enter(vis, v.as.array)) return strdup("[...]");
             size_t cap = 64;
             char* res = (char*)malloc(cap);
             strcpy(res, "[");
@@ -461,7 +499,7 @@ static inline char* uf_to_str(UfVal v) {
                     if (strlen(res) + 3 >= cap) { cap *= 2; res = (char*)realloc(res, cap); }
                     strcat(res, ", ");
                 }
-                char* s = uf_to_str(v.as.array->elements[i]);
+                char* s = uf_to_str_impl(v.as.array->elements[i], vis);
                 if (strlen(res) + strlen(s) + 4 >= cap) {
                     cap = (cap + strlen(s)) * 2;
                     res = (char*)realloc(res, cap);
@@ -470,9 +508,11 @@ static inline char* uf_to_str(UfVal v) {
                 free(s);
             }
             strcat(res, "]");
+            uf_to_str_visit_leave(vis);
             return res;
         }
         case UF_RT_MAP: {
+            if (!uf_to_str_visit_enter(vis, v.as.map)) return strdup("{...}");
             size_t cap = 64;
             char* res = (char*)malloc(cap);
             strcpy(res, "{");
@@ -489,7 +529,7 @@ static inline char* uf_to_str(UfVal v) {
                     k = (char*)malloc(klen);
                     snprintf(k, klen, "\"%s\"", order_key.as.string->chars);
                 } else {
-                    k = uf_to_str(order_key);
+                    k = uf_to_str_impl(order_key, vis);
                 }
                 if (strlen(res) + strlen(k) + 6 >= cap) {
                     cap = (cap + strlen(k)) * 2;
@@ -502,7 +542,7 @@ static inline char* uf_to_str(UfVal v) {
                 for (size_t j = 0; j < v.as.map->capacity; ++j) {
                     if (v.as.map->entries[j].occupied &&
                         strcmp(v.as.map->entries[j].key.as.string->chars, v.as.map->order_keys[i].as.string->chars) == 0) {
-                        char* val_s = uf_to_str(v.as.map->entries[j].value);
+                        char* val_s = uf_to_str_impl(v.as.map->entries[j].value, vis);
                         if (strlen(res) + strlen(val_s) + 4 >= cap) {
                             cap = (cap + strlen(val_s)) * 2;
                             res = (char*)realloc(res, cap);
@@ -514,6 +554,7 @@ static inline char* uf_to_str(UfVal v) {
                 }
             }
             strcat(res, "}");
+            uf_to_str_visit_leave(vis);
             return res;
         }
         case UF_RT_CLOSURE: return strdup("<function>");
@@ -525,6 +566,13 @@ static inline char* uf_to_str(UfVal v) {
         }
         default: return strdup("<object>");
     }
+}
+
+static inline char* uf_to_str(UfVal v) {
+    UfToStrVisited vis = {0};
+    char* result = uf_to_str_impl(v, &vis);
+    free((void*)vis.ptrs);
+    return result;
 }
 
 static inline void uf_say(UfVal v) {

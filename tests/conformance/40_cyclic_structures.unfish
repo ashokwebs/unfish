@@ -1,0 +1,29 @@
+# A self-referential or mutually-referential array/map/struct must print
+# as "{...}"/"[...]"/"Name(...)" for the repeated container instead of
+# recursing forever (this used to stack-overflow-crash the interpreter,
+# VM, and native binary alike).
+# expect: [[...]]
+# expect: {"self": {...}}
+# expect: {"y": {"x": {...}}}
+# expect: Node(val: 1, next: null)
+
+let arr = []
+push(arr, arr)
+say(arr)
+
+let m = {}
+m["self"] = m
+say(m)
+
+let x = {}
+let y = {}
+x["y"] = y
+y["x"] = x
+say(x)
+
+struct Node:
+    val: Number
+    next: Node
+
+let n = Node(1, null)
+say(n)

@@ -560,7 +560,37 @@ bool uf_val_equal(UfValue a, UfValue b) {
     return false;
 }
 
-char* uf_val_to_string(UfValue val) {
+/* Tracks the array/map/instance object pointers currently being stringified
+ * on the current recursive call chain, so a self-referential structure
+ * (e.g. `let m = {}; m["self"] = m`) prints as "{...}" for the repeated
+ * container instead of recursing forever and crashing with a stack
+ * overflow (the same convention Python's repr() uses for cycles). */
+typedef struct {
+    const void** ptrs;
+    size_t count;
+    size_t cap;
+} UfReprVisited;
+
+static bool uf_repr_visit_enter(UfReprVisited* vis, const void* ptr) {
+    for (size_t i = 0; i < vis->count; ++i) {
+        if (vis->ptrs[i] == ptr) return false;
+    }
+    if (vis->count == vis->cap) {
+        size_t new_cap = vis->cap == 0 ? 8 : vis->cap * 2;
+        const void** new_ptrs = (const void**)realloc((void*)vis->ptrs, new_cap * sizeof(const void*));
+        if (!new_ptrs) return false;
+        vis->ptrs = new_ptrs;
+        vis->cap = new_cap;
+    }
+    vis->ptrs[vis->count++] = ptr;
+    return true;
+}
+
+static void uf_repr_visit_leave(UfReprVisited* vis) {
+    if (vis->count > 0) vis->count--;
+}
+
+static char* uf_val_to_string_impl(UfValue val, UfReprVisited* vis) {
     char buf[128];
     switch (val.kind) {
         case UF_VAL_NULL:
@@ -592,6 +622,7 @@ char* uf_val_to_string(UfValue val) {
             return strdup(buf);
         case UF_VAL_ARRAY: {
             UfArrayObject* arr = val.as.array;
+            if (!uf_repr_visit_enter(vis, arr)) return strdup("[...]");
             size_t cap = 64;
             char* out = (char*)malloc(cap);
             out[0] = '[';
@@ -607,7 +638,7 @@ char* uf_val_to_string(UfValue val) {
                     strcat(out, ", ");
                     len += 2;
                 }
-                char* elem_s = uf_val_to_string(arr->elements[i]);
+                char* elem_s = uf_val_to_string_impl(arr->elements[i], vis);
                 size_t elen = strlen(elem_s);
                 if (len + elen + 2 >= cap) {
                     cap = (len + elen + 2) * 2;
@@ -622,10 +653,12 @@ char* uf_val_to_string(UfValue val) {
                 out = (char*)realloc(out, cap);
             }
             strcat(out, "]");
+            uf_repr_visit_leave(vis);
             return out;
         }
         case UF_VAL_MAP: {
             UfMapObject* map = val.as.map;
+            if (!uf_repr_visit_enter(vis, map)) return strdup("{...}");
             size_t cap = 64;
             char* out = (char*)malloc(cap);
             out[0] = '{';
@@ -643,8 +676,8 @@ char* uf_val_to_string(UfValue val) {
                 }
                 UfValue k = map->order_keys[i];
                 UfValue v = uf_map_get(map, k);
-                char* ks = (k.kind == UF_VAL_STRING) ? strdup(k.as.string->chars) : uf_val_to_string(k);
-                char* vs = uf_val_to_string(v);
+                char* ks = (k.kind == UF_VAL_STRING) ? strdup(k.as.string->chars) : uf_val_to_string_impl(k, vis);
+                char* vs = uf_val_to_string_impl(v, vis);
 
                 size_t need = strlen(ks) + strlen(vs) + 8;
                 if (len + need >= cap) {
@@ -672,6 +705,7 @@ char* uf_val_to_string(UfValue val) {
                 out = (char*)realloc(out, cap);
             }
             strcat(out, "}");
+            uf_repr_visit_leave(vis);
             return out;
         }
         case UF_VAL_ERROR: {
@@ -696,6 +730,12 @@ char* uf_val_to_string(UfValue val) {
         case UF_VAL_INSTANCE: {
             UfInstanceObject* inst = val.as.instance;
             const char* sname = (inst->def && inst->def->name) ? inst->def->name : "Instance";
+            if (!uf_repr_visit_enter(vis, inst)) {
+                size_t cap = strlen(sname) + 6;
+                char* out = (char*)malloc(cap);
+                snprintf(out, cap, "%s(...)", sname);
+                return out;
+            }
             size_t cap = 128;
             char* out = (char*)malloc(cap);
             snprintf(out, cap, "%s(", sname);
@@ -711,7 +751,7 @@ char* uf_val_to_string(UfValue val) {
                     len += 2;
                 }
                 const char* fname = (inst->def && inst->def->field_names) ? inst->def->field_names[i] : "?";
-                char* fval_s = uf_val_to_string(inst->fields[i]);
+                char* fval_s = uf_val_to_string_impl(inst->fields[i], vis);
                 size_t need = strlen(fname) + strlen(fval_s) + 4;
                 if (len + need >= cap) {
                     cap = (len + need) * 2;
@@ -728,6 +768,7 @@ char* uf_val_to_string(UfValue val) {
                 out = (char*)realloc(out, cap);
             }
             strcat(out, ")");
+            uf_repr_visit_leave(vis);
             return out;
         }
         case UF_VAL_BYTECODE_FN: {
@@ -766,7 +807,14 @@ char* uf_val_to_string(UfValue val) {
     return strdup("<unknown>");
 }
 
-char* uf_val_repr(UfValue val) {
+char* uf_val_to_string(UfValue val) {
+    UfReprVisited vis = {0};
+    char* result = uf_val_to_string_impl(val, &vis);
+    free((void*)vis.ptrs);
+    return result;
+}
+
+static char* uf_val_repr_impl(UfValue val, UfReprVisited* vis) {
     if (val.kind == UF_VAL_STRING) {
         if (!val.as.string) return strdup("\"\"");
         size_t cap = val.as.string->length * 2 + 3;
@@ -802,6 +850,7 @@ char* uf_val_repr(UfValue val) {
     if (val.kind == UF_VAL_ARRAY) {
         UfArrayObject* arr = val.as.array;
         if (!arr) return strdup("[]");
+        if (!uf_repr_visit_enter(vis, arr)) return strdup("[...]");
         size_t cap = 64;
         char* out = (char*)malloc(cap);
         if (!out) return strdup("[]");
@@ -817,7 +866,7 @@ char* uf_val_repr(UfValue val) {
                 strcat(out, ", ");
                 len += 2;
             }
-            char* elem_s = uf_val_repr(arr->elements[i]);
+            char* elem_s = uf_val_repr_impl(arr->elements[i], vis);
             size_t elen = strlen(elem_s);
             if (len + elen + 2 >= cap) {
                 cap = (len + elen + 2) * 2;
@@ -832,11 +881,13 @@ char* uf_val_repr(UfValue val) {
             out = (char*)realloc(out, cap);
         }
         strcat(out, "]");
+        uf_repr_visit_leave(vis);
         return out;
     }
     if (val.kind == UF_VAL_MAP) {
         UfMapObject* map = val.as.map;
         if (!map) return strdup("{}");
+        if (!uf_repr_visit_enter(vis, map)) return strdup("{...}");
         size_t cap = 64;
         char* out = (char*)malloc(cap);
         if (!out) return strdup("{}");
@@ -854,8 +905,8 @@ char* uf_val_repr(UfValue val) {
             }
             UfValue k = map->order_keys[i];
             UfValue v = uf_map_get(map, k);
-            char* ks = uf_val_repr(k);
-            char* vs = uf_val_repr(v);
+            char* ks = uf_val_repr_impl(k, vis);
+            char* vs = uf_val_repr_impl(v, vis);
             size_t need = strlen(ks) + strlen(vs) + 4;
             if (len + need >= cap) {
                 cap = (len + need) * 2;
@@ -873,12 +924,19 @@ char* uf_val_repr(UfValue val) {
             out = (char*)realloc(out, cap);
         }
         strcat(out, "}");
+        uf_repr_visit_leave(vis);
         return out;
     }
     if (val.kind == UF_VAL_INSTANCE) {
         UfInstanceObject* inst = val.as.instance;
         if (!inst) return strdup("Instance()");
         const char* sname = (inst->def && inst->def->name) ? inst->def->name : "Instance";
+        if (!uf_repr_visit_enter(vis, inst)) {
+            size_t cap = strlen(sname) + 6;
+            char* out = (char*)malloc(cap);
+            snprintf(out, cap, "%s(...)", sname);
+            return out;
+        }
         size_t cap = 128;
         char* out = (char*)malloc(cap);
         if (!out) return strdup("Instance()");
@@ -894,7 +952,7 @@ char* uf_val_repr(UfValue val) {
                 len += 2;
             }
             const char* fname = (inst->def && inst->def->field_names) ? inst->def->field_names[i] : "?";
-            char* fval_s = uf_val_repr(inst->fields[i]);
+            char* fval_s = uf_val_repr_impl(inst->fields[i], vis);
             size_t need = strlen(fname) + strlen(fval_s) + 4;
             if (len + need >= cap) {
                 cap = (len + need) * 2;
@@ -911,6 +969,7 @@ char* uf_val_repr(UfValue val) {
             out = (char*)realloc(out, cap);
         }
         strcat(out, ")");
+        uf_repr_visit_leave(vis);
         return out;
     }
     if (val.kind == UF_VAL_BUFFER) {
@@ -936,6 +995,13 @@ char* uf_val_repr(UfValue val) {
         return out;
     }
     return uf_val_to_string(val);
+}
+
+char* uf_val_repr(UfValue val) {
+    UfReprVisited vis = {0};
+    char* result = uf_val_repr_impl(val, &vis);
+    free((void*)vis.ptrs);
+    return result;
 }
 
 const char* uf_val_type_name(UfValue val) {
