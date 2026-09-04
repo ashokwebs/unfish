@@ -29,6 +29,17 @@ typedef struct UfLoop {
     int* break_jumps;
     size_t break_count;
     size_t break_capacity;
+    /* `continue` cannot simply jump back to start_ip: for `while` that IS
+     * the condition re-check (correct), but `for`/`repeat` re-check a
+     * hidden index/counter that only advances in code emitted *after* the
+     * loop body, at a point not yet known when a `continue` inside the
+     * body is compiled. So `continue` always emits a forward jump here,
+     * patched once that per-iteration "advance and re-check" point is
+     * reached — which for `while` is immediately before its condition
+     * re-check jump, same as start_ip. */
+    int* continue_jumps;
+    size_t continue_count;
+    size_t continue_capacity;
     struct UfLoop* enclosing;
 } UfLoop;
 

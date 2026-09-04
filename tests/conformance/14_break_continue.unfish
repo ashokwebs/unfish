@@ -6,6 +6,15 @@
 # expect: 3
 # expect: 5
 # expect: found cherry
+# expect: 0
+# expect: 2
+# expect: 4
+# expect: for-continue done
+# expect: 1
+# expect: 2
+# expect: 4
+# expect: 5
+# expect: repeat-continue done
 
 # 1. break in while
 let x = 0
@@ -30,3 +39,23 @@ for item in items:
     if item == "cherry":
         say "found cherry"
         break
+
+# 4. continue in for-in (print even numbers under 5; this was an infinite
+# loop in the bytecode VM, since `continue` skipped the loop's hidden
+# index advance)
+for i in range(5):
+    if i % 2 != 0:
+        continue
+    say i
+say "for-continue done"
+
+# 5. continue in repeat (this used to silently run one extra iteration in
+# the bytecode VM per `continue`, since it skipped the hidden counter
+# advance)
+let n = 0
+repeat 5 times:
+    n = n + 1
+    if n == 3:
+        continue
+    say n
+say "repeat-continue done"

@@ -75,6 +75,23 @@ static void emit_loop(UfCompiler* c, int loop_start, int line) {
     emit_u16(c, (uint16_t)offset, line);
 }
 
+/* Patches every `continue` inside this loop to land here: the point where
+ * an iteration's per-iteration "advance and re-check" step begins (for
+ * `while`, that's the condition re-check itself; for `for`/`repeat`, it's
+ * the hidden index/counter increment that runs after the body, which
+ * `continue` must not skip — skipping it left `for`+`continue` an infinite
+ * loop and `repeat`+`continue` off-by-one). Call this at that point in
+ * each loop kind's own compilation, then free the accumulated array. */
+static void patch_loop_continues(UfCompiler* c, UfLoop* loop) {
+    for (size_t i = 0; i < loop->continue_count; ++i) {
+        patch_jump(c, loop->continue_jumps[i]);
+    }
+    free(loop->continue_jumps);
+    loop->continue_jumps = NULL;
+    loop->continue_count = 0;
+    loop->continue_capacity = 0;
+}
+
 static void begin_scope(UfCompiler* c) {
     c->scope_depth++;
 }
@@ -390,6 +407,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
+            loop.continue_jumps = NULL;
+            loop.continue_count = 0;
+            loop.continue_capacity = 0;
             loop.enclosing = c->current_loop;
             c->current_loop = &loop;
 
@@ -399,6 +419,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 
             compile_stmt(c, stmt->as.while_stmt.body);
 
+            /* while has no hidden per-iteration advance step, so continue's
+             * target is exactly the condition re-check, same as start_ip. */
+            patch_loop_continues(c, &loop);
             emit_loop(c, loop.start_ip, line);
             patch_jump(c, exit_jump);
             emit_byte(c, (uint8_t)OP_POP, line);
@@ -428,6 +451,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
+            loop.continue_jumps = NULL;
+            loop.continue_count = 0;
+            loop.continue_capacity = 0;
             loop.enclosing = c->current_loop;
             c->current_loop = &loop;
 
@@ -442,6 +468,12 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             emit_byte(c, (uint8_t)OP_POP, line);
 
             compile_stmt(c, stmt->as.repeat_stmt.body);
+
+            /* `continue` must land here, before the hidden counter advances
+             * below — jumping straight to start_ip (as a naive backward
+             * jump would) skips this increment and makes the loop run one
+             * extra iteration to compensate, silently miscounting. */
+            patch_loop_continues(c, &loop);
 
             /* Increment counter */
             emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
@@ -483,6 +515,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
+            loop.continue_jumps = NULL;
+            loop.continue_count = 0;
+            loop.continue_capacity = 0;
             loop.enclosing = c->current_loop;
             c->current_loop = &loop;
 
@@ -515,6 +550,13 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 
             compile_stmt(c, stmt->as.for_stmt.body);
             end_scope(c, line);
+
+            /* `continue` must land here, before the hidden index advances
+             * below — jumping straight to start_ip (the condition
+             * re-check, as a naive backward jump would) skips this
+             * increment entirely, so the condition re-checks against the
+             * exact same index forever: an infinite loop. */
+            patch_loop_continues(c, &loop);
 
             /* Increment idx */
             emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
@@ -568,7 +610,13 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     emit_byte(c, (uint8_t)OP_POP, line);
                 }
             }
-            emit_loop(c, c->current_loop->start_ip, line);
+            int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
+            if (c->current_loop->continue_count >= c->current_loop->continue_capacity) {
+                size_t ncap = c->current_loop->continue_capacity < 4 ? 4 : c->current_loop->continue_capacity * 2;
+                c->current_loop->continue_jumps = (int*)realloc(c->current_loop->continue_jumps, sizeof(int) * ncap);
+                c->current_loop->continue_capacity = ncap;
+            }
+            c->current_loop->continue_jumps[c->current_loop->continue_count++] = jump;
             break;
         }
         case UF_STMT_FUNCTION: {
