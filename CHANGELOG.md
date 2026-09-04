@@ -18,9 +18,9 @@ The project adheres to [Semantic Versioning](https://semver.org/).
   - CLI `_with_path` API variants (`uf_emit_c_program_with_path`, `uf_build_native_with_path`).
   - Positional output argument support for `build` and `emit-c` commands (`unfish build foo.unfish output_binary`).
 - **3-Way Differential Parity Testing**:
-  - Extended `tools/run_differential_tests.sh` to verify AST Interpreter == Bytecode VM == Native C99 binary for all 38 positive conformance tests.
-  - All 54 tests (38 positive + 16 negative) pass with 100% parity under ASan/UBSan.
-- New conformance tests: `36_large_map.unfish` (map resize stress), `37_closure_patterns.unfish` (closures, nested closures, spread patterns), and `38_deep_closures.unfish` (multi-level transitive closure capture, closures over match-pattern bindings, mutable-capture chains).
+  - Extended `tools/run_differential_tests.sh` to verify AST Interpreter == Bytecode VM == Native C99 binary for all 39 positive conformance tests.
+  - All 55 tests (39 positive + 16 negative) pass with 100% parity under ASan/UBSan.
+- New conformance tests: `36_large_map.unfish` (map resize stress), `37_closure_patterns.unfish` (closures, nested closures, spread patterns), `38_deep_closures.unfish` (multi-level transitive closure capture, closures over match-pattern bindings, mutable-capture chains), and `39_closure_edge_cases.unfish` (per-iteration `for`-loop closures, recursive local closures with self-mutation, 4-level transitive capture with mutation, closures over struct-pattern fields).
 
 ### Fixed
 - **Native C99 Codegen — Mutable Closure Captures**: Closures compiled to native C99 captured variables by value (a `memcpy` into the closure's environment struct at creation time), so a variable mutated from inside a closure (e.g. a `make_counter()`-style counter incrementing its own state on each call) would reset to its original value on every invocation instead of persisting, diverging from the AST interpreter and bytecode VM's shared-environment semantics.
