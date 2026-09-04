@@ -2091,13 +2091,18 @@ static void _json_sb_append(UfJsonSb* sb, const char* str, size_t len) {
     sb->data[sb->len] = '\0';
 }
 
-static void _json_stringify_val(UfJsonSb* sb, UfVal val) {
+/* Returns false (without raising anything itself) on a detected cycle, so
+ * the caller can free its StringBuilder/visited-set before raising the
+ * catchable error — uf_raise/uf_throw may longjmp out past this function
+ * entirely when a try/catch is active, which would otherwise skip that
+ * cleanup and leak them. */
+static bool _json_stringify_val(UfJsonSb* sb, UfVal val, UfToStrVisited* vis) {
     switch (val.kind) {
-        case UF_RT_NULL: _json_sb_append(sb, "null", 4); break;
+        case UF_RT_NULL: _json_sb_append(sb, "null", 4); return true;
         case UF_RT_BOOL:
             if (val.as.boolean) _json_sb_append(sb, "true", 4);
             else _json_sb_append(sb, "false", 5);
-            break;
+            return true;
         case UF_RT_NUMBER: {
             char num_buf[64];
             if (val.as.number == (double)(int64_t)val.as.number && !isnan(val.as.number) && !isinf(val.as.number)) {
@@ -2106,7 +2111,7 @@ static void _json_stringify_val(UfJsonSb* sb, UfVal val) {
                 snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);
             }
             _json_sb_append(sb, num_buf, strlen(num_buf));
-            break;
+            return true;
         }
         case UF_RT_STRING: {
             _json_sb_append(sb, "\"", 1);
@@ -2126,21 +2131,27 @@ static void _json_stringify_val(UfJsonSb* sb, UfVal val) {
                 }
             }
             _json_sb_append(sb, "\"", 1);
-            break;
+            return true;
         }
         case UF_RT_ARRAY: {
-            _json_sb_append(sb, "[", 1);
             UfRtArray* arr = val.as.array;
+            if (!uf_to_str_visit_enter(vis, arr)) return false;
+            _json_sb_append(sb, "[", 1);
             for (size_t i = 0; i < arr->count; ++i) {
                 if (i > 0) _json_sb_append(sb, ", ", 2);
-                _json_stringify_val(sb, arr->elements[i]);
+                if (!_json_stringify_val(sb, arr->elements[i], vis)) {
+                    uf_to_str_visit_leave(vis);
+                    return false;
+                }
             }
             _json_sb_append(sb, "]", 1);
-            break;
+            uf_to_str_visit_leave(vis);
+            return true;
         }
         case UF_RT_MAP: {
-            _json_sb_append(sb, "{", 1);
             UfRtMap* map = val.as.map;
+            if (!uf_to_str_visit_enter(vis, map)) return false;
+            _json_sb_append(sb, "{", 1);
             for (size_t i = 0; i < map->order_count; ++i) {
                 if (i > 0) _json_sb_append(sb, ", ", 2);
                 UfVal k = map->order_keys[i];
@@ -2149,14 +2160,18 @@ static void _json_stringify_val(UfJsonSb* sb, UfVal val) {
                 _json_sb_append(sb, ks, strlen(ks));
                 _json_sb_append(sb, "\": ", 3);
                 UfVal v = uf_get(val, k);
-                _json_stringify_val(sb, v);
+                if (!_json_stringify_val(sb, v, vis)) {
+                    uf_to_str_visit_leave(vis);
+                    return false;
+                }
             }
             _json_sb_append(sb, "}", 1);
-            break;
+            uf_to_str_visit_leave(vis);
+            return true;
         }
         default:
             _json_sb_append(sb, "null", 4);
-            break;
+            return true;
     }
 }
 
@@ -2165,7 +2180,14 @@ static inline UfVal _wrap_json_stringify(void* e, size_t n, UfVal* a) {
     if (n < 1) return uf_str("null");
     UfJsonSb sb;
     _json_sb_init(&sb);
-    _json_stringify_val(&sb, a[0]);
+    UfToStrVisited vis = {0};
+    bool ok = _json_stringify_val(&sb, a[0], &vis);
+    free((void*)vis.ptrs);
+    if (!ok) {
+        free(sb.data);
+        uf_raise("Converting circular structure to JSON", "TypeError");
+        return uf_null(); /* unreachable: uf_raise always longjmps or exits */
+    }
     UfVal res = uf_str(sb.data);
     free(sb.data);
     return res;

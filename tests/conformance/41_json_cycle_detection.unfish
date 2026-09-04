@@ -1,0 +1,19 @@
+# json.stringify on a self- or mutually-referential structure must raise a
+# catchable error ("Converting circular structure to JSON") instead of
+# crashing with a stack overflow, and must not affect stringifying an
+# unrelated acyclic value afterward.
+# expect: caught: Converting circular structure to JSON
+# expect: {"a": 1, "b": [1, 2, 3]}
+
+import json
+
+let m = {}
+m["self"] = m
+try:
+    let s = json.stringify(m)
+    say("no error: " + s)
+catch e:
+    say("caught: " + e.message)
+
+let ok = {"a": 1, "b": [1, 2, 3]}
+say(json.stringify(ok))

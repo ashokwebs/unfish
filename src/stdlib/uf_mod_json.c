@@ -251,15 +251,52 @@ static void sb_append(StringBuilder* sb, const char* str, size_t len) {
     sb->data[sb->len] = '\0';
 }
 
-static void stringify_value(StringBuilder* sb, UfValue val) {
+/* Tracks the array/map object pointers currently being stringified on the
+ * current recursive call chain. Unlike say/print's repr (which prints
+ * "[...]" for a repeated container), JSON has no syntax for a cycle, so a
+ * self- or mutually-referential structure is a runtime error here — the
+ * same behavior as JS's JSON.stringify ("Converting circular structure to
+ * JSON") — rather than either crashing with a stack overflow or silently
+ * emitting a truncated placeholder that wouldn't parse back as valid JSON. */
+typedef struct {
+    const void** ptrs;
+    size_t count;
+    size_t cap;
+} UfJsonVisited;
+
+static bool json_visit_enter(UfJsonVisited* vis, const void* ptr) {
+    for (size_t i = 0; i < vis->count; ++i) {
+        if (vis->ptrs[i] == ptr) return false;
+    }
+    if (vis->count == vis->cap) {
+        size_t new_cap = vis->cap == 0 ? 8 : vis->cap * 2;
+        const void** new_ptrs = (const void**)realloc((void*)vis->ptrs, new_cap * sizeof(const void*));
+        if (!new_ptrs) return false;
+        vis->ptrs = new_ptrs;
+        vis->cap = new_cap;
+    }
+    vis->ptrs[vis->count++] = ptr;
+    return true;
+}
+
+static void json_visit_leave(UfJsonVisited* vis) {
+    if (vis->count > 0) vis->count--;
+}
+
+/* Returns false (without raising anything itself) on a detected cycle, so
+ * the top-level caller can free its StringBuilder/visited-set before
+ * raising the catchable error — uf_runtime_error may longjmp out past this
+ * function entirely when a try/catch is active, which would otherwise skip
+ * that cleanup and leak them. */
+static bool stringify_value(StringBuilder* sb, UfValue val, UfJsonVisited* vis) {
     switch (val.kind) {
         case UF_VAL_NULL:
             sb_append(sb, "null", 4);
-            break;
+            return true;
         case UF_VAL_BOOL:
             if (val.as.boolean) sb_append(sb, "true", 4);
             else sb_append(sb, "false", 5);
-            break;
+            return true;
         case UF_VAL_NUMBER: {
             char num_buf[64];
             if (val.as.number == (double)(int64_t)val.as.number) {
@@ -268,7 +305,7 @@ static void stringify_value(StringBuilder* sb, UfValue val) {
                 snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);
             }
             sb_append(sb, num_buf, strlen(num_buf));
-            break;
+            return true;
         }
         case UF_VAL_STRING: {
             sb_append(sb, "\"", 1);
@@ -288,21 +325,27 @@ static void stringify_value(StringBuilder* sb, UfValue val) {
                 }
             }
             sb_append(sb, "\"", 1);
-            break;
+            return true;
         }
         case UF_VAL_ARRAY: {
-            sb_append(sb, "[", 1);
             UfArrayObject* arr = val.as.array;
+            if (!json_visit_enter(vis, arr)) return false;
+            sb_append(sb, "[", 1);
             for (size_t i = 0; i < arr->count; ++i) {
                 if (i > 0) sb_append(sb, ", ", 2);
-                stringify_value(sb, arr->elements[i]);
+                if (!stringify_value(sb, arr->elements[i], vis)) {
+                    json_visit_leave(vis);
+                    return false;
+                }
             }
             sb_append(sb, "]", 1);
-            break;
+            json_visit_leave(vis);
+            return true;
         }
         case UF_VAL_MAP: {
-            sb_append(sb, "{", 1);
             UfMapObject* map = val.as.map;
+            if (!json_visit_enter(vis, map)) return false;
+            sb_append(sb, "{", 1);
             for (size_t i = 0; i < map->order_count; ++i) {
                 if (i > 0) sb_append(sb, ", ", 2);
                 UfValue k = map->order_keys[i];
@@ -312,14 +355,18 @@ static void stringify_value(StringBuilder* sb, UfValue val) {
                 sb_append(sb, "\": ", 3);
                 free(k_str);
                 UfValue v = uf_map_get(map, k);
-                stringify_value(sb, v);
+                if (!stringify_value(sb, v, vis)) {
+                    json_visit_leave(vis);
+                    return false;
+                }
             }
             sb_append(sb, "}", 1);
-            break;
+            json_visit_leave(vis);
+            return true;
         }
         default:
             sb_append(sb, "null", 4);
-            break;
+            return true;
     }
 }
 
@@ -329,7 +376,15 @@ static UfValue json_stringify(UfRuntime* rt, int argc, UfValue* args) {
     }
     StringBuilder sb;
     sb_init(&sb);
-    stringify_value(&sb, args[0]);
+    UfJsonVisited vis = {0};
+    bool ok = stringify_value(&sb, args[0], &vis);
+    free((void*)vis.ptrs);
+    if (!ok) {
+        free(sb.data);
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_raise(rt, "TypeError", source_span_make(loc, loc), "Converting circular structure to JSON");
+        return uf_val_null();
+    }
     UfValue res = uf_val_string(rt, sb.data, sb.len);
     free(sb.data);
     return res;
