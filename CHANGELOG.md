@@ -30,6 +30,9 @@ The project adheres to [Semantic Versioning](https://semver.org/).
 - **Native C99 Codegen — `match`-Pattern Variable Capture**: A closure defined inside a `match` arm that reads the arm's pattern-bound variable (`when x if x > 0: function show(): ... x ...`) was misanalyzed as capturing an outer-scope variable named `x` rather than recognizing it as a binding local to the arm; when that arm's closure sat inside another closure (not a top-level function directly), this produced the same `'uf_var_x' undeclared` compile failure. Pattern-bound names (including nested struct-pattern fields) are now recorded as locals for capture analysis, matching how `let`, `for`, and `catch` bindings are already handled.
 - **Native C99 Codegen — Stack Overflow on Compile**: `uf_emit_c_program_with_path` held its module-collection and main emission context (each holding up to 256 per-lambda capture-analysis records) as plain by-value local variables; combined with the fixed-size, 64-module module-collection array this comfortably exceeded a typical 8MB thread stack, crashing the compiler (`AddressSanitizer: stack-overflow`) on any program with closures, before it could emit a single line of output. These are now heap-allocated.
 
+### Changed
+- **Native C99 Codegen — Fixed-Capacity Limits Now Fail Loudly**: The emitter's internal bookkeeping (closures per program, captures per closure, local bindings per closure body, top-level functions/structs/variables per module) uses fixed-capacity arrays sized generously for ordinary programs. Previously, exceeding one silently dropped the overflow, which could produce a wrong-but-compiling binary (e.g. a closure the emitter lost track of silently became `uf_null()`) rather than a build error. Any overflow of these compiler-internal limits now fails the build with a specific, actionable error message instead; the AST interpreter and bytecode VM have no such limits and are unaffected.
+
 ## [1.0.0] - 2026-09-04
 
 ### Added

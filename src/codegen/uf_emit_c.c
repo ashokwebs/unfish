@@ -13,6 +13,26 @@ static void emit_indent(FILE* out, int indent) {
     for (int i = 0; i < indent; ++i) fputs("    ", out);
 }
 
+/* The emitter tracks lambdas, declared functions/structs/variables, and
+ * per-lambda captures/locals in fixed-capacity arrays sized generously for
+ * ordinary programs. If a program is large enough to exceed one, silently
+ * dropping the overflow would produce wrong-but-compiling C output (e.g. a
+ * closure the emitter lost track of silently becomes `uf_null()`), so any
+ * overflow instead marks the compile as failed with a specific reason,
+ * checked once emission finishes. */
+static bool g_emit_limit_exceeded = false;
+static char g_emit_limit_reason[256];
+
+static void note_limit_exceeded(const char* what, size_t limit) {
+    if (!g_emit_limit_exceeded) {
+        g_emit_limit_exceeded = true;
+        snprintf(g_emit_limit_reason, sizeof(g_emit_limit_reason),
+                 "Error: Program exceeds native C99 compiler limit: %s (max %zu). "
+                 "Split the program into smaller functions/modules to work around this.",
+                 what, limit);
+    }
+}
+
 static void emit_escaped_string(FILE* out, const char* s) {
     fputc('"', out);
     if (s) {
@@ -108,6 +128,8 @@ static void collect_structs_stmt(const UfStmt* stmt) {
                 g_ctx->declared_structs[g_ctx->declared_struct_count].field_names = stmt->as.struct_stmt.field_names;
                 g_ctx->declared_structs[g_ctx->declared_struct_count].field_count = stmt->as.struct_stmt.field_count;
                 g_ctx->declared_struct_count++;
+            } else {
+                note_limit_exceeded("more than 128 struct definitions", 128);
             }
             break;
         case UF_STMT_IF:
@@ -179,6 +201,8 @@ static void add_boxed_name(const char* name) {
     if (!g_ctx || is_boxed_name(name)) return;
     if (g_ctx->boxed_name_count < 256) {
         g_ctx->boxed_names[g_ctx->boxed_name_count++] = name;
+    } else {
+        note_limit_exceeded("more than 256 distinct captured-variable names", 256);
     }
 }
 
@@ -235,6 +259,8 @@ static void collect_lambdas_expr(const UfExpr* expr, int parent_id) {
             g_ctx->lambdas[g_ctx->lambda_count].capture_count = 0;
             g_ctx->lambdas[g_ctx->lambda_count].own_local_count = 0;
             g_ctx->lambda_count++;
+        } else {
+            note_limit_exceeded("more than 256 closures/lambdas in one program", 256);
         }
         collect_lambdas_stmt(expr->as.fn_expr.body, false, this_id);
         return;
@@ -325,6 +351,8 @@ static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel, int paren
                     g_ctx->lambdas[g_ctx->lambda_count].capture_count = 0;
                     g_ctx->lambdas[g_ctx->lambda_count].own_local_count = 0;
                     g_ctx->lambda_count++;
+                } else {
+                    note_limit_exceeded("more than 256 closures/lambdas in one program", 256);
                 }
             }
             /* A top-level function is never itself a lambda (it has real C
@@ -378,6 +406,8 @@ static void collect_pattern_locals(const UfPattern* pat, const char** locals, si
         case UF_PAT_VARIABLE:
             if (*p_local_count < 64) {
                 locals[(*p_local_count)++] = pat->as.var_name;
+            } else {
+                note_limit_exceeded("more than 64 local bindings in one closure body", 64);
             }
             break;
         case UF_PAT_STRUCT:
@@ -404,6 +434,8 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
             !is_in_list(name, info->captures, info->capture_count)) {
             if (info->capture_count < 32) {
                 info->captures[info->capture_count++] = name;
+            } else {
+                note_limit_exceeded("more than 32 captured variables in one closure", 32);
             }
         }
         return;
@@ -455,6 +487,8 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
             find_captures_expr(stmt->as.let_stmt.init, locals, *p_local_count, params, param_count, info);
             if (*p_local_count < 64) {
                 locals[(*p_local_count)++] = stmt->as.let_stmt.name;
+            } else {
+                note_limit_exceeded("more than 64 local bindings in one closure body", 64);
             }
             break;
         case UF_STMT_ASSIGN:
@@ -490,6 +524,8 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
             find_captures_expr(stmt->as.for_stmt.iterable, locals, *p_local_count, params, param_count, info);
             if (*p_local_count < 64) {
                 locals[(*p_local_count)++] = stmt->as.for_stmt.var_name;
+            } else {
+                note_limit_exceeded("more than 64 local bindings in one closure body", 64);
             }
             find_captures_stmt(stmt->as.for_stmt.body, locals, p_local_count, params, param_count, info);
             break;
@@ -506,6 +542,8 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
         case UF_STMT_FUNCTION:
             if (*p_local_count < 64) {
                 locals[(*p_local_count)++] = stmt->as.function_stmt.name;
+            } else {
+                note_limit_exceeded("more than 64 local bindings in one closure body", 64);
             }
             break;
         case UF_STMT_MATCH:
@@ -523,8 +561,12 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
             break;
         case UF_STMT_TRY_CATCH:
             find_captures_stmt(stmt->as.try_catch.try_block, locals, p_local_count, params, param_count, info);
-            if (stmt->as.try_catch.catch_var && *p_local_count < 64) {
-                locals[(*p_local_count)++] = stmt->as.try_catch.catch_var;
+            if (stmt->as.try_catch.catch_var) {
+                if (*p_local_count < 64) {
+                    locals[(*p_local_count)++] = stmt->as.try_catch.catch_var;
+                } else {
+                    note_limit_exceeded("more than 64 local bindings in one closure body", 64);
+                }
             }
             find_captures_stmt(stmt->as.try_catch.catch_block, locals, p_local_count, params, param_count, info);
             break;
@@ -1366,16 +1408,20 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
     /* Populate top-level functions and struct constructor symbols */
     for (size_t i = 0; i < program->count; ++i) {
         UfStmt* stmt = program->stmts[i];
-        if (stmt->kind == UF_STMT_FUNCTION && ctx->declared_fn_count < 512) {
-            if (!context_has_fn(ctx, stmt->as.function_stmt.name)) {
+        if (stmt->kind == UF_STMT_FUNCTION && !context_has_fn(ctx, stmt->as.function_stmt.name)) {
+            if (ctx->declared_fn_count < 512) {
                 ctx->declared_fns[ctx->declared_fn_count++] = stmt->as.function_stmt.name;
+            } else {
+                note_limit_exceeded("more than 512 top-level functions/structs in one module", 512);
             }
         }
     }
     for (size_t i = 0; i < ctx->declared_struct_count; ++i) {
-        if (ctx->declared_fn_count < 512) {
-            if (!context_has_fn(ctx, ctx->declared_structs[i].name)) {
+        if (!context_has_fn(ctx, ctx->declared_structs[i].name)) {
+            if (ctx->declared_fn_count < 512) {
                 ctx->declared_fns[ctx->declared_fn_count++] = ctx->declared_structs[i].name;
+            } else {
+                note_limit_exceeded("more than 512 top-level functions/structs in one module", 512);
             }
         }
     }
@@ -1384,21 +1430,33 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
     for (size_t i = 0; i < program->count; ++i) {
         UfStmt* stmt = program->stmts[i];
         if (stmt->kind == UF_STMT_LET) {
-            if (!context_has_var(ctx, stmt->as.let_stmt.name) && ctx->declared_var_count < 256) {
-                ctx->declared_vars[ctx->declared_var_count++] = stmt->as.let_stmt.name;
+            if (!context_has_var(ctx, stmt->as.let_stmt.name)) {
+                if (ctx->declared_var_count < 256) {
+                    ctx->declared_vars[ctx->declared_var_count++] = stmt->as.let_stmt.name;
+                } else {
+                    note_limit_exceeded("more than 256 top-level variables in one module", 256);
+                }
             }
         } else if (stmt->kind == UF_STMT_IMPORT) {
             const char* bound = stmt->as.import_stmt.alias ? stmt->as.import_stmt.alias : stmt->as.import_stmt.module_name;
-            if (!context_has_var(ctx, bound) && ctx->declared_var_count < 256) {
-                ctx->declared_vars[ctx->declared_var_count++] = bound;
+            if (!context_has_var(ctx, bound)) {
+                if (ctx->declared_var_count < 256) {
+                    ctx->declared_vars[ctx->declared_var_count++] = bound;
+                } else {
+                    note_limit_exceeded("more than 256 top-level variables in one module", 256);
+                }
             }
         } else if (stmt->kind == UF_STMT_FROM_IMPORT) {
             for (size_t s = 0; s < stmt->as.from_import_stmt.count; ++s) {
                 const char* sym = stmt->as.from_import_stmt.symbols[s];
                 const char* bound = (stmt->as.from_import_stmt.aliases && stmt->as.from_import_stmt.aliases[s])
                                     ? stmt->as.from_import_stmt.aliases[s] : sym;
-                if (!context_has_var(ctx, bound) && ctx->declared_var_count < 256) {
-                    ctx->declared_vars[ctx->declared_var_count++] = bound;
+                if (!context_has_var(ctx, bound)) {
+                    if (ctx->declared_var_count < 256) {
+                        ctx->declared_vars[ctx->declared_var_count++] = bound;
+                    } else {
+                        note_limit_exceeded("more than 256 top-level variables in one module", 256);
+                    }
                 }
             }
         }
@@ -1442,8 +1500,12 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
             const char* pname = lambda_name(parent);
             if (pname && strcmp(name, pname) == 0) continue;
             if (is_declared_function(name) || is_declared_var(name) || is_builtin_name(name)) continue;
-            if (!is_in_list(name, parent->captures, parent->capture_count) && parent->capture_count < 32) {
-                parent->captures[parent->capture_count++] = name;
+            if (!is_in_list(name, parent->captures, parent->capture_count)) {
+                if (parent->capture_count < 32) {
+                    parent->captures[parent->capture_count++] = name;
+                } else {
+                    note_limit_exceeded("more than 32 captured variables in one closure", 32);
+                }
             }
         }
     }
@@ -1953,6 +2015,7 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     }
 
     g_match_id = 0;
+    g_emit_limit_exceeded = false;
 
     /* UfModuleCollection and UfEmitContext are large fixed-capacity
      * structures (each UfEmitContext alone holds up to 256 UfLambdaInfo
@@ -1989,6 +2052,15 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
 
     /* 3. Initialize emission context for main program */
     init_emit_context(main_ctx, program, "uf_", NULL);
+
+    if (g_emit_limit_exceeded) {
+        fprintf(stderr, "%s\n", g_emit_limit_reason);
+        free_module_collection(col);
+        free(col);
+        free(main_ctx);
+        free(prefixes);
+        return false;
+    }
 
     /* 4. Emit file header */
     fputs("/* ========================================================================= */\n", out);
