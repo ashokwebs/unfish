@@ -16,6 +16,7 @@
 #include "../compiler/uf_compiler.h"
 #include "../vm/uf_vm.h"
 #include "../vm/uf_disasm.h"
+#include "../codegen/uf_emit_c.h"
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -58,6 +59,8 @@ static void print_usage(const char* prog) {
     printf("  %s blocks-import <file.json>      Import visual JSON blocks to source\n", prog);
     printf("  %s compile <file.unfish>          Compile program to bytecode\n", prog);
     printf("  %s disasm <file.unfish>           Disassemble bytecode for file and child functions\n", prog);
+    printf("  %s emit-c [-o <out.c>] <file.unfish> Transpile program to standalone C99\n", prog);
+    printf("  %s build [-o <output>] <file.unfish> Compile program to native executable\n", prog);
     printf("  %s ast <file.unfish>              Dump parsed Abstract Syntax Tree\n", prog);
     printf("  %s tokens <file.unfish>           Scan and print token stream\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
@@ -412,6 +415,108 @@ static int cmd_compile(const char* file_path) {
     return exit_code;
 }
 
+static int cmd_emit_c(const char* file_path, const char* out_c_path) {
+    char* source = read_file(file_path);
+    if (!source) return 1;
+
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, file_path, source);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, file_path, source, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+
+    if (parser.had_error || !program) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    if (!uf_analyze_program(&sema, program) || reporter.error_count > 0) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 2;
+    }
+
+    bool ok = false;
+    if (out_c_path) {
+        ok = uf_emit_c_to_file(program, out_c_path);
+    } else {
+        ok = uf_emit_c_program(program, stdout);
+    }
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    free(source);
+    return ok ? 0 : 1;
+}
+
+static int cmd_build(const char* file_path, const char* out_bin_path) {
+    char* source = read_file(file_path);
+    if (!source) return 1;
+
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, file_path, source);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, file_path, source, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* program = uf_parse_program(&parser);
+
+    if (parser.had_error || !program) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    UfSemanticAnalyzer sema;
+    uf_semantic_init(&sema, &arena, &reporter);
+    if (!uf_analyze_program(&sema, program) || reporter.error_count > 0) {
+        uf_interner_free(&interner);
+        uf_arena_free(&arena);
+        free(source);
+        return 2;
+    }
+
+    char default_bin[256];
+    if (!out_bin_path) {
+        const char* base = strrchr(file_path, '/');
+        base = base ? base + 1 : file_path;
+        snprintf(default_bin, sizeof(default_bin), "%s", base);
+        char* dot = strrchr(default_bin, '.');
+        if (dot && strcmp(dot, ".unfish") == 0) *dot = '\0';
+        out_bin_path = default_bin;
+    }
+
+    bool ok = uf_build_native(program, out_bin_path);
+    if (ok) {
+        printf("Built native binary: %s\n", out_bin_path);
+    } else {
+        fprintf(stderr, "Error: Failed to build native binary '%s'\n", out_bin_path);
+    }
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    free(source);
+    return ok ? 0 : 1;
+}
+
 static int cmd_run(const char* file_path, int script_argc, char** script_argv, bool strict, bool use_vm, bool debug_vm) {
     char* source = read_file(file_path);
     if (!source) {
@@ -692,6 +797,48 @@ int main(int argc, char* argv[]) {
             return 64;
         }
         return cmd_compile(argv[arg_idx + 1]);
+    }
+
+    if (strcmp(cmd, "emit-c") == 0) {
+        arg_idx++;
+        const char* file_path = NULL;
+        const char* out_c_path = NULL;
+        while (arg_idx < argc) {
+            if (strcmp(argv[arg_idx], "-o") == 0 && arg_idx + 1 < argc) {
+                out_c_path = argv[arg_idx + 1];
+                arg_idx += 2;
+            } else if (!file_path && argv[arg_idx][0] != '-') {
+                file_path = argv[arg_idx++];
+            } else {
+                break;
+            }
+        }
+        if (!file_path) {
+            fprintf(stderr, "Error: Expected file path for 'emit-c'\n");
+            return 64;
+        }
+        return cmd_emit_c(file_path, out_c_path);
+    }
+
+    if (strcmp(cmd, "build") == 0) {
+        arg_idx++;
+        const char* file_path = NULL;
+        const char* out_bin_path = NULL;
+        while (arg_idx < argc) {
+            if (strcmp(argv[arg_idx], "-o") == 0 && arg_idx + 1 < argc) {
+                out_bin_path = argv[arg_idx + 1];
+                arg_idx += 2;
+            } else if (!file_path && argv[arg_idx][0] != '-') {
+                file_path = argv[arg_idx++];
+            } else {
+                break;
+            }
+        }
+        if (!file_path) {
+            fprintf(stderr, "Error: Expected file path for 'build'\n");
+            return 64;
+        }
+        return cmd_build(file_path, out_bin_path);
     }
 
     if (strcmp(cmd, "run") == 0) {

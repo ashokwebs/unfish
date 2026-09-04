@@ -433,3 +433,21 @@
      - Emits real-time visual stack dumps before each instruction execution (`[ 10 ][ 20 ] -> OP_ADD`).
      - Tracks VM execution metrics: total instruction count, peak evaluation stack depth, and peak call frame depth.
 * **Consequences**: Provides powerful tooling for compiler development, educational inspection of bytecode internals, and VM performance optimization.
+
+## ADR 030: Native C99 Code Generation & Binary Compilation Pipeline
+* **Date**: Milestone 20 (Phase 5 Part 5)
+* **Status**: Accepted
+* **Context**: For maximal execution performance, portability, and deployment independence, Unfish programs should be able to compile directly into native standalone C99 source code and machine binaries without requiring the Unfish interpreter binary or runtime at execution time.
+* **Decision**:
+  1. **Single-Header Native C99 Runtime (`unfish_runtime.h`)**:
+     - Standalone, portable C99 runtime providing tagged `UfVal` types, arithmetic/logical operators, variadic collections (`uf_make_array`, `uf_make_map`), built-in I/O (`uf_say`, `uf_print`), and auto-cleanup tracking.
+  2. **AST-to-C99 Transpiler (`uf_emit_c.c`)**:
+     - Translates AST statements, expressions, loops, conditionals, functions, and arrays into readable, standard C99.
+     - Top-level variables are safely scoped with `uf_var_` prefixes to prevent C keyword collisions.
+     - Top-level functions are forward-declared and emitted before `main()`.
+  3. **Native Compiler CLI Commands (`unfish emit-c` & `unfish build`)**:
+     - `unfish emit-c [-o <out.c>] <file.unfish>`: Transpiles Unfish code to readable standalone C99.
+     - `unfish build [-o <binary>] <file.unfish>`: Compiles Unfish code directly to a native executable ELF binary using `gcc -O2`.
+  4. **Verification**:
+     - Added comprehensive unit test suite `tests/unit/test_emit_c.c` testing emission, gcc compilation, and native execution.
+* **Consequences**: Enables Unfish to target native executable binaries, delivering maximum performance and standalone distribution capabilities.
