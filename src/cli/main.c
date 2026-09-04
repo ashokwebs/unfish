@@ -593,8 +593,33 @@ static int cmd_run(const char* file_path, int script_argc, char** script_argv, b
     return exit_code;
 }
 
+static int count_open_delimiters(const char* s) {
+    if (!s) return 0;
+    int count = 0;
+    bool in_str = false;
+    for (size_t i = 0; s[i] != '\0'; ++i) {
+        char c = s[i];
+        if (c == '\\' && in_str && s[i + 1] != '\0') {
+            i++;
+            continue;
+        }
+        if (c == '"') {
+            in_str = !in_str;
+            continue;
+        }
+        if (!in_str) {
+            if (c == '(' || c == '[' || c == '{') {
+                count++;
+            } else if (c == ')' || c == ']' || c == '}') {
+                if (count > 0) count--;
+            }
+        }
+    }
+    return count;
+}
+
 static void cmd_repl(void) {
-    printf("Unfish %s REPL (type 'exit' or Ctrl+D to quit)\n", UF_VERSION_STRING);
+    printf("Unfish %s REPL (type ':help' for commands, 'exit' to quit)\n", UF_VERSION_STRING);
 
     UfDiagnosticReporter reporter;
     uf_diag_reporter_init(&reporter, "<repl>", NULL);
@@ -623,8 +648,62 @@ static void cmd_repl(void) {
             line[--len] = '\0';
         }
 
-        if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) {
+        if (strcmp(line, ":exit") == 0 || strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0) {
             break;
+        }
+
+        if (strcmp(line, ":help") == 0 || strcmp(line, "help") == 0) {
+            printf("Unfish REPL Commands:\n");
+            printf("  :help          Show this help message\n");
+            printf("  :vars          List all declared variables and their values\n");
+            printf("  :reset         Reset runtime environment and clear all variables\n");
+            printf("  :gc            Run garbage collector and report heap usage\n");
+            printf("  :exit / quit   Exit the REPL\n");
+            continue;
+        }
+
+        if (strcmp(line, ":reset") == 0) {
+            uf_runtime_free(&rt);
+            uf_interner_free(&interner);
+            uf_arena_free(&arena);
+            uf_arena_init(&arena, 65536);
+            uf_interner_init(&interner, &arena);
+            uf_diag_reporter_init(&reporter, "<repl>", NULL);
+            uf_runtime_init(&rt, &reporter);
+            printf("Environment reset.\n");
+            continue;
+        }
+
+        if (strcmp(line, ":gc") == 0) {
+            size_t before = rt.bytes_allocated;
+            uf_gc_collect(&rt);
+            size_t after = rt.bytes_allocated;
+            printf("GC ran: freed %zu bytes (current heap: %zu bytes)\n",
+                   before > after ? before - after : 0, after);
+            continue;
+        }
+
+        if (strcmp(line, ":vars") == 0) {
+            printf("Global variables:\n");
+            size_t var_count = 0;
+            if (rt.global_env) {
+                for (size_t b = 0; b < rt.global_env->bucket_count; ++b) {
+                    UfEnvBinding* bind = rt.global_env->buckets[b];
+                    while (bind) {
+                        if (bind->value.kind != UF_VAL_NATIVE_FN) {
+                            char* repr = uf_val_repr(bind->value);
+                            printf("  %s: %s = %s\n", bind->name, uf_val_type_name(bind->value), repr);
+                            free(repr);
+                            var_count++;
+                        }
+                        bind = bind->next;
+                    }
+                }
+            }
+            if (var_count == 0) {
+                printf("  (no user variables defined)\n");
+            }
+            continue;
         }
 
         if (len == 0) {
@@ -635,17 +714,27 @@ static void cmd_repl(void) {
         uf_strbuf_init(&input_buf);
         uf_strbuf_append(&input_buf, line);
 
-        if (line[len - 1] == ':') {
-            /* Multiline block entry */
+        int open_delim = count_open_delimiters(input_buf.data);
+        bool has_colon = (len > 0 && line[len - 1] == ':');
+
+        if (open_delim > 0 || has_colon) {
             char block_line[1024];
             for (;;) {
                 printf("  ... > ");
                 fflush(stdout);
                 if (!fgets(block_line, sizeof(block_line), stdin)) break;
-                if (block_line[0] == '\n' || block_line[0] == '\r') {
+                size_t blen = strlen(block_line);
+                while (blen > 0 && (block_line[blen - 1] == '\n' || block_line[blen - 1] == '\r')) {
+                    block_line[--blen] = '\0';
+                }
+                if (blen == 0 && count_open_delimiters(input_buf.data) <= 0) {
                     break;
                 }
+                uf_strbuf_append(&input_buf, "\n");
                 uf_strbuf_append(&input_buf, block_line);
+                if (count_open_delimiters(input_buf.data) <= 0 && !has_colon) {
+                    break;
+                }
             }
         }
 
@@ -668,10 +757,10 @@ static void cmd_repl(void) {
             /* If single expression statement, evaluate and display value directly */
             if (program->count == 1 && program->stmts[0]->kind == UF_STMT_EXPR) {
                 UfValue val = uf_evaluate_expression(&rt, rt.global_env, program->stmts[0]->as.expr_stmt.expr);
-                if (!rt.had_runtime_error && val.kind != UF_VAL_NULL) {
-                    char* val_str = uf_val_to_string(val);
-                    printf("=> %s\n", val_str);
-                    free(val_str);
+                if (!rt.had_runtime_error) {
+                    char* repr = uf_val_repr(val);
+                    printf("=> %s\n", repr);
+                    free(repr);
                 }
             } else {
                 uf_interpret_program(&rt, program);

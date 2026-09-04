@@ -176,6 +176,7 @@ UfValue uf_val_buffer_from_bytes(UfRuntime* rt, const uint8_t* bytes, size_t siz
 bool uf_val_is_truthy(UfValue val);
 bool uf_val_equal(UfValue a, UfValue b);
 char* uf_val_to_string(UfValue val);
+char* uf_val_repr(UfValue val);
 const char* uf_val_type_name(UfValue val);
 void uf_val_print(UfValue val, FILE* out);
 

@@ -766,6 +766,178 @@ char* uf_val_to_string(UfValue val) {
     return strdup("<unknown>");
 }
 
+char* uf_val_repr(UfValue val) {
+    if (val.kind == UF_VAL_STRING) {
+        if (!val.as.string) return strdup("\"\"");
+        size_t cap = val.as.string->length * 2 + 3;
+        char* out = (char*)malloc(cap);
+        if (!out) return strdup("\"\"");
+        out[0] = '"';
+        size_t j = 1;
+        for (size_t i = 0; i < val.as.string->length; ++i) {
+            char c = val.as.string->chars[i];
+            if (c == '"') {
+                out[j++] = '\\';
+                out[j++] = '"';
+            } else if (c == '\\') {
+                out[j++] = '\\';
+                out[j++] = '\\';
+            } else if (c == '\n') {
+                out[j++] = '\\';
+                out[j++] = 'n';
+            } else if (c == '\t') {
+                out[j++] = '\\';
+                out[j++] = 't';
+            } else if (c == '\r') {
+                out[j++] = '\\';
+                out[j++] = 'r';
+            } else {
+                out[j++] = c;
+            }
+        }
+        out[j++] = '"';
+        out[j] = '\0';
+        return out;
+    }
+    if (val.kind == UF_VAL_ARRAY) {
+        UfArrayObject* arr = val.as.array;
+        if (!arr) return strdup("[]");
+        size_t cap = 64;
+        char* out = (char*)malloc(cap);
+        if (!out) return strdup("[]");
+        out[0] = '[';
+        out[1] = '\0';
+        size_t len = 1;
+        for (size_t i = 0; i < arr->count; ++i) {
+            if (i > 0) {
+                if (len + 3 >= cap) {
+                    cap *= 2;
+                    out = (char*)realloc(out, cap);
+                }
+                strcat(out, ", ");
+                len += 2;
+            }
+            char* elem_s = uf_val_repr(arr->elements[i]);
+            size_t elen = strlen(elem_s);
+            if (len + elen + 2 >= cap) {
+                cap = (len + elen + 2) * 2;
+                out = (char*)realloc(out, cap);
+            }
+            strcat(out, elem_s);
+            len += elen;
+            free(elem_s);
+        }
+        if (len + 2 >= cap) {
+            cap += 2;
+            out = (char*)realloc(out, cap);
+        }
+        strcat(out, "]");
+        return out;
+    }
+    if (val.kind == UF_VAL_MAP) {
+        UfMapObject* map = val.as.map;
+        if (!map) return strdup("{}");
+        size_t cap = 64;
+        char* out = (char*)malloc(cap);
+        if (!out) return strdup("{}");
+        out[0] = '{';
+        out[1] = '\0';
+        size_t len = 1;
+        for (size_t i = 0; i < map->order_count; ++i) {
+            if (i > 0) {
+                if (len + 3 >= cap) {
+                    cap *= 2;
+                    out = (char*)realloc(out, cap);
+                }
+                strcat(out, ", ");
+                len += 2;
+            }
+            UfValue k = map->order_keys[i];
+            UfValue v = uf_map_get(map, k);
+            char* ks = uf_val_repr(k);
+            char* vs = uf_val_repr(v);
+            size_t need = strlen(ks) + strlen(vs) + 4;
+            if (len + need >= cap) {
+                cap = (len + need) * 2;
+                out = (char*)realloc(out, cap);
+            }
+            strcat(out, ks);
+            strcat(out, ": ");
+            strcat(out, vs);
+            len += strlen(ks) + 2 + strlen(vs);
+            free(ks);
+            free(vs);
+        }
+        if (len + 2 >= cap) {
+            cap += 2;
+            out = (char*)realloc(out, cap);
+        }
+        strcat(out, "}");
+        return out;
+    }
+    if (val.kind == UF_VAL_INSTANCE) {
+        UfInstanceObject* inst = val.as.instance;
+        if (!inst) return strdup("Instance()");
+        const char* sname = (inst->def && inst->def->name) ? inst->def->name : "Instance";
+        size_t cap = 128;
+        char* out = (char*)malloc(cap);
+        if (!out) return strdup("Instance()");
+        snprintf(out, cap, "%s(", sname);
+        size_t len = strlen(out);
+        for (size_t i = 0; i < inst->field_count; ++i) {
+            if (i > 0) {
+                if (len + 3 >= cap) {
+                    cap *= 2;
+                    out = (char*)realloc(out, cap);
+                }
+                strcat(out, ", ");
+                len += 2;
+            }
+            const char* fname = (inst->def && inst->def->field_names) ? inst->def->field_names[i] : "?";
+            char* fval_s = uf_val_repr(inst->fields[i]);
+            size_t need = strlen(fname) + strlen(fval_s) + 4;
+            if (len + need >= cap) {
+                cap = (len + need) * 2;
+                out = (char*)realloc(out, cap);
+            }
+            strcat(out, fname);
+            strcat(out, ": ");
+            strcat(out, fval_s);
+            len += strlen(fname) + 2 + strlen(fval_s);
+            free(fval_s);
+        }
+        if (len + 2 >= cap) {
+            cap += 2;
+            out = (char*)realloc(out, cap);
+        }
+        strcat(out, ")");
+        return out;
+    }
+    if (val.kind == UF_VAL_BUFFER) {
+        UfBufferObject* buf = val.as.buffer;
+        size_t cap = 64 + (buf ? buf->size * 3 : 0);
+        char* out = (char*)malloc(cap);
+        if (!out) return strdup("<buffer>");
+        if (!buf || buf->size == 0) {
+            snprintf(out, cap, "<buffer size=0>");
+            return out;
+        }
+        snprintf(out, cap, "<buffer size=%zu [", buf->size);
+        size_t limit = buf->size > 16 ? 16 : buf->size;
+        char hex[8];
+        for (size_t i = 0; i < limit; ++i) {
+            snprintf(hex, sizeof(hex), "%s%02x", i > 0 ? " " : "", buf->data[i]);
+            strcat(out, hex);
+        }
+        if (buf->size > 16) {
+            strcat(out, " ...");
+        }
+        strcat(out, "]>");
+        return out;
+    }
+    return uf_val_to_string(val);
+}
+
 const char* uf_val_type_name(UfValue val) {
     switch (val.kind) {
         case UF_VAL_NULL:        return "null";
