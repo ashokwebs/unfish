@@ -26,7 +26,8 @@ typedef enum {
     UF_VAL_BYTECODE_FN,
     UF_VAL_CLOSURE,
     UF_VAL_FIBER,
-    UF_VAL_CHANNEL
+    UF_VAL_CHANNEL,
+    UF_VAL_BUFFER
 } UfValueKind;
 
 struct UfBytecodeFunction;
@@ -39,6 +40,12 @@ struct UfFiber;
 typedef struct UfFiber UfFiber;
 struct UfChannel;
 typedef struct UfChannel UfChannel;
+
+typedef struct {
+    UfObj obj;
+    uint8_t* data;
+    size_t size;
+} UfBufferObject;
 
 typedef UfValue (*UfNativeFn)(UfRuntime* rt, int argc, UfValue* args);
 
@@ -114,6 +121,7 @@ struct UfValue {
         UfClosureObject* closure;
         UfFiber* fiber;
         UfChannel* channel;
+        UfBufferObject* buffer;
     } as;
 };
 
@@ -161,6 +169,8 @@ UfValue uf_val_instance(UfRuntime* rt, UfStructDefObject* def, UfValue* fields, 
 UfValue uf_val_bytecode_fn(UfRuntime* rt, UfBytecodeFunction* fn);
 UfValue uf_val_fiber(UfRuntime* rt, UfFiber* fiber);
 UfValue uf_val_channel(UfRuntime* rt, UfChannel* channel);
+UfValue uf_val_buffer(UfRuntime* rt, size_t size);
+UfValue uf_val_buffer_from_bytes(UfRuntime* rt, const uint8_t* bytes, size_t size);
 
 /* Operations */
 bool uf_val_is_truthy(UfValue val);

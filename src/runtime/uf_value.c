@@ -480,6 +480,8 @@ bool uf_val_is_truthy(UfValue val) {
         case UF_VAL_FIBER:
         case UF_VAL_CHANNEL:
             return true;
+        case UF_VAL_BUFFER:
+            return val.as.buffer != NULL && val.as.buffer->size > 0;
     }
     return false;
 }
@@ -547,6 +549,13 @@ bool uf_val_equal(UfValue a, UfValue b) {
             return a.as.fiber == b.as.fiber;
         case UF_VAL_CHANNEL:
             return a.as.channel == b.as.channel;
+        case UF_VAL_BUFFER: {
+            if (a.as.buffer == b.as.buffer) return true;
+            if (!a.as.buffer || !b.as.buffer) return false;
+            if (a.as.buffer->size != b.as.buffer->size) return false;
+            if (a.as.buffer->size == 0) return true;
+            return memcmp(a.as.buffer->data, b.as.buffer->data, a.as.buffer->size) == 0;
+        }
     }
     return false;
 }
@@ -747,6 +756,12 @@ char* uf_val_to_string(UfValue val) {
                      val.as.channel ? val.as.channel->count : 0);
             return strdup(cbuf);
         }
+        case UF_VAL_BUFFER: {
+            char bbuf[128];
+            snprintf(bbuf, sizeof(bbuf), "<buffer size=%zu>",
+                     val.as.buffer ? val.as.buffer->size : 0);
+            return strdup(bbuf);
+        }
     }
     return strdup("<unknown>");
 }
@@ -769,6 +784,7 @@ const char* uf_val_type_name(UfValue val) {
         case UF_VAL_INSTANCE:    return (val.as.instance && val.as.instance->def && val.as.instance->def->name) ? val.as.instance->def->name : "instance";
         case UF_VAL_FIBER:       return "fiber";
         case UF_VAL_CHANNEL:     return "channel";
+        case UF_VAL_BUFFER:      return "buffer";
     }
     return "<unknown>";
 }
@@ -804,6 +820,35 @@ UfValue uf_val_closure(UfRuntime* rt, UfClosureObject* closure) {
     UfValue v;
     v.kind = UF_VAL_CLOSURE;
     v.as.closure = closure;
+    return v;
+}
+
+UfValue uf_val_buffer(UfRuntime* rt, size_t size) {
+    UfBufferObject* buf = (UfBufferObject*)malloc(sizeof(UfBufferObject));
+    if (!buf) return uf_val_null();
+    buf->obj.kind = UF_OBJ_BUFFER;
+    buf->obj.marked = false;
+    buf->obj.next = NULL;
+    buf->size = size;
+    if (size > 0) {
+        buf->data = (uint8_t*)calloc(size, 1);
+    } else {
+        buf->data = NULL;
+    }
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)buf, sizeof(UfBufferObject) + size);
+    }
+    UfValue v;
+    v.kind = UF_VAL_BUFFER;
+    v.as.buffer = buf;
+    return v;
+}
+
+UfValue uf_val_buffer_from_bytes(UfRuntime* rt, const uint8_t* bytes, size_t size) {
+    UfValue v = uf_val_buffer(rt, size);
+    if (v.kind == UF_VAL_BUFFER && v.as.buffer && bytes && size > 0) {
+        memcpy(v.as.buffer->data, bytes, size);
+    }
     return v;
 }
 

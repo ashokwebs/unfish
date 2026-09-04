@@ -513,3 +513,30 @@
      - Added comprehensive unit test suite `tests/unit/test_fiber.c` testing task spawning, buffered FIFO queueing, buffer overflow resizing, full script-level execution with worker fibers communicating over channels, and GC marking under memory collection pressure.
      - Verified 100% pass across all 15 unit test suites, stress tests, 51/51 conformance tests, and 51/51 differential parity tests under ASan/UBSan with zero leaks.
 * **Consequences**: Unfish supports lightweight, deterministic concurrency and CSP-style message passing with zero data races.
+
+## ADR 034: Systems Programming, Explicit Byte Buffers & Memory Layout Inspection
+* **Date**: Milestone 24 (Phase 5 Part 9)
+* **Status**: Accepted
+* **Context**: Systems-level applications, hardware bridging, binary protocol parsing, and low-level optimization require explicit contiguous byte buffers, fixed-width integer semantics, multi-byte endian read/write access, and transparent memory layout inspection.
+* **Decision**:
+  1. **Contiguous Byte Buffer Object (`UfBufferObject`, `UF_OBJ_BUFFER`, `UF_VAL_BUFFER`)**:
+     - Contiguous raw byte array tracked by `UfRuntime` heap management and freed during garbage collection sweeps.
+     - Primitives: `buffer(size)`, `buffer_from_string(str)`, `buffer_to_string(buf)`, `buffer_size(buf)`, `buffer_get(buf, offset)`, `buffer_set(buf, offset, byte)`, `buffer_fill(buf, byte)`, and `buffer_slice(buf, start, len)`.
+     - Integrated into `len()` operator (`len(buffer) == buffer_size(buffer)`).
+     - Strict bounds checking with `IndexOutOfBounds` runtime error on invalid offsets.
+  2. **Multi-Byte Endian Read/Write Primitives**:
+     - `buffer_read_u16_le` / `buffer_write_u16_le`: 16-bit unsigned little-endian access.
+     - `buffer_read_u32_le` / `buffer_write_u32_le`: 32-bit unsigned little-endian access.
+     - `buffer_read_i32_le` / `buffer_write_i32_le`: 32-bit signed two's complement little-endian access.
+  3. **Fixed-Width Integer Conversion & Masking**:
+     - Fast bitwise masking and signed conversion functions: `u8(n)`, `i8(n)`, `u16(n)`, `i16(n)`, `u32(n)`, `i32(n)`.
+  4. **Memory Layout Inspector (`inspect(val)`)**:
+     - Returns a detailed dictionary map with runtime metadata:
+       - `type`: type name
+       - `size_bytes`: total heap footprint in bytes
+       - `marked`: GC mark state
+       - Internal object attributes: `length` for strings, `count`/`capacity` for arrays and maps, `buffer_size` for buffers, `field_count` for struct instances, `upvalue_count` for closures, `fiber_id` for fibers.
+  5. **Verification**:
+     - Added comprehensive unit test suite `tests/unit/test_systems.c` testing zero-allocation buffers, byte manipulations, slices, string round-trips, little-endian access, signed integer conversions, memory inspection, and GC sweeps under stress.
+     - Verified clean pass across all 16 unit test suites, stress tests, 51/51 conformance tests, and 51/51 differential tests with AddressSanitizer and UndefinedBehaviorSanitizer enabled.
+* **Consequences**: Equips Unfish with systems programming capabilities, binary serialization tools, and low-level debugging facilities without sacrificing memory safety.

@@ -53,8 +53,11 @@ static UfValue native_len(UfRuntime* rt, int argc, UfValue* args) {
     if (args[0].kind == UF_VAL_MAP) {
         return uf_val_number((double)args[0].as.map->count);
     }
+    if (args[0].kind == UF_VAL_BUFFER) {
+        return uf_val_number((double)args[0].as.buffer->size);
+    }
     SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
-    uf_runtime_error(rt, source_span_make(loc, loc), "'len()' argument must be a string, array, or map, got '%s'", uf_val_type_name(args[0]));
+    uf_runtime_error(rt, source_span_make(loc, loc), "'len()' argument must be a string, array, map, or buffer, got '%s'", uf_val_type_name(args[0]));
     return uf_val_null();
 }
 
@@ -617,6 +620,8 @@ void uf_gc_mark_value(UfValue val) {
                 f = f->next;
             }
         }
+    } else if (val.kind == UF_VAL_BUFFER) {
+        if (val.as.buffer) val.as.buffer->obj.marked = true;
     }
 }
 
@@ -728,6 +733,10 @@ void uf_gc_collect(UfRuntime* rt) {
                 uf_fiber_free((UfFiber*)obj);
             } else if (obj->kind == UF_OBJ_CHANNEL) {
                 uf_channel_free((UfChannel*)obj);
+            } else if (obj->kind == UF_OBJ_BUFFER) {
+                UfBufferObject* buf = (UfBufferObject*)obj;
+                if (buf->data) free(buf->data);
+                free(buf);
             } else {
                 free(obj);
             }
@@ -841,6 +850,10 @@ void uf_runtime_free(UfRuntime* rt) {
             uf_fiber_free((UfFiber*)obj);
         } else if (obj->kind == UF_OBJ_CHANNEL) {
             uf_channel_free((UfChannel*)obj);
+        } else if (obj->kind == UF_OBJ_BUFFER) {
+            UfBufferObject* buf = (UfBufferObject*)obj;
+            if (buf->data) free(buf->data);
+            free(buf);
         } else {
             free(obj);
         }

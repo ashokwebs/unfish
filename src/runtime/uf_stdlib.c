@@ -3,6 +3,7 @@
 #include "uf_env.h"
 #include "uf_runtime.h"
 #include "uf_fiber.h"
+#include "../vm/uf_vm.h"
 #include "../semantic/uf_semantic.h"
 #include <ctype.h>
 #include <math.h>
@@ -605,6 +606,358 @@ static UfValue std_run_scheduler(UfRuntime* rt, int argc, UfValue* args) {
 }
 
 /* ========================================================================= */
+/* SYSTEMS PROGRAMMING / LOW-LEVEL BUFFER / MEMORY FUNCTIONS                 */
+/* ========================================================================= */
+
+static UfValue std_buffer(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer()' expects a size number");
+        return uf_val_null();
+    }
+    double sz = args[0].as.number;
+    if (sz < 0) sz = 0;
+    return uf_val_buffer(rt, (size_t)sz);
+}
+
+static UfValue std_buffer_from_string(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_from_string()' expects a string");
+        return uf_val_null();
+    }
+    UfStringObject* str = args[0].as.string;
+    return uf_val_buffer_from_bytes(rt, (const uint8_t*)str->chars, str->length);
+}
+
+static UfValue std_buffer_to_string(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_BUFFER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_to_string()' expects a buffer");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    return uf_val_string(rt, (const char*)buf->data, buf->size);
+}
+
+static UfValue std_buffer_size(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_BUFFER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_size()' expects a buffer");
+        return uf_val_null();
+    }
+    return uf_val_number((double)args[0].as.buffer->size);
+}
+
+static UfValue std_buffer_get(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_get()' expects a buffer and an offset number");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)offset >= buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Buffer offset %ld out of bounds (size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    return uf_val_number((double)buf->data[offset]);
+}
+
+static UfValue std_buffer_set(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 3 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER || args[2].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_set()' expects buffer, offset number, and byte value");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)offset >= buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Buffer offset %ld out of bounds (size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    uint8_t byte_val = (uint8_t)((int)args[2].as.number & 0xFF);
+    buf->data[offset] = byte_val;
+    return args[2];
+}
+
+static UfValue std_buffer_fill(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_fill()' expects a buffer and a byte value");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    uint8_t byte_val = (uint8_t)((int)args[1].as.number & 0xFF);
+    if (buf->size > 0 && buf->data) {
+        memset(buf->data, byte_val, buf->size);
+    }
+    return args[0];
+}
+
+static UfValue std_buffer_slice(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_slice()' expects buffer and start offset");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t start = (int64_t)args[1].as.number;
+    if (start < 0) start = 0;
+    if ((size_t)start > buf->size) start = (int64_t)buf->size;
+
+    size_t length = buf->size - (size_t)start;
+    if (argc >= 3 && args[2].kind == UF_VAL_NUMBER) {
+        int64_t user_len = (int64_t)args[2].as.number;
+        if (user_len < 0) user_len = 0;
+        if ((size_t)user_len < length) length = (size_t)user_len;
+    }
+
+    const uint8_t* src = (length > 0 && buf->data) ? buf->data + start : NULL;
+    return uf_val_buffer_from_bytes(rt, src, length);
+}
+
+static UfValue std_buffer_read_u16_le(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_read_u16_le()' expects buffer and offset");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)(offset + 2) > buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Read past buffer end (offset %ld + 2 > size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    uint16_t v = (uint16_t)(buf->data[offset] | (buf->data[offset + 1] << 8));
+    return uf_val_number((double)v);
+}
+
+static UfValue std_buffer_write_u16_le(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 3 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER || args[2].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_write_u16_le()' expects buffer, offset, and value");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)(offset + 2) > buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Write past buffer end (offset %ld + 2 > size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    uint16_t v = (uint16_t)(uint32_t)args[2].as.number;
+    buf->data[offset] = (uint8_t)(v & 0xFF);
+    buf->data[offset + 1] = (uint8_t)((v >> 8) & 0xFF);
+    return args[2];
+}
+
+static UfValue std_buffer_read_u32_le(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_read_u32_le()' expects buffer and offset");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)(offset + 4) > buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Read past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    uint32_t v = (uint32_t)(buf->data[offset]) |
+                 ((uint32_t)(buf->data[offset + 1]) << 8) |
+                 ((uint32_t)(buf->data[offset + 2]) << 16) |
+                 ((uint32_t)(buf->data[offset + 3]) << 24);
+    return uf_val_number((double)v);
+}
+
+static UfValue std_buffer_write_u32_le(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 3 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER || args[2].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_write_u32_le()' expects buffer, offset, and value");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)(offset + 4) > buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Write past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    uint32_t v = (uint32_t)(uint64_t)args[2].as.number;
+    buf->data[offset] = (uint8_t)(v & 0xFF);
+    buf->data[offset + 1] = (uint8_t)((v >> 8) & 0xFF);
+    buf->data[offset + 2] = (uint8_t)((v >> 16) & 0xFF);
+    buf->data[offset + 3] = (uint8_t)((v >> 24) & 0xFF);
+    return args[2];
+}
+
+static UfValue std_buffer_read_i32_le(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_read_i32_le()' expects buffer and offset");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)(offset + 4) > buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Read past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    int32_t v = (int32_t)((uint32_t)(buf->data[offset]) |
+                          ((uint32_t)(buf->data[offset + 1]) << 8) |
+                          ((uint32_t)(buf->data[offset + 2]) << 16) |
+                          ((uint32_t)(buf->data[offset + 3]) << 24));
+    return uf_val_number((double)v);
+}
+
+static UfValue std_buffer_write_i32_le(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 3 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER || args[2].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_write_i32_le()' expects buffer, offset, and value");
+        return uf_val_null();
+    }
+    UfBufferObject* buf = args[0].as.buffer;
+    int64_t offset = (int64_t)args[1].as.number;
+    if (offset < 0 || (size_t)(offset + 4) > buf->size) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Write past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
+        return uf_val_null();
+    }
+    int32_t v = (int32_t)args[2].as.number;
+    buf->data[offset] = (uint8_t)(v & 0xFF);
+    buf->data[offset + 1] = (uint8_t)((v >> 8) & 0xFF);
+    buf->data[offset + 2] = (uint8_t)((v >> 16) & 0xFF);
+    buf->data[offset + 3] = (uint8_t)((v >> 24) & 0xFF);
+    return args[2];
+}
+
+static UfValue std_u8(UfRuntime* rt, int argc, UfValue* args) {
+    (void)rt;
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
+    return uf_val_number((double)((uint8_t)(int64_t)args[0].as.number));
+}
+
+static UfValue std_i8(UfRuntime* rt, int argc, UfValue* args) {
+    (void)rt;
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
+    return uf_val_number((double)((int8_t)(int64_t)args[0].as.number));
+}
+
+static UfValue std_u16(UfRuntime* rt, int argc, UfValue* args) {
+    (void)rt;
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
+    return uf_val_number((double)((uint16_t)(int64_t)args[0].as.number));
+}
+
+static UfValue std_i16(UfRuntime* rt, int argc, UfValue* args) {
+    (void)rt;
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
+    return uf_val_number((double)((int16_t)(int64_t)args[0].as.number));
+}
+
+static UfValue std_u32(UfRuntime* rt, int argc, UfValue* args) {
+    (void)rt;
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
+    return uf_val_number((double)((uint32_t)(int64_t)args[0].as.number));
+}
+
+static UfValue std_i32(UfRuntime* rt, int argc, UfValue* args) {
+    (void)rt;
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
+    return uf_val_number((double)((int32_t)(int64_t)args[0].as.number));
+}
+
+static UfValue std_inspect(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1) return uf_val_null();
+    UfValue v = args[0];
+
+    UfValue map_val = uf_val_map(rt, 8);
+    uf_runtime_push_temp_root(rt, map_val);
+    UfMapObject* map = map_val.as.map;
+
+    uf_map_set(rt, map, uf_val_string_cstr(rt, "type"), uf_val_string_cstr(rt, uf_val_type_name(v)));
+
+    size_t sz = sizeof(UfValue);
+    bool marked = false;
+
+    switch (v.kind) {
+        case UF_VAL_STRING:
+            if (v.as.string) {
+                sz = sizeof(UfStringObject) + v.as.string->length + 1;
+                marked = v.as.string->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "length"), uf_val_number((double)v.as.string->length));
+            }
+            break;
+        case UF_VAL_ARRAY:
+            if (v.as.array) {
+                sz = sizeof(UfArrayObject) + v.as.array->capacity * sizeof(UfValue);
+                marked = v.as.array->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "count"), uf_val_number((double)v.as.array->count));
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "capacity"), uf_val_number((double)v.as.array->capacity));
+            }
+            break;
+        case UF_VAL_MAP:
+            if (v.as.map) {
+                sz = sizeof(UfMapObject) + v.as.map->capacity * sizeof(UfMapEntry);
+                marked = v.as.map->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "count"), uf_val_number((double)v.as.map->count));
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "capacity"), uf_val_number((double)v.as.map->capacity));
+            }
+            break;
+        case UF_VAL_BUFFER:
+            if (v.as.buffer) {
+                sz = sizeof(UfBufferObject) + v.as.buffer->size;
+                marked = v.as.buffer->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "buffer_size"), uf_val_number((double)v.as.buffer->size));
+            }
+            break;
+        case UF_VAL_INSTANCE:
+            if (v.as.instance) {
+                sz = sizeof(UfInstanceObject) + v.as.instance->field_count * sizeof(UfValue);
+                marked = v.as.instance->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "field_count"), uf_val_number((double)v.as.instance->field_count));
+            }
+            break;
+        case UF_VAL_CLOSURE:
+            if (v.as.closure) {
+                sz = sizeof(UfClosureObject) + v.as.closure->upvalue_count * sizeof(UfUpvalueCell*);
+                marked = v.as.closure->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "upvalue_count"), uf_val_number((double)v.as.closure->upvalue_count));
+            }
+            break;
+        case UF_VAL_FIBER:
+            if (v.as.fiber) {
+                sz = sizeof(UfFiber) + v.as.fiber->argc * sizeof(UfValue);
+                marked = v.as.fiber->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "fiber_id"), uf_val_number((double)v.as.fiber->id));
+            }
+            break;
+        case UF_VAL_CHANNEL:
+            if (v.as.channel) {
+                sz = sizeof(UfChannel) + v.as.channel->capacity * sizeof(UfValue);
+                marked = v.as.channel->obj.marked;
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "count"), uf_val_number((double)v.as.channel->count));
+                uf_map_set(rt, map, uf_val_string_cstr(rt, "capacity"), uf_val_number((double)v.as.channel->capacity));
+            }
+            break;
+        default:
+            break;
+    }
+
+    uf_map_set(rt, map, uf_val_string_cstr(rt, "size_bytes"), uf_val_number((double)sz));
+    uf_map_set(rt, map, uf_val_string_cstr(rt, "marked"), uf_val_bool(marked));
+
+    uf_runtime_pop_temp_roots(rt, 1);
+    return map_val;
+}
+
+/* ========================================================================= */
 /* REGISTRATION                                                              */
 /* ========================================================================= */
 
@@ -655,6 +1008,29 @@ void uf_stdlib_register_runtime(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "recv",          uf_val_native("recv",          std_recv,          1));
     uf_env_declare(rt->global_env, "close_channel", uf_val_native("close_channel", std_close_channel, 1));
     uf_env_declare(rt->global_env, "run_scheduler", uf_val_native("run_scheduler", std_run_scheduler, 0));
+
+    /* Systems / Buffer / Low-Level functions */
+    uf_env_declare(rt->global_env, "buffer",              uf_val_native("buffer",              std_buffer,              1));
+    uf_env_declare(rt->global_env, "buffer_from_string",  uf_val_native("buffer_from_string",  std_buffer_from_string,  1));
+    uf_env_declare(rt->global_env, "buffer_to_string",    uf_val_native("buffer_to_string",    std_buffer_to_string,    1));
+    uf_env_declare(rt->global_env, "buffer_size",         uf_val_native("buffer_size",         std_buffer_size,         1));
+    uf_env_declare(rt->global_env, "buffer_get",          uf_val_native("buffer_get",          std_buffer_get,          2));
+    uf_env_declare(rt->global_env, "buffer_set",          uf_val_native("buffer_set",          std_buffer_set,          3));
+    uf_env_declare(rt->global_env, "buffer_fill",         uf_val_native("buffer_fill",         std_buffer_fill,         2));
+    uf_env_declare(rt->global_env, "buffer_slice",        uf_val_native("buffer_slice",        std_buffer_slice,        -1));
+    uf_env_declare(rt->global_env, "buffer_read_u16_le",  uf_val_native("buffer_read_u16_le",  std_buffer_read_u16_le,  2));
+    uf_env_declare(rt->global_env, "buffer_write_u16_le", uf_val_native("buffer_write_u16_le", std_buffer_write_u16_le, 3));
+    uf_env_declare(rt->global_env, "buffer_read_u32_le",  uf_val_native("buffer_read_u32_le",  std_buffer_read_u32_le,  2));
+    uf_env_declare(rt->global_env, "buffer_write_u32_le", uf_val_native("buffer_write_u32_le", std_buffer_write_u32_le, 3));
+    uf_env_declare(rt->global_env, "buffer_read_i32_le",  uf_val_native("buffer_read_i32_le",  std_buffer_read_i32_le,  2));
+    uf_env_declare(rt->global_env, "buffer_write_i32_le", uf_val_native("buffer_write_i32_le", std_buffer_write_i32_le, 3));
+    uf_env_declare(rt->global_env, "u8",                  uf_val_native("u8",                  std_u8,                  1));
+    uf_env_declare(rt->global_env, "i8",                  uf_val_native("i8",                  std_i8,                  1));
+    uf_env_declare(rt->global_env, "u16",                 uf_val_native("u16",                 std_u16,                 1));
+    uf_env_declare(rt->global_env, "i16",                 uf_val_native("i16",                 std_i16,                 1));
+    uf_env_declare(rt->global_env, "u32",                 uf_val_native("u32",                 std_u32,                 1));
+    uf_env_declare(rt->global_env, "i32",                 uf_val_native("i32",                 std_i32,                 1));
+    uf_env_declare(rt->global_env, "inspect",             uf_val_native("inspect",             std_inspect,             1));
 
     /* Error handling */
     uf_env_declare(rt->global_env, "error", uf_val_native("error", std_error, -1));
@@ -710,6 +1086,29 @@ void uf_stdlib_register_semantic(struct UfSemanticAnalyzer* analyzer) {
     uf_semantic_add_symbol(analyzer, "recv",          UF_SYM_BUILTIN, span, 1);
     uf_semantic_add_symbol(analyzer, "close_channel", UF_SYM_BUILTIN, span, 1);
     uf_semantic_add_symbol(analyzer, "run_scheduler", UF_SYM_BUILTIN, span, 0);
+
+    /* Systems / Buffer / Low-Level functions */
+    uf_semantic_add_symbol(analyzer, "buffer",              UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "buffer_from_string",  UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "buffer_to_string",    UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "buffer_size",         UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "buffer_get",          UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "buffer_set",          UF_SYM_BUILTIN, span, 3);
+    uf_semantic_add_symbol(analyzer, "buffer_fill",         UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "buffer_slice",        UF_SYM_BUILTIN, span, -1);
+    uf_semantic_add_symbol(analyzer, "buffer_read_u16_le",  UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "buffer_write_u16_le", UF_SYM_BUILTIN, span, 3);
+    uf_semantic_add_symbol(analyzer, "buffer_read_u32_le",  UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "buffer_write_u32_le", UF_SYM_BUILTIN, span, 3);
+    uf_semantic_add_symbol(analyzer, "buffer_read_i32_le",  UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "buffer_write_i32_le", UF_SYM_BUILTIN, span, 3);
+    uf_semantic_add_symbol(analyzer, "u8",                  UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "i8",                  UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "u16",                 UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "i16",                 UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "u32",                 UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "i32",                 UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "inspect",             UF_SYM_BUILTIN, span, 1);
 
     /* Error handling */
     uf_semantic_add_symbol(analyzer, "error", UF_SYM_BUILTIN, span, -1);

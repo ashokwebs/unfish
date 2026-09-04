@@ -72,6 +72,7 @@ test: $(BIN_DIR)/unfish
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_optimize.c $(LDFLAGS) -o $(BIN_DIR)/test_optimize
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_lsp.c $(LDFLAGS) -o $(BIN_DIR)/test_lsp
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_fiber.c $(LDFLAGS) -o $(BIN_DIR)/test_fiber
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_systems.c $(LDFLAGS) -o $(BIN_DIR)/test_systems
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	@echo "=== Running Unit Tests ==="
 	@$(BIN_DIR)/test_lexer
@@ -89,6 +90,7 @@ test: $(BIN_DIR)/unfish
 	@$(BIN_DIR)/test_optimize
 	@$(BIN_DIR)/test_lsp
 	@$(BIN_DIR)/test_fiber
+	@$(BIN_DIR)/test_systems
 	@echo "=== Running Stress Tests ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests ==="
@@ -113,6 +115,7 @@ test-asan:
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_optimize.c $(LDFLAGS) -o $(BIN_DIR)/test_optimize
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_lsp.c $(LDFLAGS) -o $(BIN_DIR)/test_lsp
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_fiber.c $(LDFLAGS) -o $(BIN_DIR)/test_fiber
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_systems.c $(LDFLAGS) -o $(BIN_DIR)/test_systems
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) $(CLI_SRC) $(LDFLAGS) -o $(BIN_DIR)/unfish
 	@echo "=== Running Unit Tests with ASan/UBSan ==="
@@ -131,6 +134,7 @@ test-asan:
 	@$(BIN_DIR)/test_optimize
 	@$(BIN_DIR)/test_lsp
 	@$(BIN_DIR)/test_fiber
+	@$(BIN_DIR)/test_systems
 	@echo "=== Running Stress Tests with ASan/UBSan ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests with ASan/UBSan ==="

@@ -17,7 +17,8 @@ typedef enum {
     UF_OBJ_CLOSURE,
     UF_OBJ_UPVALUE,
     UF_OBJ_FIBER,
-    UF_OBJ_CHANNEL
+    UF_OBJ_CHANNEL,
+    UF_OBJ_BUFFER
 } UfObjKind;
 
 typedef struct UfObj {
