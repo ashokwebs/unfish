@@ -62,9 +62,17 @@ typedef struct UfVM {
 void uf_vm_init(UfVM* vm, UfRuntime* rt);
 void uf_vm_free(UfVM* vm);
 
-void uf_vm_push(UfVM* vm, UfValue value);
-UfValue uf_vm_pop(UfVM* vm);
-UfValue uf_vm_peek(UfVM* vm, int distance);
+static inline void uf_vm_push(UfVM* vm, UfValue value) {
+    *vm->stack_top++ = value;
+}
+
+static inline UfValue uf_vm_pop(UfVM* vm) {
+    return *--vm->stack_top;
+}
+
+static inline UfValue uf_vm_peek(UfVM* vm, int distance) {
+    return vm->stack_top[-1 - distance];
+}
 
 UfClosureObject* uf_closure_new(UfRuntime* rt, UfBytecodeFunction* function);
 UfValue uf_val_closure(UfRuntime* rt, UfClosureObject* closure);

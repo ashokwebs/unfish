@@ -684,6 +684,26 @@ void uf_gc_collect(UfRuntime* rt) {
         }
     }
 
+    /* Mark active VM stack, frames, and open upvalues */
+    if (rt->active_vm) {
+        UfVM* vm = (UfVM*)rt->active_vm;
+        for (UfValue* slot = vm->stack; slot < vm->stack_top; ++slot) {
+            uf_gc_mark_value(*slot);
+        }
+        for (int i = 0; i < vm->frame_count; ++i) {
+            if (vm->frames[i].closure) {
+                uf_gc_mark_value(uf_val_closure(rt, vm->frames[i].closure));
+            }
+        }
+        for (UfUpvalueCell* up = vm->open_upvalues; up != NULL; up = up->next) {
+            up->obj.marked = true;
+            if (up->location) {
+                uf_gc_mark_value(*up->location);
+            }
+            uf_gc_mark_value(up->closed);
+        }
+    }
+
     /* 2. Sweep */
     UfObj** curr = &rt->all_objects;
     while (*curr) {

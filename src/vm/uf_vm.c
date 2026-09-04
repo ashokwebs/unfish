@@ -40,17 +40,6 @@ void uf_vm_free(UfVM* vm) {
     vm->peak_frame_depth = 0;
 }
 
-void uf_vm_push(UfVM* vm, UfValue value) {
-    *vm->stack_top++ = value;
-}
-
-UfValue uf_vm_pop(UfVM* vm) {
-    return *--vm->stack_top;
-}
-
-UfValue uf_vm_peek(UfVM* vm, int distance) {
-    return vm->stack_top[-1 - distance];
-}
 
 static UfUpvalueCell* capture_upvalue(UfVM* vm, UfValue* local) {
     UfUpvalueCell* prev = NULL;
@@ -167,19 +156,27 @@ static bool call_value(UfVM* vm, UfValue callee, uint8_t argc) {
 
 static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
     UfVMFrame* volatile frame = &vm->frames[vm->frame_count - 1];
+    uint8_t* volatile ip = frame->ip;
+    UfValue* volatile stack_top = vm->stack_top;
 
-#define READ_BYTE() (*frame->ip++)
-#define READ_U16() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+#define READ_BYTE() (*ip++)
+#define READ_U16() (ip += 2, (uint16_t)((ip[-2] << 8) | ip[-1]))
 #define READ_CONSTANT(idx) (frame->closure->function->chunk.constants[idx])
-#define ERROR_RETURN() do { vm->had_error = true; return uf_val_null(); } while (0)
+#define PUSH(val) (*stack_top++ = (val))
+#define POP() (*--stack_top)
+#define PEEK(dist) (stack_top[-1 - (dist)])
+#define SYNC_VM() do { vm->stack_top = stack_top; frame->ip = ip; } while (0)
+#define RESTORE_VM() do { stack_top = vm->stack_top; ip = frame->ip; } while (0)
+#define ERROR_RETURN() do { SYNC_VM(); vm->had_error = true; return uf_val_null(); } while (0)
 
     for (;;) {
         vm->total_instructions++;
-        size_t cur_stack = (size_t)(vm->stack_top - vm->stack);
+        size_t cur_stack = (size_t)(stack_top - vm->stack);
         if (cur_stack > vm->peak_stack_depth) vm->peak_stack_depth = cur_stack;
         if ((size_t)vm->frame_count > vm->peak_frame_depth) vm->peak_frame_depth = (size_t)vm->frame_count;
 
         if (vm->trace_execution) {
+            SYNC_VM();
             uf_disasm_trace_instruction(vm, (const struct UfVMFrame*)frame, stdout);
         }
 
@@ -187,32 +184,33 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
         switch (instruction) {
             case OP_CONSTANT: {
                 uint16_t const_idx = READ_U16();
-                uf_vm_push(vm, READ_CONSTANT(const_idx));
+                PUSH(READ_CONSTANT(const_idx));
                 break;
             }
             case OP_NULL:
-                uf_vm_push(vm, uf_val_null());
+                PUSH(uf_val_null());
                 break;
             case OP_TRUE:
-                uf_vm_push(vm, uf_val_bool(true));
+                PUSH(uf_val_bool(true));
                 break;
             case OP_FALSE:
-                uf_vm_push(vm, uf_val_bool(false));
+                PUSH(uf_val_bool(false));
                 break;
             case OP_POP:
-                uf_vm_pop(vm);
+                stack_top--;
                 break;
             case OP_DUP:
-                uf_vm_push(vm, uf_vm_peek(vm, 0));
+                *stack_top = stack_top[-1];
+                stack_top++;
                 break;
             case OP_LOAD_LOCAL: {
                 uint16_t slot = READ_U16();
-                uf_vm_push(vm, frame->slots[slot]);
+                PUSH(frame->slots[slot]);
                 break;
             }
             case OP_STORE_LOCAL: {
                 uint16_t slot = READ_U16();
-                frame->slots[slot] = uf_vm_peek(vm, 0);
+                frame->slots[slot] = PEEK(0);
                 break;
             }
             case OP_LOAD_GLOBAL: {
@@ -220,7 +218,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 const char* name = READ_CONSTANT(c_idx).as.string->chars;
                 UfValue val;
                 if (uf_env_lookup(vm->rt->global_env, name, &val)) {
-                    uf_vm_push(vm, val);
+                    PUSH(val);
                 } else {
                     fprintf(stderr, "Runtime Error: Undefined variable '%s'\n", name);
                     ERROR_RETURN();
@@ -230,7 +228,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
             case OP_STORE_GLOBAL: {
                 uint16_t c_idx = READ_U16();
                 const char* name = READ_CONSTANT(c_idx).as.string->chars;
-                if (!uf_env_assign(vm->rt->global_env, name, uf_vm_peek(vm, 0))) {
+                if (!uf_env_assign(vm->rt->global_env, name, PEEK(0))) {
                     fprintf(stderr, "Runtime Error: Undefined variable '%s'\n", name);
                     ERROR_RETURN();
                 }
@@ -239,30 +237,32 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
             case OP_DEFINE_GLOBAL: {
                 uint16_t c_idx = READ_U16();
                 const char* name = READ_CONSTANT(c_idx).as.string->chars;
-                uf_env_declare(vm->rt->global_env, name, uf_vm_peek(vm, 0));
-                uf_vm_pop(vm);
+                uf_env_declare(vm->rt->global_env, name, PEEK(0));
+                stack_top--;
                 break;
             }
             case OP_GET_UPVALUE: {
                 uint8_t slot = READ_BYTE();
-                uf_vm_push(vm, *frame->closure->upvalues[slot]->location);
+                PUSH(*frame->closure->upvalues[slot]->location);
                 break;
             }
             case OP_SET_UPVALUE: {
                 uint8_t slot = READ_BYTE();
-                *frame->closure->upvalues[slot]->location = uf_vm_peek(vm, 0);
+                *frame->closure->upvalues[slot]->location = PEEK(0);
                 break;
             }
             case OP_CLOSURE: {
                 uint16_t c_idx = READ_U16();
                 UfBytecodeFunction* fn = READ_CONSTANT(c_idx).as.bytecode_fn;
+                SYNC_VM();
                 UfClosureObject* cl = uf_closure_new(vm->rt, fn);
-                uf_vm_push(vm, uf_val_closure(vm->rt, cl));
+                PUSH(uf_val_closure(vm->rt, cl));
 
                 for (size_t i = 0; i < fn->upvalue_count; ++i) {
                     uint8_t is_local = READ_BYTE();
                     uint8_t index = READ_BYTE();
                     if (is_local) {
+                        SYNC_VM();
                         cl->upvalues[i] = capture_upvalue(vm, frame->slots + index);
                     } else {
                         cl->upvalues[i] = frame->closure->upvalues[index];
@@ -271,69 +271,84 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_CLOSE_UPVALUE: {
-                close_upvalues(vm, vm->stack_top - 1);
-                uf_vm_pop(vm);
+                SYNC_VM();
+                close_upvalues(vm, stack_top - 1);
+                stack_top--;
                 break;
             }
             case OP_ADD: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind == UF_VAL_NUMBER && b.kind == UF_VAL_NUMBER) {
-                    uf_vm_push(vm, uf_val_number(a.as.number + b.as.number));
-                } else if (a.kind == UF_VAL_STRING || b.kind == UF_VAL_STRING) {
-                    char* sa = uf_val_to_string(a);
-                    char* sb = uf_val_to_string(b);
-                    size_t la = strlen(sa);
-                    size_t lb = strlen(sb);
-                    char* buf = (char*)malloc(la + lb + 1);
-                    memcpy(buf, sa, la);
-                    memcpy(buf + la, sb, lb);
-                    buf[la + lb] = '\0';
-                    free(sa);
-                    free(sb);
-                    uf_vm_push(vm, uf_val_string_take(vm->rt, buf, la + lb));
-                } else if (a.kind == UF_VAL_ARRAY && b.kind == UF_VAL_ARRAY) {
-                    size_t na = a.as.array->count;
-                    size_t nb = b.as.array->count;
-                    UfValue arr = uf_val_array(vm->rt, na + nb);
-                    for (size_t i = 0; i < na; ++i) {
-                        uf_array_push(vm->rt, arr.as.array, a.as.array->elements[i]);
-                    }
-                    for (size_t i = 0; i < nb; ++i) {
-                        uf_array_push(vm->rt, arr.as.array, b.as.array->elements[i]);
-                    }
-                    uf_vm_push(vm, arr);
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    a_ptr->as.number += b_ptr->as.number;
+                    stack_top--;
                 } else {
-                    fprintf(stderr, "Runtime Error: Invalid operands to '+' (%s and %s)\n",
-                            uf_val_type_name(a), uf_val_type_name(b));
-                    ERROR_RETURN();
+                    UfValue a = *a_ptr;
+                    UfValue b = *b_ptr;
+                    if (a.kind == UF_VAL_STRING || b.kind == UF_VAL_STRING) {
+                        char* sa = uf_val_to_string(a);
+                        char* sb = uf_val_to_string(b);
+                        size_t la = strlen(sa);
+                        size_t lb = strlen(sb);
+                        char* buf = (char*)malloc(la + lb + 1);
+                        memcpy(buf, sa, la);
+                        memcpy(buf + la, sb, lb);
+                        buf[la + lb] = '\0';
+                        free(sa);
+                        free(sb);
+                        SYNC_VM();
+                        UfValue res = uf_val_string_take(vm->rt, buf, la + lb);
+                        stack_top -= 2;
+                        *stack_top++ = res;
+                    } else if (a.kind == UF_VAL_ARRAY && b.kind == UF_VAL_ARRAY) {
+                        SYNC_VM();
+                        size_t na = a.as.array->count;
+                        size_t nb = b.as.array->count;
+                        UfValue arr = uf_val_array(vm->rt, na + nb);
+                        for (size_t i = 0; i < na; ++i) {
+                            uf_array_push(vm->rt, arr.as.array, a.as.array->elements[i]);
+                        }
+                        for (size_t i = 0; i < nb; ++i) {
+                            uf_array_push(vm->rt, arr.as.array, b.as.array->elements[i]);
+                        }
+                        stack_top -= 2;
+                        *stack_top++ = arr;
+                    } else {
+                        fprintf(stderr, "Runtime Error: Invalid operands to '+' (%s and %s)\n",
+                                uf_val_type_name(a), uf_val_type_name(b));
+                        ERROR_RETURN();
+                    }
                 }
                 break;
             }
             case OP_SUB: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind != UF_VAL_NUMBER || b.kind != UF_VAL_NUMBER) {
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    a_ptr->as.number -= b_ptr->as.number;
+                    stack_top--;
+                } else {
                     fprintf(stderr, "Runtime Error: Operands to '-' must be numbers\n");
                     ERROR_RETURN();
                 }
-                uf_vm_push(vm, uf_val_number(a.as.number - b.as.number));
                 break;
             }
             case OP_MUL: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind != UF_VAL_NUMBER || b.kind != UF_VAL_NUMBER) {
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    a_ptr->as.number *= b_ptr->as.number;
+                    stack_top--;
+                } else {
                     fprintf(stderr, "Runtime Error: Operands to '*' must be numbers\n");
                     ERROR_RETURN();
                 }
-                uf_vm_push(vm, uf_val_number(a.as.number * b.as.number));
                 break;
             }
             case OP_DIV: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind != UF_VAL_NUMBER || b.kind != UF_VAL_NUMBER) {
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind != UF_VAL_NUMBER || b_ptr->kind != UF_VAL_NUMBER) {
                     if (vm->rt) {
                         uf_runtime_error(vm->rt, (SourceSpan){0}, "Operands to '/' must be numbers");
                     } else {
@@ -341,7 +356,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     }
                     ERROR_RETURN();
                 }
-                if (b.as.number == 0.0) {
+                if (b_ptr->as.number == 0.0) {
                     if (vm->rt) {
                         uf_runtime_error(vm->rt, (SourceSpan){0}, "Division by zero");
                     } else {
@@ -349,56 +364,66 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     }
                     ERROR_RETURN();
                 }
-                uf_vm_push(vm, uf_val_number(a.as.number / b.as.number));
+                a_ptr->as.number /= b_ptr->as.number;
+                stack_top--;
                 break;
             }
             case OP_MOD: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind != UF_VAL_NUMBER || b.kind != UF_VAL_NUMBER) {
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind != UF_VAL_NUMBER || b_ptr->kind != UF_VAL_NUMBER) {
                     fprintf(stderr, "Runtime Error: Operands to '%%' must be numbers\n");
                     ERROR_RETURN();
                 }
-                if (b.as.number == 0.0) {
+                if (b_ptr->as.number == 0.0) {
                     fprintf(stderr, "Runtime Error: Division by zero in modulo\n");
                     ERROR_RETURN();
                 }
-                uf_vm_push(vm, uf_val_number(fmod(a.as.number, b.as.number)));
+                a_ptr->as.number = fmod(a_ptr->as.number, b_ptr->as.number);
+                stack_top--;
                 break;
             }
             case OP_NEG: {
-                UfValue v = uf_vm_pop(vm);
-                if (v.kind != UF_VAL_NUMBER) {
+                UfValue* v = stack_top - 1;
+                if (v->kind != UF_VAL_NUMBER) {
                     fprintf(stderr, "Runtime Error: Operand to '-' must be a number\n");
                     ERROR_RETURN();
                 }
-                uf_vm_push(vm, uf_val_number(-v.as.number));
+                v->as.number = -v->as.number;
                 break;
             }
             case OP_NOT: {
-                UfValue v = uf_vm_pop(vm);
-                uf_vm_push(vm, uf_val_bool(!uf_val_is_truthy(v)));
+                UfValue* v = stack_top - 1;
+                bool truth = uf_val_is_truthy(*v);
+                v->kind = UF_VAL_BOOL;
+                v->as.boolean = !truth;
                 break;
             }
             case OP_EQ: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                uf_vm_push(vm, uf_val_bool(uf_val_equal(a, b)));
+                UfValue b = POP();
+                UfValue a = POP();
+                PUSH(uf_val_bool(uf_val_equal(a, b)));
                 break;
             }
             case OP_NEQ: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                uf_vm_push(vm, uf_val_bool(!uf_val_equal(a, b)));
+                UfValue b = POP();
+                UfValue a = POP();
+                PUSH(uf_val_bool(!uf_val_equal(a, b)));
                 break;
             }
             case OP_LT: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind == UF_VAL_NUMBER && b.kind == UF_VAL_NUMBER) {
-                    uf_vm_push(vm, uf_val_bool(a.as.number < b.as.number));
-                } else if (a.kind == UF_VAL_STRING && b.kind == UF_VAL_STRING) {
-                    uf_vm_push(vm, uf_val_bool(strcmp(a.as.string->chars, b.as.string->chars) < 0));
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    bool res = a_ptr->as.number < b_ptr->as.number;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
+                } else if (a_ptr->kind == UF_VAL_STRING && b_ptr->kind == UF_VAL_STRING) {
+                    bool res = strcmp(a_ptr->as.string->chars, b_ptr->as.string->chars) < 0;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
                 } else {
                     fprintf(stderr, "Runtime Error: Operands to '<' must be comparable\n");
                     ERROR_RETURN();
@@ -406,12 +431,18 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_LTE: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind == UF_VAL_NUMBER && b.kind == UF_VAL_NUMBER) {
-                    uf_vm_push(vm, uf_val_bool(a.as.number <= b.as.number));
-                } else if (a.kind == UF_VAL_STRING && b.kind == UF_VAL_STRING) {
-                    uf_vm_push(vm, uf_val_bool(strcmp(a.as.string->chars, b.as.string->chars) <= 0));
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    bool res = a_ptr->as.number <= b_ptr->as.number;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
+                } else if (a_ptr->kind == UF_VAL_STRING && b_ptr->kind == UF_VAL_STRING) {
+                    bool res = strcmp(a_ptr->as.string->chars, b_ptr->as.string->chars) <= 0;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
                 } else {
                     fprintf(stderr, "Runtime Error: Operands to '<=' must be comparable\n");
                     ERROR_RETURN();
@@ -419,12 +450,18 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_GT: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind == UF_VAL_NUMBER && b.kind == UF_VAL_NUMBER) {
-                    uf_vm_push(vm, uf_val_bool(a.as.number > b.as.number));
-                } else if (a.kind == UF_VAL_STRING && b.kind == UF_VAL_STRING) {
-                    uf_vm_push(vm, uf_val_bool(strcmp(a.as.string->chars, b.as.string->chars) > 0));
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    bool res = a_ptr->as.number > b_ptr->as.number;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
+                } else if (a_ptr->kind == UF_VAL_STRING && b_ptr->kind == UF_VAL_STRING) {
+                    bool res = strcmp(a_ptr->as.string->chars, b_ptr->as.string->chars) > 0;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
                 } else {
                     fprintf(stderr, "Runtime Error: Operands to '>' must be comparable\n");
                     ERROR_RETURN();
@@ -432,12 +469,18 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_GTE: {
-                UfValue b = uf_vm_pop(vm);
-                UfValue a = uf_vm_pop(vm);
-                if (a.kind == UF_VAL_NUMBER && b.kind == UF_VAL_NUMBER) {
-                    uf_vm_push(vm, uf_val_bool(a.as.number >= b.as.number));
-                } else if (a.kind == UF_VAL_STRING && b.kind == UF_VAL_STRING) {
-                    uf_vm_push(vm, uf_val_bool(strcmp(a.as.string->chars, b.as.string->chars) >= 0));
+                UfValue* b_ptr = stack_top - 1;
+                UfValue* a_ptr = stack_top - 2;
+                if (a_ptr->kind == UF_VAL_NUMBER && b_ptr->kind == UF_VAL_NUMBER) {
+                    bool res = a_ptr->as.number >= b_ptr->as.number;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
+                } else if (a_ptr->kind == UF_VAL_STRING && b_ptr->kind == UF_VAL_STRING) {
+                    bool res = strcmp(a_ptr->as.string->chars, b_ptr->as.string->chars) >= 0;
+                    stack_top--;
+                    a_ptr->kind = UF_VAL_BOOL;
+                    a_ptr->as.boolean = res;
                 } else {
                     fprintf(stderr, "Runtime Error: Operands to '>=' must be comparable\n");
                     ERROR_RETURN();
@@ -446,72 +489,80 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
             }
             case OP_JUMP: {
                 uint16_t offset = READ_U16();
-                frame->ip += offset;
+                ip += offset;
                 break;
             }
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset = READ_U16();
-                if (!uf_val_is_truthy(uf_vm_peek(vm, 0))) {
-                    frame->ip += offset;
+                if (!uf_val_is_truthy(PEEK(0))) {
+                    ip += offset;
                 }
                 break;
             }
             case OP_LOOP: {
                 uint16_t offset = READ_U16();
-                frame->ip -= offset;
+                ip -= offset;
                 break;
             }
             case OP_CALL: {
                 uint8_t argc = READ_BYTE();
-                if (!call_value(vm, uf_vm_peek(vm, argc), argc)) {
+                SYNC_VM();
+                if (!call_value(vm, PEEK(argc), argc)) {
                     ERROR_RETURN();
                 }
                 frame = &vm->frames[vm->frame_count - 1];
+                RESTORE_VM();
                 break;
             }
             case OP_RETURN: {
-                UfValue result = uf_vm_pop(vm);
+                UfValue result = POP();
+                SYNC_VM();
                 close_upvalues(vm, frame->slots);
                 vm->frame_count--;
-                vm->stack_top = frame->slots;
+                stack_top = frame->slots;
                 if (vm->frame_count == target_frame_count) {
+                    vm->stack_top = stack_top;
+                    frame->ip = ip;
                     return result;
                 }
 
-                uf_vm_push(vm, result);
+                *stack_top++ = result;
                 frame = &vm->frames[vm->frame_count - 1];
+                ip = frame->ip;
                 break;
             }
             case OP_BUILD_ARRAY: {
                 uint16_t count = READ_U16();
+                SYNC_VM();
                 UfValue arr = uf_val_array(vm->rt, count);
                 for (size_t i = 0; i < count; ++i) {
-                    UfValue elem = vm->stack_top[-count + i];
+                    UfValue elem = stack_top[-count + i];
                     uf_array_push(vm->rt, arr.as.array, elem);
                 }
-                vm->stack_top -= count;
-                uf_vm_push(vm, arr);
+                stack_top -= count;
+                PUSH(arr);
                 break;
             }
             case OP_BUILD_MAP: {
                 uint16_t count = READ_U16();
+                SYNC_VM();
                 UfValue map = uf_val_map(vm->rt, count);
                 for (size_t i = 0; i < count; ++i) {
-                    UfValue key = vm->stack_top[-count * 2 + i * 2];
-                    UfValue val = vm->stack_top[-count * 2 + i * 2 + 1];
+                    UfValue key = stack_top[-count * 2 + i * 2];
+                    UfValue val = stack_top[-count * 2 + i * 2 + 1];
                     if (key.kind != UF_VAL_STRING && key.kind != UF_VAL_NUMBER && key.kind != UF_VAL_BOOL && key.kind != UF_VAL_NULL) {
                         fprintf(stderr, "Runtime Error: Map key must be a string or number, got '%s'\n", uf_val_type_name(key));
                         ERROR_RETURN();
                     }
                     uf_map_set(vm->rt, map.as.map, key, val);
                 }
-                vm->stack_top -= count * 2;
-                uf_vm_push(vm, map);
+                stack_top -= count * 2;
+                PUSH(map);
                 break;
             }
             case OP_INDEX_GET: {
-                UfValue index = uf_vm_pop(vm);
-                UfValue target = uf_vm_pop(vm);
+                UfValue index = POP();
+                UfValue target = POP();
 
                 if (target.kind == UF_VAL_ARRAY) {
                     if (index.kind != UF_VAL_NUMBER) {
@@ -528,9 +579,9 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                         }
                         ERROR_RETURN();
                     }
-                    uf_vm_push(vm, uf_array_get(target.as.array, (size_t)idx));
+                    PUSH(uf_array_get(target.as.array, (size_t)idx));
                 } else if (target.kind == UF_VAL_MAP) {
-                    uf_vm_push(vm, uf_map_get(target.as.map, index));
+                    PUSH(uf_map_get(target.as.map, index));
                 } else if (target.kind == UF_VAL_STRING) {
                     if (index.kind != UF_VAL_NUMBER) {
                         fprintf(stderr, "Runtime Error: String index must be a number\n");
@@ -543,7 +594,8 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                         ERROR_RETURN();
                     }
                     char ch_buf[2] = { target.as.string->chars[idx], '\0' };
-                    uf_vm_push(vm, uf_val_string_cstr(vm->rt, ch_buf));
+                    SYNC_VM();
+                    PUSH(uf_val_string_cstr(vm->rt, ch_buf));
                 } else if (target.kind == UF_VAL_INSTANCE) {
                     if (index.kind != UF_VAL_STRING) {
                         fprintf(stderr, "Runtime Error: Instance field must be a string\n");
@@ -554,7 +606,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     bool found = false;
                     for (size_t i = 0; i < inst->field_count; ++i) {
                         if (strcmp(inst->def->field_names[i], fname) == 0) {
-                            uf_vm_push(vm, inst->fields[i]);
+                            PUSH(inst->fields[i]);
                             found = true;
                             break;
                         }
@@ -576,7 +628,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                                 index.as.string->chars);
                         ERROR_RETURN();
                     }
-                    uf_vm_push(vm, res);
+                    PUSH(res);
                 } else if (target.kind == UF_VAL_ERROR) {
                     if (index.kind != UF_VAL_STRING) {
                         fprintf(stderr, "Runtime Error: Error property access expects string\n");
@@ -585,15 +637,15 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     const char* prop = index.as.string->chars;
                     UfErrorObject* err = target.as.error;
                     if (strcmp(prop, "kind") == 0) {
-                        uf_vm_push(vm, uf_val_string(vm->rt, err->kind ? err->kind->chars : "Error", err->kind ? err->kind->length : 5));
+                        PUSH(uf_val_string(vm->rt, err->kind ? err->kind->chars : "Error", err->kind ? err->kind->length : 5));
                     } else if (strcmp(prop, "message") == 0) {
-                        uf_vm_push(vm, uf_val_string(vm->rt, err->message ? err->message->chars : "", err->message ? err->message->length : 0));
+                        PUSH(uf_val_string(vm->rt, err->message ? err->message->chars : "", err->message ? err->message->length : 0));
                     } else if (strcmp(prop, "line") == 0) {
-                        uf_vm_push(vm, uf_val_number((double)err->line));
+                        PUSH(uf_val_number((double)err->line));
                     } else if (strcmp(prop, "file") == 0) {
-                        uf_vm_push(vm, uf_val_string_cstr(vm->rt, err->file ? err->file : "<unknown>"));
+                        PUSH(uf_val_string_cstr(vm->rt, err->file ? err->file : "<unknown>"));
                     } else {
-                        uf_vm_push(vm, uf_val_null());
+                        PUSH(uf_val_null());
                     }
                 } else {
                     fprintf(stderr, "Runtime Error: Cannot index type '%s'\n", uf_val_type_name(target));
@@ -602,9 +654,9 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_INDEX_SET: {
-                UfValue val = uf_vm_pop(vm);
-                UfValue index = uf_vm_pop(vm);
-                UfValue target = uf_vm_pop(vm);
+                UfValue val = POP();
+                UfValue index = POP();
+                UfValue target = POP();
 
                 if (target.kind == UF_VAL_ARRAY) {
                     if (index.kind != UF_VAL_NUMBER) {
@@ -651,7 +703,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_SAY: {
-                UfValue val = uf_vm_pop(vm);
+                UfValue val = POP();
                 char* str = uf_val_to_string(val);
                 fprintf(vm->rt->out_stream, "%s\n", str ? str : "null");
                 free(str);
@@ -660,23 +712,23 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
             }
             case OP_STRUCT_DEF: {
                 uint16_t const_idx = READ_U16();
-                uf_vm_push(vm, READ_CONSTANT(const_idx));
+                PUSH(READ_CONSTANT(const_idx));
                 break;
             }
             case OP_INSTANCE: {
                 uint16_t c_idx = READ_U16();
                 const char* sname = READ_CONSTANT(c_idx).as.string->chars;
-                UfValue target = uf_vm_pop(vm);
+                UfValue target = POP();
                 bool matches = (target.kind == UF_VAL_INSTANCE &&
                                 target.as.instance &&
                                 target.as.instance->def &&
                                 strcmp(target.as.instance->def->name, sname) == 0);
-                uf_vm_push(vm, uf_val_bool(matches));
+                PUSH(uf_val_bool(matches));
                 break;
             }
             case OP_ITER_GET: {
-                UfValue index = uf_vm_pop(vm);
-                UfValue target = uf_vm_pop(vm);
+                UfValue index = POP();
+                UfValue target = POP();
                 if (index.kind != UF_VAL_NUMBER) {
                     fprintf(stderr, "Runtime Error: Iterator index must be a number\n");
                     ERROR_RETURN();
@@ -687,20 +739,20 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                         fprintf(stderr, "Runtime Error: Array index out of bounds\n");
                         ERROR_RETURN();
                     }
-                    uf_vm_push(vm, target.as.array->elements[idx]);
+                    PUSH(target.as.array->elements[idx]);
                 } else if (target.kind == UF_VAL_MAP) {
                     if (idx < 0 || (size_t)idx >= target.as.map->order_count) {
                         fprintf(stderr, "Runtime Error: Map index out of bounds\n");
                         ERROR_RETURN();
                     }
-                    uf_vm_push(vm, target.as.map->order_keys[idx]);
+                    PUSH(target.as.map->order_keys[idx]);
                 } else if (target.kind == UF_VAL_STRING) {
                     if (idx < 0 || (size_t)idx >= target.as.string->length) {
                         fprintf(stderr, "Runtime Error: String index out of bounds\n");
                         ERROR_RETURN();
                     }
                     char ch_buf[2] = { target.as.string->chars[idx], '\0' };
-                    uf_vm_push(vm, uf_val_string_cstr(vm->rt, ch_buf));
+                    PUSH(uf_val_string_cstr(vm->rt, ch_buf));
                 } else {
                     fprintf(stderr, "Runtime Error: Cannot iterate type '%s'\n", uf_val_type_name(target));
                     ERROR_RETURN();
@@ -709,14 +761,15 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
             }
             case OP_PUSH_TRY: {
                 uint16_t catch_offset = READ_U16();
+                SYNC_VM();
                 if (vm->handler_count >= UF_VM_HANDLERS_MAX || vm->rt->try_handler_count >= UF_MAX_TRY_HANDLERS) {
                     fprintf(stderr, "Runtime Error: Maximum nested try-catch handlers exceeded\n");
                     ERROR_RETURN();
                 }
                 int h_idx = vm->handler_count++;
                 vm->handlers[h_idx].frame_index = vm->frame_count - 1;
-                vm->handlers[h_idx].catch_ip = frame->ip + catch_offset;
-                vm->handlers[h_idx].stack_top = vm->stack_top;
+                vm->handlers[h_idx].catch_ip = ip + catch_offset;
+                vm->handlers[h_idx].stack_top = stack_top;
 
                 UfTryHandler* th = &vm->rt->try_handlers[vm->rt->try_handler_count++];
                 th->frame_count = vm->rt->frame_count;
@@ -733,9 +786,9 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     }
                     frame = &vm->frames[cur_h->frame_index];
                     close_upvalues(vm, cur_h->stack_top);
-                    vm->stack_top = cur_h->stack_top;
-                    uf_vm_push(vm, err);
-                    frame->ip = cur_h->catch_ip;
+                    stack_top = cur_h->stack_top;
+                    *stack_top++ = err;
+                    ip = cur_h->catch_ip;
                     vm->handler_count--;
                     vm->had_error = false;
                     vm->rt->had_runtime_error = false;
@@ -757,6 +810,11 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
 #undef READ_BYTE
 #undef READ_U16
 #undef READ_CONSTANT
+#undef PUSH
+#undef POP
+#undef PEEK
+#undef SYNC_VM
+#undef RESTORE_VM
 #undef ERROR_RETURN
 }
 
