@@ -1,4 +1,5 @@
 #include "uf_compiler.h"
+#include "uf_optimize.h"
 #include "../runtime/uf_module.h"
 #include "../runtime/uf_env.h"
 #include <stdlib.h>
@@ -801,6 +802,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
     if (!program) return NULL;
 
+    /* Optimization Pass 1: Constant folding & Dead code elimination on AST */
+    uf_optimize_ast((UfProgram*)program, rt);
+
     UfCompiler compiler;
     compiler_init(&compiler, NULL, TYPE_SCRIPT, "<script>", 0, rt, reporter);
 
@@ -828,6 +832,9 @@ UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagno
     if (compiler.had_error) {
         return NULL;
     }
+
+    /* Optimization Pass 2: Bytecode Peephole & Function Tree Optimization */
+    uf_optimize_function_tree(compiler.function, rt);
 
     return compiler.function;
 }
