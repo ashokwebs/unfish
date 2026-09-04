@@ -119,6 +119,12 @@ static void fold_expr(UfExpr* expr, UfRuntime* rt) {
                     expr->kind = UF_EXPR_LITERAL_BOOL;
                     expr->as.bool_val = (a != b);
                 }
+            } else if (expr->as.binary.op == UF_TOK_AND && left->kind == UF_EXPR_LITERAL_BOOL && !left->as.bool_val) {
+                expr->kind = UF_EXPR_LITERAL_BOOL;
+                expr->as.bool_val = false;
+            } else if (expr->as.binary.op == UF_TOK_OR && left->kind == UF_EXPR_LITERAL_BOOL && left->as.bool_val) {
+                expr->kind = UF_EXPR_LITERAL_BOOL;
+                expr->as.bool_val = true;
             }
             break;
         }
@@ -181,10 +187,32 @@ static void fold_stmt(UfStmt* stmt, UfRuntime* rt) {
             fold_expr(stmt->as.if_stmt.condition, rt);
             fold_stmt(stmt->as.if_stmt.then_branch, rt);
             if (stmt->as.if_stmt.else_branch) fold_stmt(stmt->as.if_stmt.else_branch, rt);
+
+            if (stmt->as.if_stmt.condition->kind == UF_EXPR_LITERAL_BOOL) {
+                if (stmt->as.if_stmt.condition->as.bool_val) {
+                    if (stmt->as.if_stmt.then_branch) {
+                        *stmt = *stmt->as.if_stmt.then_branch;
+                    }
+                } else {
+                    if (stmt->as.if_stmt.else_branch) {
+                        *stmt = *stmt->as.if_stmt.else_branch;
+                    } else {
+                        stmt->kind = UF_STMT_BLOCK;
+                        stmt->as.block.stmts = NULL;
+                        stmt->as.block.count = 0;
+                    }
+                }
+            }
             break;
         case UF_STMT_WHILE:
             fold_expr(stmt->as.while_stmt.condition, rt);
             fold_stmt(stmt->as.while_stmt.body, rt);
+            if (stmt->as.while_stmt.condition->kind == UF_EXPR_LITERAL_BOOL &&
+                !stmt->as.while_stmt.condition->as.bool_val) {
+                stmt->kind = UF_STMT_BLOCK;
+                stmt->as.block.stmts = NULL;
+                stmt->as.block.count = 0;
+            }
             break;
         case UF_STMT_REPEAT:
             fold_expr(stmt->as.repeat_stmt.count_expr, rt);

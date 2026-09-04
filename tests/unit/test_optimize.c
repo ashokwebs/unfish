@@ -172,6 +172,46 @@ static void test_optimized_bytecode(void) {
     printf("test_optimized_bytecode passed!\n");
 }
 
+static void test_dead_branch_pruning(void) {
+    UfArena arena;
+    uf_arena_init(&arena, 16384);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "<test>", "");
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+
+    const char* src =
+        "let x = 1\n"
+        "if false:\n"
+        "    x = 99\n"
+        "else:\n"
+        "    x = 42\n"
+        "while false:\n"
+        "    x = 100\n";
+    UfProgram* prog = parse_test_source(src, &arena, &interner, &reporter);
+
+    uf_optimize_ast(prog, &rt);
+
+    /* The if false was pruned to just its else branch (a block containing x = 42) */
+    assert(prog->stmts[1]->kind == UF_STMT_BLOCK);
+    assert(prog->stmts[1]->as.block.count == 1);
+    UfStmt* assign = prog->stmts[1]->as.block.stmts[0];
+    assert(assign->kind == UF_STMT_ASSIGN);
+    assert(strcmp(assign->as.assign_stmt.name, "x") == 0);
+    assert(assign->as.assign_stmt.value->as.number_val == 42.0);
+
+    /* The while false was pruned to an empty block */
+    assert(prog->stmts[2]->kind == UF_STMT_BLOCK);
+    assert(prog->stmts[2]->as.block.count == 0);
+
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_dead_branch_pruning passed!\n");
+}
+
 int main(void) {
     printf("Running optimization pass unit tests...\n");
     test_constant_folding_numbers();
@@ -179,6 +219,7 @@ int main(void) {
     test_constant_folding_booleans();
     test_dead_code_elimination();
     test_optimized_bytecode();
+    test_dead_branch_pruning();
     printf("All optimization pass unit tests passed successfully!\n");
     return 0;
 }

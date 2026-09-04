@@ -873,6 +873,170 @@ static UfValue std_i32(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_number((double)((int32_t)(int64_t)args[0].as.number));
 }
 
+static UfValue std_band(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'band()' expects two numbers");
+        return uf_val_null();
+    }
+    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    uint32_t b = (uint32_t)(int64_t)args[1].as.number;
+    return uf_val_number((double)(a & b));
+}
+
+static UfValue std_bor(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'bor()' expects two numbers");
+        return uf_val_null();
+    }
+    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    uint32_t b = (uint32_t)(int64_t)args[1].as.number;
+    return uf_val_number((double)(a | b));
+}
+
+static UfValue std_bxor(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'bxor()' expects two numbers");
+        return uf_val_null();
+    }
+    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    uint32_t b = (uint32_t)(int64_t)args[1].as.number;
+    return uf_val_number((double)(a ^ b));
+}
+
+static UfValue std_bnot(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'bnot()' expects a number");
+        return uf_val_null();
+    }
+    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    return uf_val_number((double)(~a));
+}
+
+static UfValue std_shl(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'shl()' expects two numbers");
+        return uf_val_null();
+    }
+    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    uint32_t b = (uint32_t)(int64_t)args[1].as.number & 31;
+    return uf_val_number((double)(a << b));
+}
+
+static UfValue std_shr(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'shr()' expects two numbers");
+        return uf_val_null();
+    }
+    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    uint32_t b = (uint32_t)(int64_t)args[1].as.number & 31;
+    return uf_val_number((double)(a >> b));
+}
+
+static UfValue std_sar(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 2 || args[0].kind != UF_VAL_NUMBER || args[1].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'sar()' expects two numbers");
+        return uf_val_null();
+    }
+    int32_t a = (int32_t)(int64_t)args[0].as.number;
+    uint32_t b = (uint32_t)(int64_t)args[1].as.number & 31;
+    return uf_val_number((double)(a >> b));
+}
+
+static UfValue std_to_hex(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_NUMBER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'to_hex()' expects a number");
+        return uf_val_null();
+    }
+    uint64_t v = (uint64_t)(int64_t)args[0].as.number;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lx", (unsigned long)v);
+    return uf_val_string(rt, buf, strlen(buf));
+}
+
+static UfValue std_from_hex(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'from_hex()' expects a string");
+        return uf_val_null();
+    }
+    const char* s = args[0].as.string->chars;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+    char* endptr = NULL;
+    unsigned long long val = strtoull(s, &endptr, 16);
+    if (endptr == s) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "ValueError: Invalid hex string '%s'", args[0].as.string->chars);
+        return uf_val_null();
+    }
+    return uf_val_number((double)val);
+}
+
+static UfValue std_buffer_to_hex(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_BUFFER) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_to_hex()' expects a buffer");
+        return uf_val_null();
+    }
+    UfBufferObject* b = args[0].as.buffer;
+    if (b->size == 0) return uf_val_string(rt, "", 0);
+    size_t hex_len = b->size * 2;
+    char* hex = (char*)malloc(hex_len + 1);
+    if (!hex) return uf_val_null();
+    static const char hex_digits[] = "0123456789abcdef";
+    for (size_t i = 0; i < b->size; ++i) {
+        hex[i * 2] = hex_digits[(b->data[i] >> 4) & 0x0F];
+        hex[i * 2 + 1] = hex_digits[b->data[i] & 0x0F];
+    }
+    hex[hex_len] = '\0';
+    UfValue res = uf_val_string(rt, hex, hex_len);
+    free(hex);
+    return res;
+}
+
+static int hex_char_to_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static UfValue std_buffer_from_hex(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'buffer_from_hex()' expects a hex string");
+        return uf_val_null();
+    }
+    const char* s = args[0].as.string->chars;
+    size_t len = args[0].as.string->length;
+    if (len % 2 != 0) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "ValueError: Hex string must have an even length");
+        return uf_val_null();
+    }
+    size_t buf_len = len / 2;
+    UfValue bval = uf_val_buffer(rt, buf_len);
+    UfBufferObject* buf = bval.as.buffer;
+    for (size_t i = 0; i < buf_len; ++i) {
+        int hi = hex_char_to_val(s[i * 2]);
+        int lo = hex_char_to_val(s[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+            uf_runtime_error(rt, source_span_make(loc, loc), "ValueError: Invalid hex character in '%s'", s);
+            return uf_val_null();
+        }
+        buf->data[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return bval;
+}
+
 static UfValue std_inspect(UfRuntime* rt, int argc, UfValue* args) {
     if (argc < 1) return uf_val_null();
     UfValue v = args[0];
@@ -1030,6 +1194,17 @@ void uf_stdlib_register_runtime(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "i16",                 uf_val_native("i16",                 std_i16,                 1));
     uf_env_declare(rt->global_env, "u32",                 uf_val_native("u32",                 std_u32,                 1));
     uf_env_declare(rt->global_env, "i32",                 uf_val_native("i32",                 std_i32,                 1));
+    uf_env_declare(rt->global_env, "band",                uf_val_native("band",                std_band,                2));
+    uf_env_declare(rt->global_env, "bor",                 uf_val_native("bor",                 std_bor,                 2));
+    uf_env_declare(rt->global_env, "bxor",                uf_val_native("bxor",                std_bxor,                2));
+    uf_env_declare(rt->global_env, "bnot",                uf_val_native("bnot",                std_bnot,                1));
+    uf_env_declare(rt->global_env, "shl",                 uf_val_native("shl",                 std_shl,                 2));
+    uf_env_declare(rt->global_env, "shr",                 uf_val_native("shr",                 std_shr,                 2));
+    uf_env_declare(rt->global_env, "sar",                 uf_val_native("sar",                 std_sar,                 2));
+    uf_env_declare(rt->global_env, "to_hex",              uf_val_native("to_hex",              std_to_hex,              1));
+    uf_env_declare(rt->global_env, "from_hex",            uf_val_native("from_hex",            std_from_hex,            1));
+    uf_env_declare(rt->global_env, "buffer_to_hex",       uf_val_native("buffer_to_hex",       std_buffer_to_hex,       1));
+    uf_env_declare(rt->global_env, "buffer_from_hex",     uf_val_native("buffer_from_hex",     std_buffer_from_hex,     1));
     uf_env_declare(rt->global_env, "inspect",             uf_val_native("inspect",             std_inspect,             1));
 
     /* Error handling */
@@ -1108,6 +1283,17 @@ void uf_stdlib_register_semantic(struct UfSemanticAnalyzer* analyzer) {
     uf_semantic_add_symbol(analyzer, "i16",                 UF_SYM_BUILTIN, span, 1);
     uf_semantic_add_symbol(analyzer, "u32",                 UF_SYM_BUILTIN, span, 1);
     uf_semantic_add_symbol(analyzer, "i32",                 UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "band",                UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "bor",                 UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "bxor",                UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "bnot",                UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "shl",                 UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "shr",                 UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "sar",                 UF_SYM_BUILTIN, span, 2);
+    uf_semantic_add_symbol(analyzer, "to_hex",              UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "from_hex",            UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "buffer_to_hex",       UF_SYM_BUILTIN, span, 1);
+    uf_semantic_add_symbol(analyzer, "buffer_from_hex",     UF_SYM_BUILTIN, span, 1);
     uf_semantic_add_symbol(analyzer, "inspect",             UF_SYM_BUILTIN, span, 1);
 
     /* Error handling */
