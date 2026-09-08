@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐡 Unfish Web Playground & Visual Block Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Toolbar -->
+    <header class="toolbar">
+      <div class="brand">
+        <span class="logo">🐡</span>
+        <span class="brand-title">Unfish</span>
+        <span class="badge">v2.0.0</span>
+      </div>
+
+      <div class="controls">
+        <label for="example-select">Example:</label>
+        <select id="example-select" class="select-input">
+          <option value="hello">Hello & Interpolation</option>
+          <option value="enums">Enums & Pattern Matching</option>
+          <option value="structs">Structs & Methods</option>
+          <option value="destructure">Destructuring & Rest</option>
+          <option value="closures">Closures & Higher-Order</option>
+          <option value="fibonacci">Fibonacci & Recursion</option>
+          <option value="sorting">Bubble Sort</option>
+        </select>
+
+        <button id="btn-run" class="btn btn-primary" title="Run program (Ctrl+Enter)">
+          <span class="icon">▶</span> Run
+        </button>
+
+        <button id="btn-vm" class="btn btn-secondary" title="Run in Bytecode VM">
+          ⚡ VM
+        </button>
+
+        <button id="btn-format" class="btn btn-secondary" title="Format code cleanly">
+          ✨ Format
+        </button>
+
+        <button id="btn-clear" class="btn btn-ghost" title="Clear console">
+          🗑️ Clear
+        </button>
+      </div>
+
+      <div class="status-indicator">
+        <span id="backend-status" class="status-badge live">● Ready</span>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left: Editor Pane -->
+      <section class="pane editor-pane">
+        <div class="pane-header">
+          <span class="pane-title">Source Code (Unfish)</span>
+          <span class="shortcut-tip">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run</span>
+        </div>
+        <div class="editor-wrapper">
+          <div id="line-numbers" class="line-numbers">1</div>
+          <textarea id="code-editor" class="code-editor" spellcheck="false" placeholder="Write Unfish code here..."></textarea>
+        </div>
+      </section>
+
+      <!-- Right: Tabbed Output / Visualizer Pane -->
+      <section class="pane output-pane">
+        <nav class="tabs">
+          <button class="tab-btn active" data-tab="console">Console</button>
+          <button class="tab-btn" data-tab="blocks">Visual Blocks Studio</button>
+          <button class="tab-btn" data-tab="ast">AST Inspector</button>
+          <button class="tab-btn" data-tab="cheatsheet">Cheatsheet</button>
+        </nav>
+
+        <!-- Tab 1: Terminal Console -->
+        <div id="tab-console" class="tab-content active">
+          <div class="console-toolbar">
+            <span id="execution-stats" class="execution-stats">Execution status: Idle</span>
+          </div>
+          <div id="console-output" class="terminal-view">
+            <span class="terminal-line system">🐡 Welcome to Unfish Studio v2.0! Select an example or write code and click Run.</span>
+          </div>
+        </div>
+
+        <!-- Tab 2: Visual Blocks Editor & Studio -->
+        <div id="tab-blocks" class="tab-content blocks-tab-layout">
+          <div class="blocks-editor-toolbar">
+            <div class="blocks-toolbar-left">
+              <span class="toolbar-label">Interactive Blocks Canvas</span>
+              <span id="blocks-sync-status" class="sync-status-pill">● Synced with Code</span>
+            </div>
+            <div class="blocks-toolbar-right">
+              <button id="btn-blocks-sync" class="btn btn-sm btn-primary" title="Sync changes from blocks back to code editor">
+                ⟳ Sync to Code
+              </button>
+              <button id="btn-blocks-format" class="btn btn-sm btn-secondary" title="Re-import and format code cleanly">
+                ✨ Format &amp; Sync
+              </button>
+              <button id="btn-blocks-export" class="btn btn-sm btn-secondary" title="Export blocks as JSON">
+                💾 Export JSON
+              </button>
+              <button id="btn-blocks-clear" class="btn btn-sm btn-ghost" title="Clear blocks canvas">
+                🗑️ Clear
+              </button>
+            </div>
+          </div>
+
+          <div class="blocks-workspace">
+            <!-- Left: Block Palette / Toolbox -->
+            <aside class="blocks-palette" id="blocks-palette">
+              <div class="palette-header">Toolbox Palette</div>
+              
+              <div class="palette-group">
+                <span class="palette-group-title">Output</span>
+                <button class="palette-item item-say" data-kind="say">
+                  <span class="palette-icon">📢</span> say &quot;Hello&quot;
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Variables</span>
+                <button class="palette-item item-let" data-kind="let">
+                  <span class="palette-icon">📦</span> let x = 42
+                </button>
+                <button class="palette-item item-set" data-kind="set">
+                  <span class="palette-icon">✏️</span> x = 100
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Logic &amp; Loops</span>
+                <button class="palette-item item-if" data-kind="if">
+                  <span class="palette-icon">🔀</span> if condition:
+                </button>
+                <button class="palette-item item-while" data-kind="while">
+                  <span class="palette-icon">🔄</span> while condition:
+                </button>
+                <button class="palette-item item-for" data-kind="for">
+                  <span class="palette-icon">🔁</span> for item in list:
+                </button>
+                <button class="palette-item item-repeat" data-kind="repeat">
+                  <span class="palette-icon">🔢</span> repeat 5 times:
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Functions</span>
+                <button class="palette-item item-function" data-kind="function">
+                  <span class="palette-icon">⚡</span> function foo(x):
+                </button>
+                <button class="palette-item item-return" data-kind="return">
+                  <span class="palette-icon">↩️</span> return value
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Data Structures</span>
+                <button class="palette-item item-struct" data-kind="struct">
+                  <span class="palette-icon">🏛️</span> struct Point:
+                </button>
+                <button class="palette-item item-enum" data-kind="enum">
+                  <span class="palette-icon">🏷️</span> enum Color:
+                </button>
+                <button class="palette-item item-match" data-kind="match">
+                  <span class="palette-icon">🎯</span> match val:
+                </button>
+                <button class="palette-item item-when" data-kind="when">
+                  <span class="palette-icon">👉</span> when Pattern:
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Error Recovery &amp; Fibers</span>
+                <button class="palette-item item-try" data-kind="try">
+                  <span class="palette-icon">🛡️</span> try:
+                </button>
+                <button class="palette-item item-catch" data-kind="catch">
+                  <span class="palette-icon">🪤</span> catch err:
+                </button>
+                <button class="palette-item item-finally" data-kind="finally">
+                  <span class="palette-icon">🧹</span> finally:
+                </button>
+                <button class="palette-item item-spawn" data-kind="spawn">
+                  <span class="palette-icon">🧵</span> spawn task()
+                </button>
+                <button class="palette-item item-yield" data-kind="yield">
+                  <span class="palette-icon">⏸️</span> yield
+                </button>
+              </div>
+            </aside>
+
+            <!-- Right: Interactive Blocks Canvas -->
+            <div class="blocks-canvas-area">
+              <div class="blocks-canvas" id="blocks-container">
+                <div class="blocks-placeholder">Loading blocks...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: AST Inspector -->
+        <div id="tab-ast" class="tab-content">
+          <pre id="ast-output" class="tree-view">Click 'Run' to inspect the Abstract Syntax Tree.</pre>
+        </div>
+
+        <!-- Tab 4: Language Cheatsheet -->
+        <div id="tab-cheatsheet" class="tab-content cheatsheet-view">
+          <h3>🐡 Unfish Quick Syntax Reference</h3>
+          <div class="cheatsheet-grid">
+            <div class="cheatsheet-card">
+              <h4>Variables & Output</h4>
+              <code>let x = 42<br>let name = "Alice"<br>say f"Hello, {name}!"</code>
+            </div>
+            <div class="cheatsheet-card">
+              <h4>Functions & Closures</h4>
+              <code>function add(a, b = 0):<br>&nbsp;&nbsp;&nbsp;&nbsp;return a + b<br><br>let double = fn(x): x * 2</code>
+            </div>
+            <div class="cheatsheet-card">
+              <h4>Structs & Methods</h4>
+              <code>struct Point:<br>&nbsp;&nbsp;&nbsp;&nbsp;x<br>&nbsp;&nbsp;&nbsp;&nbsp;y<br>&nbsp;&nbsp;&nbsp;&nbsp;fn dist(self):<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return (self.x^2 + self.y^2)^0.5</code>
+            </div>
+            <div class="cheatsheet-card">
+              <h4>Enums & Pattern Matching</h4>
+              <code>enum Result:<br>&nbsp;&nbsp;&nbsp;&nbsp;Ok(value)<br>&nbsp;&nbsp;&nbsp;&nbsp;Err(message)<br><br>match res:<br>&nbsp;&nbsp;&nbsp;&nbsp;when Ok(v): say v<br>&nbsp;&nbsp;&nbsp;&nbsp;when Err(e): say e</code>
+            </div>
+            <div class="cheatsheet-card">
+              <h4>Destructuring & Spread</h4>
+              <code>let [head, ...tail] = [1, 2, 3]<br>let {name, age} = user<br>let merged = [...a, ...b]</code>
+            </div>
+            <div class="cheatsheet-card">
+              <h4>Error Handling</h4>
+              <code>try:<br>&nbsp;&nbsp;&nbsp;&nbsp;1 / 0<br>catch err:<br>&nbsp;&nbsp;&nbsp;&nbsp;say f"Caught: {err}"<br>finally:<br>&nbsp;&nbsp;&nbsp;&nbsp;say "Cleanup done"</code>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="unfish_engine.js"></script>
+  <script src="playground.js"></script>
+</body>
+</html>
