@@ -11,7 +11,7 @@
 #include <setjmp.h>
 
 #define UF_MAX_CALL_FRAMES 512
-#define UF_MAX_TEMP_ROOTS 512
+#define UF_MAX_TEMP_ROOTS 4096
 #define UF_MAX_TRY_HANDLERS 64
 #define UF_GC_INITIAL_THRESHOLD (64 * 1024) /* 64 KB */
 
@@ -19,6 +19,7 @@ typedef struct {
     const char* fn_name;
     SourceSpan call_span;
     UfEnv* env;
+    UfEnv* caller_env;
 } UfCallFrame;
 
 typedef struct {
@@ -80,6 +81,7 @@ struct UfRuntime {
 
     UfCallValueFn call_fn;
     void* active_vm;
+    void* active_regvm;
     void* scheduler;
 
     FILE* out_stream;
@@ -88,6 +90,8 @@ struct UfRuntime {
 
     UfDebugHook debug_hook;
     void* debug_user_ctx;
+
+    struct UfProfiler* profiler;
 
     int argc;
     char** argv;

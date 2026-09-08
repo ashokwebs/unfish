@@ -1,0 +1,14 @@
+struct Point:
+    x
+    y
+    fn norm_sq(self):
+        return self.x * self.x + self.y * self.y
+
+let sum = 0
+let i = 0
+while i < 10000:
+    let p = Point(i, i + 1)
+    sum = sum + p.norm_sq()
+    i = i + 1
+
+say sum

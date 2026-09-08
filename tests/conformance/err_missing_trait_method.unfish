@@ -1,0 +1,13 @@
+# expect-exit: 2
+# expect-error: Struct 'Circle' does not implement required method 'area' of trait 'Shape'
+
+trait Shape:
+    fn perimeter() -> Number
+    fn area() -> Number
+
+struct Circle:
+    radius: Number
+
+    impl Shape:
+        fn perimeter(self) -> Number:
+            return 6.28 * self.radius

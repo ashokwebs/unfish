@@ -35,11 +35,23 @@ const char* uf_opcode_name(UfOpcode op) {
         case OP_GTE: return "OP_GTE";
         case OP_JUMP: return "OP_JUMP";
         case OP_JUMP_IF_FALSE: return "OP_JUMP_IF_FALSE";
+        case OP_JUMP_IF_ARG: return "OP_JUMP_IF_ARG";
         case OP_LOOP: return "OP_LOOP";
         case OP_CALL: return "OP_CALL";
+        case OP_CALL_SPREAD: return "OP_CALL_SPREAD";
         case OP_RETURN: return "OP_RETURN";
         case OP_BUILD_ARRAY: return "OP_BUILD_ARRAY";
+        case OP_ARRAY_PUSH: return "OP_ARRAY_PUSH";
+        case OP_ARRAY_EXTEND: return "OP_ARRAY_EXTEND";
+        case OP_ARRAY_SLICE: return "OP_ARRAY_SLICE";
+        case OP_ASSERT_ARRAY: return "OP_ASSERT_ARRAY";
+        case OP_ASSERT_MAP: return "OP_ASSERT_MAP";
+        case OP_ARRAY_GET_SAFE: return "OP_ARRAY_GET_SAFE";
+        case OP_MAP_GET_SAFE: return "OP_MAP_GET_SAFE";
+        case OP_MAP_REST: return "OP_MAP_REST";
         case OP_BUILD_MAP: return "OP_BUILD_MAP";
+        case OP_MAP_SET: return "OP_MAP_SET";
+        case OP_MAP_EXTEND: return "OP_MAP_EXTEND";
         case OP_INDEX_GET: return "OP_INDEX_GET";
         case OP_INDEX_SET: return "OP_INDEX_SET";
         case OP_ITER_GET: return "OP_ITER_GET";
@@ -48,6 +60,8 @@ const char* uf_opcode_name(UfOpcode op) {
         case OP_INSTANCE: return "OP_INSTANCE";
         case OP_PUSH_TRY: return "OP_PUSH_TRY";
         case OP_POP_TRY: return "OP_POP_TRY";
+        case OP_RETHROW: return "OP_RETHROW";
+        case OP_AWAIT: return "OP_AWAIT";
         default: return "OP_UNKNOWN";
     }
 }
@@ -231,16 +245,47 @@ size_t uf_disassemble_instruction(const UfChunk* chunk, size_t offset, FILE* out
             return jump_instruction("OP_JUMP", 1, chunk, offset, out);
         case OP_JUMP_IF_FALSE:
             return jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset, out);
+        case OP_JUMP_IF_ARG: {
+            uint8_t arg = chunk->code[offset + 1];
+            uint16_t jump = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
+            fprintf(out, "%-16s %4d -> %zu\n", "OP_JUMP_IF_ARG", arg, offset + 4 + jump);
+            return offset + 4;
+        }
         case OP_LOOP:
             return jump_instruction("OP_LOOP", -1, chunk, offset, out);
         case OP_CALL:
             return byte_instruction("OP_CALL", chunk, offset, out);
+        case OP_CALL_SPREAD:
+            return simple_instruction("OP_CALL_SPREAD", offset, out);
         case OP_RETURN:
             return simple_instruction("OP_RETURN", offset, out);
         case OP_BUILD_ARRAY:
             return u16_instruction("OP_BUILD_ARRAY", chunk, offset, out);
+        case OP_ARRAY_PUSH:
+            return simple_instruction("OP_ARRAY_PUSH", offset, out);
+        case OP_ARRAY_EXTEND:
+            return simple_instruction("OP_ARRAY_EXTEND", offset, out);
+        case OP_ARRAY_SLICE:
+            return u16_instruction("OP_ARRAY_SLICE", chunk, offset, out);
+        case OP_ASSERT_ARRAY:
+            return simple_instruction("OP_ASSERT_ARRAY", offset, out);
+        case OP_ASSERT_MAP:
+            return simple_instruction("OP_ASSERT_MAP", offset, out);
+        case OP_ARRAY_GET_SAFE:
+            return u16_instruction("OP_ARRAY_GET_SAFE", chunk, offset, out);
+        case OP_MAP_GET_SAFE:
+            return simple_instruction("OP_MAP_GET_SAFE", offset, out);
+        case OP_MAP_REST: {
+            uint16_t count = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            fprintf(out, "%-16s %4d\n", "OP_MAP_REST", count);
+            return offset + 3 + count * 2;
+        }
         case OP_BUILD_MAP:
             return u16_instruction("OP_BUILD_MAP", chunk, offset, out);
+        case OP_MAP_SET:
+            return simple_instruction("OP_MAP_SET", offset, out);
+        case OP_MAP_EXTEND:
+            return simple_instruction("OP_MAP_EXTEND", offset, out);
         case OP_INDEX_GET:
             return simple_instruction("OP_INDEX_GET", offset, out);
         case OP_INDEX_SET:
@@ -250,13 +295,17 @@ size_t uf_disassemble_instruction(const UfChunk* chunk, size_t offset, FILE* out
         case OP_SAY:
             return simple_instruction("OP_SAY", offset, out);
         case OP_STRUCT_DEF:
-            return constant_instruction("OP_STRUCT_DEF", chunk, offset, out);
+            return u16_instruction("OP_STRUCT_DEF", chunk, offset, out);
         case OP_INSTANCE:
-            return constant_instruction("OP_INSTANCE", chunk, offset, out);
+            return u16_instruction("OP_INSTANCE", chunk, offset, out);
         case OP_PUSH_TRY:
             return jump_instruction("OP_PUSH_TRY", 1, chunk, offset, out);
         case OP_POP_TRY:
             return simple_instruction("OP_POP_TRY", offset, out);
+        case OP_RETHROW:
+            return simple_instruction("OP_RETHROW", offset, out);
+        case OP_AWAIT:
+            return simple_instruction("OP_AWAIT", offset, out);
         default:
             fprintf(out, "Unknown opcode %d\n", instruction);
             return offset + 1;
@@ -280,7 +329,7 @@ void uf_chunk_disassemble(const UfChunk* chunk, const char* name, FILE* out) {
     }
 }
 
-UfBytecodeFunction* uf_bytecode_fn_new(UfRuntime* rt, const char* name, size_t arity) {
+UfBytecodeFunction* uf_bytecode_fn_new(UfRuntime* rt, const char* name, size_t arity, size_t min_arity, bool has_rest) {
     UfBytecodeFunction* bfn = (UfBytecodeFunction*)malloc(sizeof(UfBytecodeFunction));
     if (!bfn) return NULL;
     bfn->obj.kind = UF_OBJ_BYTECODE_FN;
@@ -288,6 +337,9 @@ UfBytecodeFunction* uf_bytecode_fn_new(UfRuntime* rt, const char* name, size_t a
     bfn->obj.next = NULL;
     bfn->name = name;
     bfn->arity = arity;
+    bfn->min_arity = min_arity;
+    bfn->has_rest = has_rest;
+    bfn->is_async = false;
     bfn->upvalue_count = 0;
     uf_chunk_init(&bfn->chunk);
     if (rt) {

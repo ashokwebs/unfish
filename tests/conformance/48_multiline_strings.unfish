@@ -1,0 +1,26 @@
+# expect: Hello
+# expect: World
+# expect: Line with "quotes" and 'single'
+# expect: Done
+# expect: 12
+# expect: Joined:
+# expect: Part A
+# expect: Part B
+
+let s = """Hello
+World"""
+say s
+
+let s2 = """Line with "quotes" and 'single'"""
+say s2
+
+say "Done"
+
+let multiline_len = len("""12345
+67890
+""")
+say multiline_len
+
+let joined = "Joined:\n" + """Part A
+Part B"""
+say joined

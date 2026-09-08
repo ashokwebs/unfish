@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unfish WebAssembly Runner</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0ea5e9;
+      --term-bg: #090d16;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
+    body { background: var(--bg); color: var(--text); padding: 2rem; display: flex; flex-direction: column; height: 100vh; }
+    header { margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+    h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent); }
+    .badge { background: #0284c7; color: white; padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.75rem; }
+    .toolbar { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center; }
+    button { background: var(--accent); color: #0f172a; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: var(--accent-hover); }
+    input[type="file"] { display: none; }
+    .file-btn { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 0.6rem 1.2rem; border-radius: 6px; cursor: pointer; }
+    .file-btn:hover { background: #283548; }
+    #status { font-size: 0.9rem; color: var(--text-muted); }
+    .terminal { flex: 1; background: var(--term-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+    .stdout { color: #f8fafc; }
+    .stderr { color: #f87171; }
+    .sys { color: #38bdf8; font-style: italic; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>🐡</span> Unfish WebAssembly Runner</h1>
+    <span class="badge">WASI Preview-1</span>
+  </header>
+  <div class="toolbar">
+    <label class="file-btn" for="wasm-file">Select .wasm File</label>
+    <input type="file" id="wasm-file" accept=".wasm">
+    <button id="run-btn" disabled>Run</button>
+    <button id="clear-btn" style="background: var(--panel); color: var(--text); border: 1px solid var(--border);">Clear Console</button>
+    <span id="status">No WebAssembly module loaded.</span>
+  </div>
+  <div class="terminal" id="term"><span class="sys">Select a compiled Unfish .wasm binary to run in browser...</span></div>
+
+  <script>
+    let currentWasmBytes = null;
+    let fileName = "";
+    const term = document.getElementById('term');
+    const status = document.getElementById('status');
+    const runBtn = document.getElementById('run-btn');
+
+    function log(text, cls = 'stdout') {
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = text;
+      term.appendChild(span);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    document.getElementById('clear-btn').onclick = () => {
+      term.innerHTML = '';
+    };
+
+    document.getElementById('wasm-file').onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      fileName = file.name;
+      currentWasmBytes = await file.arrayBuffer();
+      status.textContent = `Loaded: ${fileName} (${(currentWasmBytes.byteLength / 1024).toFixed(1)} KB)`;
+      runBtn.disabled = false;
+      log(`\n[Loaded ${fileName}]\n`, 'sys');
+    };
+
+    async function runWasm() {
+      if (!currentWasmBytes) return;
+      log(`\n=== Running ${fileName} ===\n`, 'sys');
+      const start = performance.now();
+
+      let memory = null;
+      const decoder = new TextDecoder('utf-8');
+
+      // Minimal WASI Preview 1 implementation for browser
+      const wasi = {
+        fd_write: (fd, iovs, iovs_len, nwritten) => {
+          if (!memory) return 28; // EINVAL
+          const view = new DataView(memory.buffer);
+          let bytesWritten = 0;
+          let output = "";
+
+          for (let i = 0; i < iovs_len; i++) {
+            const ptr = view.getUint32(iovs + i * 8, true);
+            const len = view.getUint32(iovs + i * 8 + 4, true);
+            const bytes = new Uint8Array(memory.buffer, ptr, len);
+            output += decoder.decode(bytes);
+            bytesWritten += len;
+          }
+
+          if (nwritten) view.setUint32(nwritten, bytesWritten, true);
+          if (fd === 1) log(output, 'stdout');
+          else if (fd === 2) log(output, 'stderr');
+          return 0; // SUCCESS
+        },
+        proc_exit: (code) => {
+          const time = (performance.now() - start).toFixed(2);
+          log(`\n[Program exited with code ${code} in ${time} ms]\n`, 'sys');
+          throw new Error(`EXIT_${code}`);
+        },
+        environ_sizes_get: (count_ptr, buf_size_ptr) => {
+          const view = new DataView(memory.buffer);
+          view.setUint32(count_ptr, 0, true);
+          view.setUint32(buf_size_ptr, 0, true);
+          return 0;
+        },
+        environ_get: (environ, environ_buf) => 0,
+        args_sizes_get: (argc_ptr, argv_buf_size_ptr) => {
+          const view = new DataView(memory.buffer);
+          view.setUint32(argc_ptr, 1, true);
+          view.setUint32(argv_buf_size_ptr, fileName.length + 1, true);
+          return 0;
+        },
+        args_get: (argv, argv_buf) => {
+          const view = new DataView(memory.buffer);
+          view.setUint32(argv, argv_buf, true);
+          const buf = new Uint8Array(memory.buffer, argv_buf);
+          for (let i = 0; i < fileName.length; i++) {
+            buf[i] = fileName.charCodeAt(i);
+          }
+          buf[fileName.length] = 0;
+          return 0;
+        },
+        clock_time_get: (id, precision, time_ptr) => {
+          const view = new DataView(memory.buffer);
+          const nowNs = BigInt(Math.floor(performance.now() * 1000000));
+          view.setBigUint64(time_ptr, nowNs, true);
+          return 0;
+        },
+        random_get: (buf_ptr, buf_len) => {
+          const arr = new Uint8Array(memory.buffer, buf_ptr, buf_len);
+          crypto.getRandomValues(arr);
+          return 0;
+        },
+        fd_close: () => 0,
+        fd_seek: () => 0,
+        fd_fdstat_get: (fd, stat_ptr) => 0
+      };
+
+      try {
+        const module = await WebAssembly.compile(currentWasmBytes);
+        const instance = await WebAssembly.instantiate(module, {
+          wasi_snapshot_preview1: wasi
+        });
+        memory = instance.exports.memory;
+        if (instance.exports._start) {
+          instance.exports._start();
+        } else if (instance.exports.main) {
+          instance.exports.main();
+        }
+        const time = (performance.now() - start).toFixed(2);
+        log(`\n[Execution completed successfully in ${time} ms]\n`, 'sys');
+      } catch (err) {
+        if (!err.message.startsWith('EXIT_')) {
+          log(`\nRuntime Exception: ${err.message}\n`, 'stderr');
+        }
+      }
+    }
+
+    runBtn.onclick = runWasm;
+  </script>
+</body>
+</html>

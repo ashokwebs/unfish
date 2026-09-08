@@ -1,0 +1,84 @@
+# expect: 25
+# expect: Point(3, 4)
+# expect: 8
+# expect: 10
+# expect: 164
+# expect: 16
+# expect: 20
+# expect: Point(16, 20)
+# expect: 656
+# expect: function
+# expect: 30
+# expect: 49
+# expect: 81
+# expect: Point(6, 7)
+# expect: Point(10, 20)
+
+struct Point:
+    x: Number
+    y: Number
+
+    fn dist_sq(self):
+        return self.x * self.x + self.y * self.y
+
+    function translate(self, dx, dy):
+        self.x = self.x + dx
+        self.y = self.y + dy
+        return self
+
+    fn scale(self, factor=2):
+        self.x = self.x * factor
+        self.y = self.y * factor
+        return self
+
+    fn describe(self):
+        return "Point(" + self.x + ", " + self.y + ")"
+
+# 1. Basic method call
+let p = Point(3, 4)
+say p.dist_sq()
+say p.describe()
+
+# 2. Mutating self and method chaining
+p.translate(1, 1).scale(2)
+say p.x
+say p.y
+say p.dist_sq()
+
+# 3. Default parameters on methods
+p.scale()
+say p.x
+say p.y
+
+# 4. Bound method extraction (first-class method)
+let d = p.describe
+say d()
+
+let m = p.dist_sq
+say m()
+say type_of(m)
+
+# 5. Method on struct without fields
+struct Calculator:
+    fn add(self, a, b):
+        return a + b
+    fn square(self, n):
+        return n * n
+
+let calc = Calculator()
+say calc.add(10, 20)
+say calc.square(7)
+
+# 6. Higher-order function with method
+function execute(func, arg):
+    return func(arg)
+
+let sq = calc.square
+say execute(sq, 9)
+
+# 7. Multiple instances have independent state
+let p1 = Point(1, 2)
+let p2 = Point(10, 20)
+p1.translate(5, 5)
+say p1.describe()
+say p2.describe()

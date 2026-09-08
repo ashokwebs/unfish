@@ -1,0 +1,4 @@
+# expect-exit: 2
+# expect-error: Semantic Error: 'await' can only be used inside an async function
+
+await 42

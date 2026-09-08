@@ -1,0 +1,42 @@
+# expect: promise
+# expect: 42
+# expect: 84
+# expect: hello world
+# expect: computed 100
+# expect: direct 123
+# expect: done
+
+async function compute(x):
+    return x * 2
+
+async function greet(name):
+    return "hello " + name
+
+async function chained():
+    let a = await compute(21)
+    say(a)
+    let b = await compute(a)
+    say(b)
+    let msg = await greet("world")
+    say(msg)
+    let pass = await 123
+    return pass
+
+let p = compute(21)
+say(type_of(p))
+
+struct Worker:
+    multiplier: Number
+    async function do_work(self, val):
+        return val * self.multiplier
+
+async function main():
+    let d = await chained()
+    let w = Worker(10)
+    let work_res = await w.do_work(10)
+    say("computed " + to_string(work_res))
+    say("direct " + to_string(d))
+    return "done"
+
+let final_res = run_async(main)
+say(final_res)

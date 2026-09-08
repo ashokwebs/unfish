@@ -61,4 +61,10 @@ bool uf_channel_send(UfRuntime* rt, UfChannel* ch, UfValue val);
 bool uf_channel_recv(UfRuntime* rt, UfChannel* ch, UfValue* out_val);
 void uf_channel_close(UfRuntime* rt, UfChannel* ch);
 
+UfPromiseObject* uf_promise_create(UfRuntime* rt);
+void uf_promise_free(UfPromiseObject* p);
+void uf_promise_resolve(UfRuntime* rt, UfPromiseObject* p, UfValue val);
+void uf_promise_reject(UfRuntime* rt, UfPromiseObject* p, UfValue err);
+UfValue uf_promise_await(UfRuntime* rt, UfPromiseObject* p);
+
 #endif /* UF_FIBER_H */

@@ -87,6 +87,20 @@ void uf_module_cache_add(UfRuntime* rt, const char* name, UfModuleObject* mod) {
     rt->module_cache = entry;
 }
 
+void uf_module_cache_remove(UfRuntime* rt, const char* name) {
+    UfModuleEntry** curr = &rt->module_cache;
+    while (*curr) {
+        if (strcmp((*curr)->name, name) == 0) {
+            UfModuleEntry* to_free = *curr;
+            *curr = (*curr)->next;
+            free(to_free->name);
+            free(to_free);
+            return;
+        }
+        curr = &(*curr)->next;
+    }
+}
+
 static char* resolve_module_path(const char* name, SourceSpan span) {
     char path[1024];
 
@@ -278,6 +292,7 @@ UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span)
 
     if (!program || parser.had_error) {
         mod->state = UF_MOD_ERROR;
+        uf_module_cache_remove(rt, name);
         uf_runtime_pop_temp_roots(rt, 1);
         uf_runtime_raise(rt, "ModuleLoadError", span, "Syntax error in module '%s'", name);
         return NULL;
@@ -288,6 +303,7 @@ UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span)
     bool sema_ok = uf_analyze_program(&sema, program);
     if (!sema_ok || sema.had_error) {
         mod->state = UF_MOD_ERROR;
+        uf_module_cache_remove(rt, name);
         uf_runtime_pop_temp_roots(rt, 1);
         uf_runtime_raise(rt, "ModuleLoadError", span, "Semantic error in module '%s'", name);
         return NULL;
@@ -296,12 +312,56 @@ UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span)
     /* 7. Execute in isolated module environment */
     UfEnv* prev_env = rt->current_env;
     rt->current_env = mod->env;
-    UfInterpretResult res = uf_interpret_program(rt, program);
+
+    bool had_err = false;
+    bool caught_by_longjmp = false;
+    if (rt->try_handler_count < UF_MAX_TRY_HANDLERS) {
+        UfTryHandler* h = &rt->try_handlers[rt->try_handler_count++];
+        h->scope_env = prev_env;
+        h->frame_count = rt->frame_count;
+        h->temp_root_count = rt->temp_root_count;
+        if (setjmp(h->jmp) == 0) {
+            UfInterpretResult res = uf_interpret_program(rt, program);
+            if (res != UF_INTERPRET_OK || rt->had_runtime_error) {
+                had_err = true;
+            }
+            rt->try_handler_count--;
+        } else {
+            had_err = true;
+            caught_by_longjmp = true;
+        }
+    } else {
+        UfInterpretResult res = uf_interpret_program(rt, program);
+        if (res != UF_INTERPRET_OK || rt->had_runtime_error) {
+            had_err = true;
+        }
+    }
+
     rt->current_env = prev_env;
     uf_runtime_pop_temp_roots(rt, 1);
 
-    if (res != UF_INTERPRET_OK || rt->had_runtime_error) {
+    if (had_err) {
         mod->state = UF_MOD_ERROR;
+        uf_module_cache_remove(rt, name);
+        if (caught_by_longjmp && rt->current_error.kind == UF_VAL_ERROR) {
+            if (rt->try_handler_count > 0) {
+                UfTryHandler* outer_h = &rt->try_handlers[--rt->try_handler_count];
+                rt->frame_count = outer_h->frame_count;
+                rt->temp_root_count = outer_h->temp_root_count;
+                rt->current_env = outer_h->scope_env;
+                longjmp(outer_h->jmp, 1);
+            } else {
+                rt->had_runtime_error = true;
+                const char* msg = rt->current_error.as.error->message ? rt->current_error.as.error->message->chars : "Runtime error";
+                SourceSpan err_span = { { rt->current_error.as.error->file, (uint32_t)rt->current_error.as.error->line, 1, 0 },
+                                        { rt->current_error.as.error->file, (uint32_t)rt->current_error.as.error->line, 1, 0 } };
+                if (rt->reporter) {
+                    uf_report_diag(rt->reporter, UF_DIAG_RUNTIME_ERROR, err_span, msg, NULL);
+                } else {
+                    fprintf(rt->err_stream, "Runtime Error: %s\n", msg);
+                }
+            }
+        }
         return NULL;
     }
 

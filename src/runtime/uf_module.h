@@ -40,6 +40,7 @@ void uf_module_free_all(UfRuntime* rt);
 UfModuleObject* uf_module_create(UfRuntime* rt, const char* name, const char* path);
 UfModuleObject* uf_module_find_cached(UfRuntime* rt, const char* name);
 void uf_module_cache_add(UfRuntime* rt, const char* name, UfModuleObject* mod);
+void uf_module_cache_remove(UfRuntime* rt, const char* name);
 
 UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span);
 

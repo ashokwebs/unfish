@@ -145,11 +145,68 @@ static void test_build_and_execute_systems_and_math_native(void) {
     printf("test_build_and_execute_systems_and_math_native passed!\n");
 }
 
+static void test_emit_and_build_embedded(void) {
+    UfArena arena;
+    uf_arena_init(&arena, 32768);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "<test>", "");
+
+    const char* code =
+        "let x = 25\n"
+        "let y = 17\n"
+        "say x + y\n";
+
+    UfProgram* prog = parse_string(code, &arena, &interner, &reporter);
+
+    /* 1. Test embedded C emission */
+    FILE* stream = tmpfile();
+    assert(stream != NULL);
+    bool ok = uf_emit_c_program_embedded(prog, "<test>", stream);
+    assert(ok);
+    rewind(stream);
+    char buf[4096];
+    size_t len = fread(buf, 1, sizeof(buf) - 1, stream);
+    buf[len] = '\0';
+    fclose(stream);
+    assert(strstr(buf, "#define UF_EMBEDDED 1") != NULL);
+
+    /* 2. Test embedded build & host execution */
+    const char* emb_bin = "/tmp/test_uf_embedded_bin";
+    bool built = uf_build_embedded(prog, "<test>", emb_bin);
+    assert(built);
+
+    FILE* pipe = popen(emb_bin, "r");
+    assert(pipe != NULL);
+    char out_buf[128];
+    char* res = fgets(out_buf, sizeof(out_buf), pipe);
+    assert(res != NULL);
+    pclose(pipe);
+    remove(emb_bin);
+
+    assert(atoi(out_buf) == 42);
+
+    /* 3. Test ARM Cortex-M cross-compilation if arm-none-eabi-gcc is present */
+    if (access("/usr/bin/arm-none-eabi-gcc", X_OK) == 0) {
+        const char* arm_elf = "/tmp/test_uf_arm.elf";
+        bool arm_built = uf_build_embedded_arm(prog, "<test>", arm_elf);
+        assert(arm_built);
+        assert(access(arm_elf, F_OK) == 0);
+        remove(arm_elf);
+    }
+
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    printf("test_emit_and_build_embedded passed!\n");
+}
+
 int main(void) {
     printf("Running C99 code emission & native compilation tests...\n");
     test_emit_c_code();
     test_build_and_execute_native();
     test_build_and_execute_systems_and_math_native();
+    test_emit_and_build_embedded();
     printf("All C99 emission tests passed successfully!\n");
     return 0;
 }

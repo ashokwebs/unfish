@@ -25,6 +25,7 @@ typedef struct {
     int pending_dedents;
     bool at_line_start;
     int paren_depth;
+    int paren_indent_stack[UF_MAX_INDENT_DEPTH];
 
     UfTokenKind last_token_kind;
     bool has_tokens;

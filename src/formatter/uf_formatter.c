@@ -110,7 +110,9 @@ static FmtPrec expr_precedence(const UfExpr* expr) {
                 default: return FMT_PREC_NONE;
             }
         }
-        case UF_EXPR_UNARY: return FMT_PREC_UNARY;
+        case UF_EXPR_UNARY:
+        case UF_EXPR_SPREAD:
+        case UF_EXPR_AWAIT: return FMT_PREC_UNARY;
         case UF_EXPR_CALL:
         case UF_EXPR_INDEX: return FMT_PREC_CALL;
         default: return FMT_PREC_PRIMARY;
@@ -213,14 +215,21 @@ static void emit_expr(FILE* out, const UfExpr* expr, int indent) {
             fputc('{', out);
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
                 if (i > 0) fputs(", ", out);
-                emit_expr(out, expr->as.map_lit.keys[i], indent);
-                fputs(": ", out);
-                emit_expr(out, expr->as.map_lit.values[i], indent);
+                if (expr->as.map_lit.values[i] == NULL) {
+                    emit_expr(out, expr->as.map_lit.keys[i], indent);
+                } else {
+                    emit_expr(out, expr->as.map_lit.keys[i], indent);
+                    fputs(": ", out);
+                    emit_expr(out, expr->as.map_lit.values[i], indent);
+                }
             }
             fputc('}', out);
             break;
         }
         case UF_EXPR_FUNCTION: {
+            if (expr->as.fn_expr.is_async) {
+                fputs("async ", out);
+            }
             fputs("function", out);
             if (expr->as.fn_expr.name) {
                 fprintf(out, " %s", expr->as.fn_expr.name);
@@ -228,9 +237,16 @@ static void emit_expr(FILE* out, const UfExpr* expr, int indent) {
             fputc('(', out);
             for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
                 if (i > 0) fputs(", ", out);
+                if (i == expr->as.fn_expr.param_count - 1 && expr->as.fn_expr.has_rest) {
+                    fputs("...", out);
+                }
                 fputs(expr->as.fn_expr.params[i], out);
                 if (expr->as.fn_expr.param_types && expr->as.fn_expr.param_types[i]) {
                     fprintf(out, ": %s", expr->as.fn_expr.param_types[i]);
+                }
+                if (expr->as.fn_expr.param_defaults && expr->as.fn_expr.param_defaults[i]) {
+                    fputs(" = ", out);
+                    emit_expr(out, expr->as.fn_expr.param_defaults[i], indent);
                 }
             }
             fputc(')', out);
@@ -243,6 +259,42 @@ static void emit_expr(FILE* out, const UfExpr* expr, int indent) {
                 fputc('\n', out);
                 emit_block(out, expr->as.fn_expr.body, indent + 1);
             }
+            break;
+        }
+        case UF_EXPR_AWAIT: {
+            fputs("await ", out);
+            FmtPrec child_prec = expr_precedence(expr->as.await_expr.value);
+            bool paren = (child_prec < FMT_PREC_UNARY);
+            if (paren) fputc('(', out);
+            emit_expr(out, expr->as.await_expr.value, indent);
+            if (paren) fputc(')', out);
+            break;
+        }
+        case UF_EXPR_SPREAD:
+            fputs("...", out);
+            emit_expr(out, expr->as.spread.operand, indent);
+            break;
+        case UF_EXPR_STRING_INTERP: {
+            fputs("f\"", out);
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                UfExpr* part = expr->as.string_interp.parts[i];
+                if (part->kind == UF_EXPR_LITERAL_STRING) {
+                    for (const char* p = part->as.string_val; *p; ++p) {
+                        if (*p == '{') fputs("{{", out);
+                        else if (*p == '}') fputs("}}", out);
+                        else if (*p == '\"') fputs("\\\"", out);
+                        else if (*p == '\n') fputs("\\n", out);
+                        else if (*p == '\t') fputs("\\t", out);
+                        else if (*p == '\\') fputs("\\\\", out);
+                        else fputc(*p, out);
+                    }
+                } else {
+                    fputc('{', out);
+                    emit_expr(out, part, indent);
+                    fputc('}', out);
+                }
+            }
+            fputc('\"', out);
             break;
         }
     }
@@ -271,6 +323,40 @@ static void emit_pattern(FILE* out, const UfPattern* pat, int indent) {
             }
             fputc(')', out);
             break;
+        case UF_PAT_ARRAY:
+            fputc('[', out);
+            for (size_t i = 0; i < pat->as.array_pat.count; ++i) {
+                if (i > 0) fputs(", ", out);
+                emit_pattern(out, pat->as.array_pat.elements[i], indent);
+            }
+            fputc(']', out);
+            break;
+        case UF_PAT_MAP:
+            fputc('{', out);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                if (i > 0) fputs(", ", out);
+                UfPattern* val = pat->as.map_pat.values[i];
+                if (val && val->kind == UF_PAT_VARIABLE && strcmp(val->as.var_name, pat->as.map_pat.keys[i]) == 0) {
+                    /* Shorthand {x} */
+                    fputs(pat->as.map_pat.keys[i], out);
+                } else {
+                    fprintf(out, "%s: ", pat->as.map_pat.keys[i]);
+                    emit_pattern(out, val, indent);
+                }
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                if (pat->as.map_pat.count > 0) fputs(", ", out);
+                fputs("...", out);
+                emit_pattern(out, pat->as.map_pat.rest_pattern, indent);
+            }
+            fputc('}', out);
+            break;
+        case UF_PAT_REST:
+            fputs("...", out);
+            if (pat->as.rest_pat.subpattern) {
+                emit_pattern(out, pat->as.rest_pat.subpattern, indent);
+            }
+            break;
     }
 }
 
@@ -292,9 +378,13 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
         case UF_STMT_LET:
             emit_indent(out, indent);
             fputs("let ", out);
-            fputs(stmt->as.let_stmt.name, out);
-            if (stmt->as.let_stmt.type_annotation) {
-                fprintf(out, ": %s", stmt->as.let_stmt.type_annotation);
+            if (stmt->as.let_stmt.pattern) {
+                emit_pattern(out, stmt->as.let_stmt.pattern, indent);
+            } else {
+                fputs(stmt->as.let_stmt.name ? stmt->as.let_stmt.name : "_", out);
+                if (stmt->as.let_stmt.type_annotation) {
+                    fprintf(out, ": %s", stmt->as.let_stmt.type_annotation);
+                }
             }
             if (stmt->as.let_stmt.init) {
                 fputs(" = ", out);
@@ -305,7 +395,12 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
 
         case UF_STMT_ASSIGN:
             emit_indent(out, indent);
-            fprintf(out, "%s = ", stmt->as.assign_stmt.name);
+            if (stmt->as.assign_stmt.pattern) {
+                emit_pattern(out, stmt->as.assign_stmt.pattern, indent);
+                fputs(" = ", out);
+            } else {
+                fprintf(out, "%s = ", stmt->as.assign_stmt.name ? stmt->as.assign_stmt.name : "_");
+            }
             emit_expr(out, stmt->as.assign_stmt.value, indent);
             fputc('\n', out);
             break;
@@ -406,12 +501,34 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
 
         case UF_STMT_FUNCTION:
             emit_indent(out, indent);
-            fprintf(out, "function %s(", stmt->as.function_stmt.name);
+            if (stmt->as.function_stmt.is_async) {
+                fputs("async ", out);
+            }
+            fprintf(out, "function %s", stmt->as.function_stmt.name);
+            if (stmt->as.function_stmt.type_param_count > 0) {
+                fputc('<', out);
+                for (size_t tp = 0; tp < stmt->as.function_stmt.type_param_count; ++tp) {
+                    if (tp > 0) fputs(", ", out);
+                    fputs(stmt->as.function_stmt.type_params[tp], out);
+                    if (stmt->as.function_stmt.type_param_bounds && stmt->as.function_stmt.type_param_bounds[tp]) {
+                        fprintf(out, ": %s", stmt->as.function_stmt.type_param_bounds[tp]);
+                    }
+                }
+                fputc('>', out);
+            }
+            fputc('(', out);
             for (size_t i = 0; i < stmt->as.function_stmt.param_count; ++i) {
                 if (i > 0) fputs(", ", out);
+                if (i == stmt->as.function_stmt.param_count - 1 && stmt->as.function_stmt.has_rest) {
+                    fputs("...", out);
+                }
                 fputs(stmt->as.function_stmt.params[i], out);
                 if (stmt->as.function_stmt.param_types && stmt->as.function_stmt.param_types[i]) {
                     fprintf(out, ": %s", stmt->as.function_stmt.param_types[i]);
+                }
+                if (stmt->as.function_stmt.param_defaults && stmt->as.function_stmt.param_defaults[i]) {
+                    fputs(" = ", out);
+                    emit_expr(out, stmt->as.function_stmt.param_defaults[i], indent);
                 }
             }
             fputc(')', out);
@@ -441,13 +558,20 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
             emit_indent(out, indent);
             fputs("try:\n", out);
             emit_block(out, stmt->as.try_catch.try_block, indent + 1);
-            emit_indent(out, indent);
-            if (stmt->as.try_catch.catch_var) {
-                fprintf(out, "catch %s:\n", stmt->as.try_catch.catch_var);
-            } else {
-                fputs("catch:\n", out);
+            if (stmt->as.try_catch.catch_block) {
+                emit_indent(out, indent);
+                if (stmt->as.try_catch.catch_var) {
+                    fprintf(out, "catch %s:\n", stmt->as.try_catch.catch_var);
+                } else {
+                    fputs("catch:\n", out);
+                }
+                emit_block(out, stmt->as.try_catch.catch_block, indent + 1);
             }
-            emit_block(out, stmt->as.try_catch.catch_block, indent + 1);
+            if (stmt->as.try_catch.finally_block) {
+                emit_indent(out, indent);
+                fputs("finally:\n", out);
+                emit_block(out, stmt->as.try_catch.finally_block, indent + 1);
+            }
             break;
 
         case UF_STMT_IMPORT:
@@ -474,12 +598,98 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
 
         case UF_STMT_STRUCT:
             emit_indent(out, indent);
-            fprintf(out, "struct %s:\n", stmt->as.struct_stmt.name);
+            fprintf(out, "struct %s", stmt->as.struct_stmt.name);
+            if (stmt->as.struct_stmt.type_param_count > 0) {
+                fputc('<', out);
+                for (size_t tp = 0; tp < stmt->as.struct_stmt.type_param_count; ++tp) {
+                    if (tp > 0) fputs(", ", out);
+                    fputs(stmt->as.struct_stmt.type_params[tp], out);
+                    if (stmt->as.struct_stmt.type_param_bounds && stmt->as.struct_stmt.type_param_bounds[tp]) {
+                        fprintf(out, ": %s", stmt->as.struct_stmt.type_param_bounds[tp]);
+                    }
+                }
+                fputc('>', out);
+            }
+            fputs(":\n", out);
             for (size_t i = 0; i < stmt->as.struct_stmt.field_count; ++i) {
                 emit_indent(out, indent + 1);
                 fputs(stmt->as.struct_stmt.field_names[i], out);
                 if (stmt->as.struct_stmt.field_types && stmt->as.struct_stmt.field_types[i]) {
                     fprintf(out, ": %s", stmt->as.struct_stmt.field_types[i]);
+                }
+                fputc('\n', out);
+            }
+            for (size_t i = 0; i < stmt->as.struct_stmt.method_count; ++i) {
+                emit_statement(out, stmt->as.struct_stmt.methods[i], indent + 1);
+            }
+            for (size_t i = 0; i < stmt->as.struct_stmt.impl_block_count; ++i) {
+                emit_statement(out, stmt->as.struct_stmt.impl_blocks[i], indent + 1);
+            }
+            break;
+
+        case UF_STMT_TRAIT:
+            emit_indent(out, indent);
+            fprintf(out, "trait %s", stmt->as.trait_stmt.name);
+            if (stmt->as.trait_stmt.type_param_count > 0) {
+                fputc('<', out);
+                for (size_t tp = 0; tp < stmt->as.trait_stmt.type_param_count; ++tp) {
+                    if (tp > 0) fputs(", ", out);
+                    fputs(stmt->as.trait_stmt.type_params[tp], out);
+                    if (stmt->as.trait_stmt.type_param_bounds && stmt->as.trait_stmt.type_param_bounds[tp]) {
+                        fprintf(out, ": %s", stmt->as.trait_stmt.type_param_bounds[tp]);
+                    }
+                }
+                fputc('>', out);
+            }
+            fputs(":\n", out);
+            for (size_t i = 0; i < stmt->as.trait_stmt.method_count; ++i) {
+                emit_indent(out, indent + 1);
+                fprintf(out, "fn %s(", stmt->as.trait_stmt.method_names[i]);
+                size_t pcount = stmt->as.trait_stmt.method_param_counts[i];
+                for (size_t p = 0; p < pcount; ++p) {
+                    if (p > 0) fputs(", ", out);
+                    fputs(stmt->as.trait_stmt.method_param_names[i][p], out);
+                    if (stmt->as.trait_stmt.method_param_types && stmt->as.trait_stmt.method_param_types[i] && stmt->as.trait_stmt.method_param_types[i][p]) {
+                        fprintf(out, ": %s", stmt->as.trait_stmt.method_param_types[i][p]);
+                    }
+                }
+                fputc(')', out);
+                if (stmt->as.trait_stmt.method_return_types && stmt->as.trait_stmt.method_return_types[i]) {
+                    fprintf(out, " -> %s", stmt->as.trait_stmt.method_return_types[i]);
+                }
+                fputc('\n', out);
+            }
+            break;
+
+        case UF_STMT_IMPL:
+            emit_indent(out, indent);
+            if (stmt->as.impl_stmt.struct_name) {
+                fprintf(out, "impl %s for %s:\n", stmt->as.impl_stmt.trait_name, stmt->as.impl_stmt.struct_name);
+            } else {
+                fprintf(out, "impl %s:\n", stmt->as.impl_stmt.trait_name);
+            }
+            for (size_t i = 0; i < stmt->as.impl_stmt.method_count; ++i) {
+                emit_statement(out, stmt->as.impl_stmt.methods[i], indent + 1);
+            }
+            break;
+
+        case UF_STMT_ENUM:
+            emit_indent(out, indent);
+            fprintf(out, "enum %s:\n", stmt->as.enum_stmt.name);
+            for (size_t i = 0; i < stmt->as.enum_stmt.variant_count; ++i) {
+                const UfEnumVariant* v = &stmt->as.enum_stmt.variants[i];
+                emit_indent(out, indent + 1);
+                fputs(v->name, out);
+                if (v->field_count > 0) {
+                    fputc('(', out);
+                    for (size_t j = 0; j < v->field_count; ++j) {
+                        if (j > 0) fputs(", ", out);
+                        fputs(v->field_names[j], out);
+                        if (v->field_types && v->field_types[j]) {
+                            fprintf(out, ": %s", v->field_types[j]);
+                        }
+                    }
+                    fputc(')', out);
                 }
                 fputc('\n', out);
             }
@@ -512,7 +722,7 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
 
 static bool is_decl_stmt(const UfStmt* stmt) {
     if (!stmt) return false;
-    return (stmt->kind == UF_STMT_FUNCTION || stmt->kind == UF_STMT_STRUCT);
+    return (stmt->kind == UF_STMT_FUNCTION || stmt->kind == UF_STMT_STRUCT || stmt->kind == UF_STMT_ENUM || stmt->kind == UF_STMT_TRAIT || stmt->kind == UF_STMT_IMPL);
 }
 
 void uf_format_program_stream(const UfProgram* program, FILE* out) {

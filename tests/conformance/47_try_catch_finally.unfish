@@ -1,0 +1,67 @@
+# expect: 1. try normal
+# expect: 1. finally normal
+# expect: 2. try error
+# expect: 2. catch error: DivisionByZero
+# expect: 2. finally error
+# expect: 3. try no catch normal
+# expect: 3. finally no catch normal
+# expect: 4. try no catch error
+# expect: 4. finally no catch error
+# expect: 4. outer catch: DivisionByZero
+# expect: 5. standard try
+# expect: 6. outer try
+# expect: 6. inner try
+# expect: 6. inner finally
+# expect: 6. outer finally
+# expect: Done finally tests
+
+# 1. try-catch-finally normal path
+try:
+    say "1. try normal"
+catch e:
+    say "1. catch unreachable"
+finally:
+    say "1. finally normal"
+
+# 2. try-catch-finally error path
+try:
+    say "2. try error"
+    let x = 10 / 0
+catch e:
+    say "2. catch error: " + e.kind
+finally:
+    say "2. finally error"
+
+# 3. try-finally without catch (normal path)
+try:
+    say "3. try no catch normal"
+finally:
+    say "3. finally no catch normal"
+
+# 4. try-finally without catch (error path rethrown to outer catch)
+try:
+    try:
+        say "4. try no catch error"
+        let y = 10 / 0
+    finally:
+        say "4. finally no catch error"
+catch e:
+    say "4. outer catch: " + e.kind
+
+# 5. standard try-catch without finally
+try:
+    say "5. standard try"
+catch e:
+    say "5. standard catch"
+
+# 6. nested try-finally
+try:
+    say "6. outer try"
+    try:
+        say "6. inner try"
+    finally:
+        say "6. inner finally"
+finally:
+    say "6. outer finally"
+
+say "Done finally tests"

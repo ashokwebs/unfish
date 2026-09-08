@@ -9,16 +9,17 @@
 | Dynamic Tagged Union Representation (`UfValue`) | **IMPLEMENTED** | `src/runtime/uf_value.h` |
 | Primitive Types (`Null`, `Boolean`, `Number`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
 | UTF-8 Dynamic Strings (`String`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
-| First-Class Functions & Closures (`Function`) | **IMPLEMENTED** | `src/runtime/uf_value.c`, `src/runtime/uf_env.c` |
+| First-Class Functions & Closures (`Function`, `Closure`) | **IMPLEMENTED** | `src/runtime/uf_value.c`, `src/runtime/uf_env.c` |
 | Native Host Functions (`NativeFunction`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
-| String Concatenation Coercion in `+` | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c` |
-| Runtime Type Query (`type_of()`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
-| Collections (`Array`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
-| Collections (`Map`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
-| Gradual Type Annotations (`let x: Number`) | **DESIGN / PLANNED** (Phase 4) | Static checker pass |
-| User-Defined Structs / Records | **PLANNED** (Phase 4) | Record system |
+| Bytecode Functions (`BytecodeFunction`) | **IMPLEMENTED** | `src/compiler/uf_compiler.c`, `src/vm/uf_vm.c` |
+| Collections (`Array`, `Map`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
+| Error Objects (`Error`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
+| Modules (`Module`) | **IMPLEMENTED** | `src/runtime/uf_module.c` |
+| User-Defined Structs & Instances (`StructDef`, `Instance`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c` |
+| Cooperative Concurrency (`Fiber`, `Channel`) | **IMPLEMENTED** | `src/runtime/uf_fiber.c`, `src/runtime/uf_value.c` |
+| Raw Contiguous Byte Buffers (`Buffer`) | **IMPLEMENTED** | `src/runtime/uf_stdlib.c`, `src/runtime/uf_value.c` |
+| Gradual Type Annotations (`let x: Number`) | **IMPLEMENTED** | `src/semantic/uf_semantic.c` |
 | Generic Types (`Array<T>`, `Result<T, E>`) | **NOT IMPLEMENTED** | Deferred to Phase 9 |
-| Low-Level Systems Types (`i32`, `u8`, `Ptr<T>`) | **NOT IMPLEMENTED** | Deferred to Phase 10 |
 
 ---
 
@@ -27,7 +28,7 @@
 Unfish currently implements a strongly checked dynamic type model where types are properties of values:
 
 ### 2.1. Value Representation (`UfValue`) [IMPLEMENTED]
-All values fit into a 16-byte tagged union:
+All values fit into a 16-byte tagged union representing 17 distinct runtime kinds:
 ```c
 typedef enum {
     UF_VAL_NULL,
@@ -37,7 +38,16 @@ typedef enum {
     UF_VAL_FUNCTION,
     UF_VAL_NATIVE_FN,
     UF_VAL_ARRAY,
-    UF_VAL_MAP
+    UF_VAL_MAP,
+    UF_VAL_ERROR,
+    UF_VAL_MODULE,
+    UF_VAL_STRUCT_DEF,
+    UF_VAL_INSTANCE,
+    UF_VAL_BYTECODE_FN,
+    UF_VAL_CLOSURE,
+    UF_VAL_FIBER,
+    UF_VAL_CHANNEL,
+    UF_VAL_BUFFER
 } UfValueKind;
 
 struct UfValue {
@@ -50,6 +60,15 @@ struct UfValue {
         UfNativeObject native_fn;
         UfArrayObject* array;
         UfMapObject* map;
+        UfErrorObject* error;
+        UfModuleObject* module;
+        UfStructDefObject* struct_def;
+        UfInstanceObject* instance;
+        UfBytecodeFunction* bytecode_fn;
+        UfClosureObject* closure;
+        UfFiber* fiber;
+        UfChannel* channel;
+        UfBufferObject* buffer;
     } as;
 };
 ```

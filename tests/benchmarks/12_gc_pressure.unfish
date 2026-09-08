@@ -1,0 +1,13 @@
+function make_list(n):
+    let arr = []
+    let i = 0
+    while i < n:
+        arr = [arr, i]
+        i = i + 1
+    return arr
+
+let i = 0
+while i < 1000:
+    let list = make_list(100)
+    i = i + 1
+say "done"

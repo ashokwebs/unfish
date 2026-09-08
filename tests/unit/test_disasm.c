@@ -85,11 +85,11 @@ static void test_disasm_closures(void) {
     UfRuntime rt;
     uf_runtime_init(&rt, NULL);
 
-    UfBytecodeFunction* inner = uf_bytecode_fn_new(&rt, "inner_fn", 1);
+    UfBytecodeFunction* inner = uf_bytecode_fn_new(&rt, "inner_fn", 1, 1, false);
     inner->upvalue_count = 2;
     uf_chunk_write(&inner->chunk, (uint8_t)OP_RETURN, 1);
 
-    UfBytecodeFunction* outer = uf_bytecode_fn_new(&rt, "outer_fn", 0);
+    UfBytecodeFunction* outer = uf_bytecode_fn_new(&rt, "outer_fn", 0, 0, false);
     size_t const_idx = uf_chunk_add_constant(&outer->chunk, uf_val_bytecode_fn(&rt, inner));
 
     uf_chunk_write(&outer->chunk, (uint8_t)OP_CLOSURE, 5);
@@ -128,7 +128,7 @@ static void test_disasm_trace(void) {
     UfRuntime rt;
     uf_runtime_init(&rt, NULL);
 
-    UfBytecodeFunction* fn = uf_bytecode_fn_new(&rt, "trace_target", 0);
+    UfBytecodeFunction* fn = uf_bytecode_fn_new(&rt, "trace_target", 0, 0, false);
     uf_chunk_write_constant(&fn->chunk, uf_val_number(123.0), 1);
     uf_chunk_write(&fn->chunk, (uint8_t)OP_RETURN, 1);
 

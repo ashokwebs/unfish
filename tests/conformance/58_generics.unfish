@@ -1,0 +1,64 @@
+# expect: 42
+# expect: hello
+# expect: [1, 2, 3]
+# expect: key -> 100
+# expect: 99
+# expect: unfish
+# expect: age = 30
+# expect: Item: Sword
+# expect: [10, 20, 30]
+# expect: 50
+
+fn identity<T>(x: T) -> T:
+    return x
+
+say identity(42)
+say identity("hello")
+say identity([1, 2, 3])
+
+fn pair_str<A, B>(a: A, b: B) -> String:
+    return to_string(a) + " -> " + to_string(b)
+
+say pair_str("key", 100)
+
+struct Box<T>:
+    item: T
+    fn get(self) -> T:
+        return self.item
+
+let b1 = Box(99)
+say b1.get()
+
+let b2 = Box("unfish")
+say b2.get()
+
+struct Pair<K, V>:
+    first: K
+    second: V
+    fn info(self) -> String:
+        return to_string(self.first) + " = " + to_string(self.second)
+
+let p = Pair("age", 30)
+say p.info()
+
+trait Describable:
+    fn describe() -> String
+
+struct Item:
+    name: String
+
+impl Describable for Item:
+    fn describe(self) -> String:
+        return "Item: " + self.name
+
+fn print_bounded<T: Describable>(x: T):
+    say x.describe()
+
+let sword = Item("Sword")
+print_bounded(sword)
+
+let numbers: List<Number> = [10, 20, 30]
+say numbers
+
+let config: Map<String, Number> = {"timeout": 50}
+say config["timeout"]

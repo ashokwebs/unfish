@@ -1,3 +1,14 @@
+/*
+ * Unfish Cooperative Concurrency & Fiber Runtime
+ *
+ * NOTE ON CONCURRENCY MODEL (R-02):
+ * Fibers in Unfish are lightweight, cooperative coroutines (green threads),
+ * NOT preemptive OS threads. Execution is deterministic and single-threaded.
+ * Scheduling transitions occur cooperatively at explicit yield points and
+ * blocking channel operations (uf_channel_send, uf_channel_recv).
+ * There are no background OS threads or preemptive time-slicing.
+ */
+
 #include "uf_fiber.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -199,8 +210,10 @@ bool uf_channel_send(UfRuntime* rt, UfChannel* ch, UfValue val) {
     /* Buffer is full: place in circular buffer expanding if needed for educational fiber runtime */
     size_t new_cap = ch->capacity == 0 ? 4 : ch->capacity * 2;
     UfValue* new_buf = (UfValue*)malloc(sizeof(UfValue) * new_cap);
-    for (size_t i = 0; i < ch->count; ++i) {
-        new_buf[i] = ch->buffer[(ch->head + i) % ch->capacity];
+    if (ch->capacity > 0) {
+        for (size_t i = 0; i < ch->count; ++i) {
+            new_buf[i] = ch->buffer[(ch->head + i) % ch->capacity];
+        }
     }
     new_buf[ch->count] = val;
     free(ch->buffer);
@@ -216,7 +229,7 @@ bool uf_channel_recv(UfRuntime* rt, UfChannel* ch, UfValue* out_val) {
     (void)rt;
     if (!ch || !out_val) return false;
 
-    if (ch->count > 0) {
+    if (ch->count > 0 && ch->capacity > 0) {
         *out_val = ch->buffer[ch->head];
         ch->head = (ch->head + 1) % ch->capacity;
         ch->count--;
@@ -236,4 +249,121 @@ void uf_channel_close(UfRuntime* rt, UfChannel* ch) {
     (void)rt;
     if (!ch) return;
     ch->closed = true;
+}
+
+UfPromiseObject* uf_promise_create(UfRuntime* rt) {
+    UfPromiseObject* p = (UfPromiseObject*)malloc(sizeof(UfPromiseObject));
+    if (!p) return NULL;
+    p->obj.kind = UF_OBJ_PROMISE;
+    p->obj.marked = false;
+    p->obj.next = NULL;
+    p->state = UF_PROMISE_PENDING;
+    p->result = uf_val_null();
+    p->error = uf_val_null();
+    p->waiters = NULL;
+    p->waiter_count = 0;
+    p->waiter_capacity = 0;
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)p, sizeof(UfPromiseObject));
+    }
+    return p;
+}
+
+void uf_promise_free(UfPromiseObject* p) {
+    if (!p) return;
+    if (p->waiters) {
+        free(p->waiters);
+        p->waiters = NULL;
+    }
+    free(p);
+}
+
+void uf_promise_resolve(UfRuntime* rt, UfPromiseObject* p, UfValue val) {
+    if (!p || p->state != UF_PROMISE_PENDING) return;
+    p->state = UF_PROMISE_RESOLVED;
+    p->result = val;
+    if (rt && p->waiters) {
+        for (size_t i = 0; i < p->waiter_count; ++i) {
+            if (p->waiters[i]) {
+                p->waiters[i]->result = val;
+                uf_scheduler_spawn(rt, p->waiters[i]);
+            }
+        }
+        free(p->waiters);
+        p->waiters = NULL;
+        p->waiter_count = 0;
+        p->waiter_capacity = 0;
+    }
+}
+
+void uf_promise_reject(UfRuntime* rt, UfPromiseObject* p, UfValue err) {
+    if (!p || p->state != UF_PROMISE_PENDING) return;
+    p->state = UF_PROMISE_REJECTED;
+    p->error = err;
+    if (rt && p->waiters) {
+        for (size_t i = 0; i < p->waiter_count; ++i) {
+            if (p->waiters[i]) {
+                uf_scheduler_spawn(rt, p->waiters[i]);
+            }
+        }
+        free(p->waiters);
+        p->waiters = NULL;
+        p->waiter_count = 0;
+        p->waiter_capacity = 0;
+    }
+}
+
+UfValue uf_promise_await(UfRuntime* rt, UfPromiseObject* p) {
+    if (!p) return uf_val_null();
+    if (p->state == UF_PROMISE_RESOLVED) {
+        return p->result;
+    }
+    if (p->state == UF_PROMISE_REJECTED) {
+        if (rt) {
+            char* err_str = uf_val_to_string(p->error);
+            SourceSpan span = source_span_make(source_loc_make("<await>", 0, 0, 0), source_loc_make("<await>", 0, 0, 0));
+            uf_runtime_error(rt, span, "Unhandled promise rejection: %s", err_str ? err_str : "error");
+            if (err_str) free(err_str);
+        }
+        return uf_val_null();
+    }
+
+    /* If pending, cooperatively run any pending tasks until resolved or deadlock */
+    UfScheduler* s = rt ? (UfScheduler*)rt->scheduler : NULL;
+    if (s && s->current) {
+        if (p->waiter_count >= p->waiter_capacity) {
+            size_t new_cap = p->waiter_capacity == 0 ? 4 : p->waiter_capacity * 2;
+            p->waiters = (UfFiber**)realloc(p->waiters, sizeof(UfFiber*) * new_cap);
+            p->waiter_capacity = new_cap;
+        }
+        p->waiters[p->waiter_count++] = s->current;
+    }
+
+    while (p->state == UF_PROMISE_PENDING) {
+        if (s && s->run_head) {
+            uf_scheduler_run(rt);
+        } else {
+            break;
+        }
+    }
+
+    if (p->state == UF_PROMISE_RESOLVED) {
+        return p->result;
+    }
+    if (p->state == UF_PROMISE_REJECTED) {
+        if (rt) {
+            char* err_str = uf_val_to_string(p->error);
+            SourceSpan span = source_span_make(source_loc_make("<await>", 0, 0, 0), source_loc_make("<await>", 0, 0, 0));
+            uf_runtime_error(rt, span, "Unhandled promise rejection: %s", err_str ? err_str : "error");
+            if (err_str) free(err_str);
+        }
+        return uf_val_null();
+    }
+
+    if (rt) {
+        SourceSpan span = source_span_make(source_loc_make("<await>", 0, 0, 0), source_loc_make("<await>", 0, 0, 0));
+        uf_runtime_error(rt, span, "Deadlock: promise never resolved and no runnable fibers remain");
+    }
+    return uf_val_null();
 }

@@ -48,6 +48,8 @@ typedef struct UfCompiler {
     FunctionType type;
     const char* fn_name;
     size_t arity;
+    size_t min_arity;
+    bool has_rest;
 
     UfChunk* chunk;
     UfBytecodeFunction* function;

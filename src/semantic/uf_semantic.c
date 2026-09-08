@@ -59,14 +59,19 @@ static UfSymbol* resolve_symbol(const UfScope* start_scope, const char* name) {
     return NULL;
 }
 
-void uf_semantic_add_symbol_with_type(UfSemanticAnalyzer* analyzer,
-                                      const char* name,
-                                      UfSymbolKind kind,
-                                      SourceSpan span,
-                                      int arity,
-                                      const char* type_annotation,
-                                      const char* return_type,
-                                      const char** param_types) {
+void uf_semantic_add_symbol_generic(UfSemanticAnalyzer* analyzer,
+                                    const char* name,
+                                    UfSymbolKind kind,
+                                    SourceSpan span,
+                                    int arity,
+                                    int min_arity,
+                                    bool has_rest,
+                                    const char* type_annotation,
+                                    const char* return_type,
+                                    const char** param_types,
+                                    const char** type_params,
+                                    const char** type_param_bounds,
+                                    size_t type_param_count) {
     UfScope* scope = analyzer->current_scope;
     uint32_t h = hash_symbol(name);
     size_t idx = h & (scope->bucket_count - 1);
@@ -76,15 +81,35 @@ void uf_semantic_add_symbol_with_type(UfSemanticAnalyzer* analyzer,
     sym->kind = kind;
     sym->span = span;
     sym->arity = arity;
+    sym->min_arity = (min_arity >= 0) ? min_arity : arity;
+    sym->has_rest = has_rest;
     sym->type_annotation = type_annotation;
     sym->return_type = return_type;
     sym->param_types = param_types;
+    sym->trait_bound = NULL;
+    sym->type_params = type_params;
+    sym->type_param_bounds = type_param_bounds;
+    sym->type_param_count = type_param_count;
     sym->next = scope->buckets[idx];
     scope->buckets[idx] = sym;
 }
 
+void uf_semantic_add_symbol_with_type(UfSemanticAnalyzer* analyzer,
+                                      const char* name,
+                                      UfSymbolKind kind,
+                                      SourceSpan span,
+                                      int arity,
+                                      int min_arity,
+                                      bool has_rest,
+                                      const char* type_annotation,
+                                      const char* return_type,
+                                      const char** param_types) {
+    uf_semantic_add_symbol_generic(analyzer, name, kind, span, arity, min_arity, has_rest,
+                                   type_annotation, return_type, param_types, NULL, NULL, 0);
+}
+
 void uf_semantic_add_symbol(UfSemanticAnalyzer* analyzer, const char* name, UfSymbolKind kind, SourceSpan span, int arity) {
-    uf_semantic_add_symbol_with_type(analyzer, name, kind, span, arity, NULL, NULL, NULL);
+    uf_semantic_add_symbol_with_type(analyzer, name, kind, span, arity, arity, false, NULL, NULL, NULL);
 }
 
 static void add_symbol(UfSemanticAnalyzer* analyzer, const char* name, UfSymbolKind kind, SourceSpan span, int arity) {
@@ -164,6 +189,49 @@ static void register_builtins(UfSemanticAnalyzer* analyzer) {
     add_symbol(analyzer, "some",    UF_SYM_BUILTIN, span, 2);
     add_symbol(analyzer, "clock",   UF_SYM_BUILTIN, span, 0);
     add_symbol(analyzer, "assert",  UF_SYM_BUILTIN, span, -1);
+    add_symbol(analyzer, "run_async", UF_SYM_BUILTIN, span, -1);
+}
+
+static void register_trait(UfSemanticAnalyzer* analyzer, const char* name, SourceSpan span,
+                           const char** method_names, size_t* method_param_counts,
+                           const char*** method_param_names, const char*** method_param_types,
+                           const char** method_return_types, size_t method_count) {
+    UfTraitInfo* t = (UfTraitInfo*)uf_arena_alloc(analyzer->arena, sizeof(UfTraitInfo));
+    t->name = name;
+    t->span = span;
+    t->method_names = method_names;
+    t->method_param_counts = method_param_counts;
+    t->method_param_names = method_param_names;
+    t->method_param_types = method_param_types;
+    t->method_return_types = method_return_types;
+    t->method_count = method_count;
+    t->next = analyzer->traits;
+    analyzer->traits = t;
+}
+
+static UfTraitInfo* find_trait(UfSemanticAnalyzer* analyzer, const char* name) {
+    for (UfTraitInfo* t = analyzer->traits; t != NULL; t = t->next) {
+        if (strcmp(t->name, name) == 0) return t;
+    }
+    return NULL;
+}
+
+static void register_trait_impl(UfSemanticAnalyzer* analyzer, const char* struct_name, const char* trait_name) {
+    UfTraitImplInfo* ti = (UfTraitImplInfo*)uf_arena_alloc(analyzer->arena, sizeof(UfTraitImplInfo));
+    ti->struct_name = struct_name;
+    ti->trait_name = trait_name;
+    ti->next = analyzer->trait_impls;
+    analyzer->trait_impls = ti;
+}
+
+static bool struct_implements_trait(UfSemanticAnalyzer* analyzer, const char* struct_name, const char* trait_name) {
+    if (!analyzer || !struct_name || !trait_name) return false;
+    for (UfTraitImplInfo* ti = analyzer->trait_impls; ti != NULL; ti = ti->next) {
+        if (strcmp(ti->struct_name, struct_name) == 0 && strcmp(ti->trait_name, trait_name) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void uf_semantic_init(UfSemanticAnalyzer* analyzer,
@@ -178,6 +246,9 @@ void uf_semantic_init(UfSemanticAnalyzer* analyzer,
     analyzer->had_error = false;
     analyzer->strict_mode = false;
     analyzer->current_fn_return_type = NULL;
+    analyzer->traits = NULL;
+    analyzer->trait_impls = NULL;
+    analyzer->is_in_async_fn = false;
 
     /* Create global scope and register built-in symbols */
     analyzer->global_scope = push_scope(analyzer, false);
@@ -187,10 +258,53 @@ void uf_semantic_init(UfSemanticAnalyzer* analyzer,
 
 static bool is_valid_type_name(UfSemanticAnalyzer* analyzer, const char* name) {
     if (!name) return false;
+
+    /* Check for parameterized types e.g. "Box<Number>" or "Map<String, Number>" */
+    const char* lt = strchr(name, '<');
+    if (lt) {
+        size_t base_len = (size_t)(lt - name);
+        char base[64];
+        if (base_len >= sizeof(base)) return false;
+        memcpy(base, name, base_len);
+        base[base_len] = '\0';
+        if (!is_valid_type_name(analyzer, base)) return false;
+
+        /* Check type arguments inside < ... > */
+        const char* p = lt + 1;
+        while (*p && *p != '>') {
+            while (*p == ' ' || *p == ',') p++;
+            if (*p == '>' || *p == '\0') break;
+            const char* start = p;
+            int depth = 0;
+            while (*p) {
+                if (*p == '<') depth++;
+                else if (*p == '>') {
+                    if (depth == 0) break;
+                    depth--;
+                } else if (*p == ',' && depth == 0) {
+                    break;
+                }
+                p++;
+            }
+            size_t arg_len = (size_t)(p - start);
+            char arg[128];
+            if (arg_len >= sizeof(arg)) return false;
+            memcpy(arg, start, arg_len);
+            arg[arg_len] = '\0';
+            while (arg_len > 0 && arg[arg_len - 1] == ' ') {
+                arg[--arg_len] = '\0';
+            }
+            if (!is_valid_type_name(analyzer, arg)) return false;
+            if (*p == ',') p++;
+        }
+        return true;
+    }
+
     if (strcmp(name, "Number") == 0 ||
         strcmp(name, "String") == 0 ||
         strcmp(name, "Boolean") == 0 ||
         strcmp(name, "Array") == 0 ||
+        strcmp(name, "List") == 0 ||
         strcmp(name, "Map") == 0 ||
         strcmp(name, "Function") == 0 ||
         strcmp(name, "Null") == 0 ||
@@ -199,16 +313,85 @@ static bool is_valid_type_name(UfSemanticAnalyzer* analyzer, const char* name) {
         return true;
     }
     UfSymbol* sym = resolve_symbol(analyzer->current_scope, name);
-    if (sym && sym->kind == UF_SYM_STRUCT) {
+    if (sym && (sym->kind == UF_SYM_STRUCT || sym->kind == UF_SYM_ENUM || sym->kind == UF_SYM_TRAIT || sym->kind == UF_SYM_TYPE_PARAM)) {
+        return true;
+    }
+    if (find_trait(analyzer, name) != NULL) {
         return true;
     }
     return false;
 }
 
-static bool types_compatible(const char* expected, const char* actual) {
+static bool types_compatible(UfSemanticAnalyzer* analyzer, const char* expected, const char* actual) {
     if (!expected || !actual) return true;
     if (strcmp(expected, "Any") == 0 || strcmp(actual, "Any") == 0) return true;
-    return strcmp(expected, actual) == 0;
+    if (strcmp(expected, actual) == 0) return true;
+
+    /* List and Array are synonyms */
+    if ((strcmp(expected, "List") == 0 && strcmp(actual, "Array") == 0) ||
+        (strcmp(expected, "Array") == 0 && strcmp(actual, "List") == 0)) {
+        return true;
+    }
+
+    /* Check if expected is a type parameter */
+    UfSymbol* exp_sym = resolve_symbol(analyzer->current_scope, expected);
+    if (exp_sym && exp_sym->kind == UF_SYM_TYPE_PARAM) {
+        if (!exp_sym->trait_bound) {
+            return true;
+        }
+        if (strcmp(actual, exp_sym->trait_bound) == 0) return true;
+        if (struct_implements_trait(analyzer, actual, exp_sym->trait_bound)) return true;
+        return false;
+    }
+
+    /* Check if actual is a type parameter */
+    UfSymbol* act_sym = resolve_symbol(analyzer->current_scope, actual);
+    if (act_sym && act_sym->kind == UF_SYM_TYPE_PARAM) {
+        if (!act_sym->trait_bound) {
+            return true;
+        }
+        if (strcmp(expected, act_sym->trait_bound) == 0) return true;
+        return false;
+    }
+
+    /* Check trait implementation */
+    if (struct_implements_trait(analyzer, actual, expected)) return true;
+
+    /* Parameterized types: e.g. Box<T> or List<T> */
+    const char* exp_lt = strchr(expected, '<');
+    const char* act_lt = strchr(actual, '<');
+    if (exp_lt && act_lt) {
+        size_t exp_base_len = (size_t)(exp_lt - expected);
+        size_t act_base_len = (size_t)(act_lt - actual);
+        char exp_base[64], act_base[64];
+        if (exp_base_len < sizeof(exp_base) && act_base_len < sizeof(act_base)) {
+            memcpy(exp_base, expected, exp_base_len);
+            exp_base[exp_base_len] = '\0';
+            memcpy(act_base, actual, act_base_len);
+            act_base[act_base_len] = '\0';
+            if (types_compatible(analyzer, exp_base, act_base)) {
+                return true;
+            }
+        }
+    } else if (exp_lt && !act_lt) {
+        size_t exp_base_len = (size_t)(exp_lt - expected);
+        char exp_base[64];
+        if (exp_base_len < sizeof(exp_base)) {
+            memcpy(exp_base, expected, exp_base_len);
+            exp_base[exp_base_len] = '\0';
+            if (types_compatible(analyzer, exp_base, actual)) return true;
+        }
+    } else if (!exp_lt && act_lt) {
+        size_t act_base_len = (size_t)(act_lt - actual);
+        char act_base[64];
+        if (act_base_len < sizeof(act_base)) {
+            memcpy(act_base, actual, act_base_len);
+            act_base[act_base_len] = '\0';
+            if (types_compatible(analyzer, expected, act_base)) return true;
+        }
+    }
+
+    return false;
 }
 
 static void report_type_mismatch(UfSemanticAnalyzer* analyzer, SourceSpan span, const char* msg) {
@@ -232,9 +415,12 @@ static const char* infer_expr_type(UfSemanticAnalyzer* analyzer, const UfExpr* e
         case UF_EXPR_LITERAL_BOOL:   return "Boolean";
         case UF_EXPR_LITERAL_NUMBER: return "Number";
         case UF_EXPR_LITERAL_STRING: return "String";
+        case UF_EXPR_STRING_INTERP:  return "String";
         case UF_EXPR_ARRAY:          return "Array";
         case UF_EXPR_MAP:            return "Map";
         case UF_EXPR_FUNCTION:       return "Function";
+        case UF_EXPR_SPREAD:         return infer_expr_type(analyzer, expr->as.spread.operand);
+        case UF_EXPR_AWAIT:          return infer_expr_type(analyzer, expr->as.await_expr.value);
         case UF_EXPR_GROUPING:
             return infer_expr_type(analyzer, expr->as.grouping.inner);
 
@@ -304,6 +490,19 @@ static const char* infer_expr_type(UfSemanticAnalyzer* analyzer, const UfExpr* e
                         return sym->name;
                     }
                     if (sym->return_type) {
+                        if (sym->type_param_count > 0 && sym->type_params) {
+                            for (size_t tp = 0; tp < sym->type_param_count; ++tp) {
+                                if (strcmp(sym->return_type, sym->type_params[tp]) == 0) {
+                                    if (sym->param_types) {
+                                        for (size_t p = 0; p < (size_t)sym->arity && p < expr->as.call.argc; ++p) {
+                                            if (sym->param_types[p] && strcmp(sym->param_types[p], sym->type_params[tp]) == 0) {
+                                                return infer_expr_type(analyzer, expr->as.call.args[p]);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         return sym->return_type;
                     }
                 }
@@ -398,38 +597,86 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
 
         case UF_EXPR_CALL: {
             analyze_expr(analyzer, expr->as.call.callee);
+            bool has_spread_arg = false;
             for (size_t i = 0; i < expr->as.call.argc; ++i) {
                 analyze_expr(analyzer, expr->as.call.args[i]);
+                if (expr->as.call.args[i]->kind == UF_EXPR_SPREAD) {
+                    has_spread_arg = true;
+                }
             }
 
-            /* Arity and type check if callee is a direct identifier */
-            if (expr->as.call.callee->kind == UF_EXPR_IDENTIFIER) {
+            /* Arity and type check if callee is a direct identifier and no spread args */
+            if (!has_spread_arg && expr->as.call.callee->kind == UF_EXPR_IDENTIFIER) {
                 const char* fn_name = expr->as.call.callee->as.identifier_name;
                 UfSymbol* sym = resolve_symbol(analyzer->current_scope, fn_name);
-                if (sym && (sym->kind == UF_SYM_FUNCTION || sym->kind == UF_SYM_BUILTIN || sym->kind == UF_SYM_STRUCT)) {
-                    if (sym->arity >= 0 && (int)expr->as.call.argc != sym->arity) {
+                if (sym && (sym->kind == UF_SYM_FUNCTION || sym->kind == UF_SYM_BUILTIN || sym->kind == UF_SYM_STRUCT || sym->kind == UF_SYM_ENUM_VARIANT)) {
+                    int min_a = (sym->min_arity >= 0) ? sym->min_arity : sym->arity;
+                    if (sym->has_rest) {
+                        if ((int)expr->as.call.argc < min_a) {
+                            analyzer->had_error = true;
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "Function '%s' expects at least %d argument%s, but %zu %s provided",
+                                     fn_name, min_a, min_a == 1 ? "" : "s",
+                                     expr->as.call.argc, expr->as.call.argc == 1 ? "was" : "were");
+                            uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, expr->span, msg, NULL);
+                        }
+                    } else if (sym->arity >= 0 && ((int)expr->as.call.argc < min_a || (int)expr->as.call.argc > sym->arity)) {
                         analyzer->had_error = true;
                         char msg[256];
                         if (sym->kind == UF_SYM_STRUCT) {
                             snprintf(msg, sizeof(msg), "Struct '%s' constructor expects %d argument%s, but %zu %s provided",
                                      fn_name, sym->arity, sym->arity == 1 ? "" : "s",
                                      expr->as.call.argc, expr->as.call.argc == 1 ? "was" : "were");
-                        } else {
+                        } else if (sym->kind == UF_SYM_ENUM_VARIANT) {
+                            snprintf(msg, sizeof(msg), "Enum variant '%s' expects %d argument%s, but %zu %s provided",
+                                     fn_name, sym->arity, sym->arity == 1 ? "" : "s",
+                                     expr->as.call.argc, expr->as.call.argc == 1 ? "was" : "were");
+                        } else if (min_a == sym->arity) {
                             snprintf(msg, sizeof(msg), "Function '%s' expects %d argument%s, but %zu %s provided",
                                      fn_name, sym->arity, sym->arity == 1 ? "" : "s",
+                                     expr->as.call.argc, expr->as.call.argc == 1 ? "was" : "were");
+                        } else {
+                            snprintf(msg, sizeof(msg), "Function '%s' expects %d to %d arguments, but %zu %s provided",
+                                     fn_name, min_a, sym->arity,
                                      expr->as.call.argc, expr->as.call.argc == 1 ? "was" : "were");
                         }
                         uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, expr->span, msg, NULL);
                     } else if (sym->param_types) {
                         for (size_t i = 0; i < expr->as.call.argc && i < (size_t)sym->arity; ++i) {
                             const char* expected_pt = sym->param_types[i];
-                            if (expected_pt && is_valid_type_name(analyzer, expected_pt)) {
-                                const char* arg_type = infer_expr_type(analyzer, expr->as.call.args[i]);
-                                if (!types_compatible(expected_pt, arg_type)) {
-                                    char msg[256];
-                                    snprintf(msg, sizeof(msg), "Type mismatch in argument %zu of call to '%s': expected '%s', got '%s'",
-                                             i + 1, fn_name, expected_pt, arg_type);
-                                    report_type_mismatch(analyzer, expr->as.call.args[i]->span, msg);
+                            if (expected_pt) {
+                                bool is_tp = false;
+                                const char* bound = NULL;
+                                if (sym->type_param_count > 0 && sym->type_params) {
+                                    for (size_t tp = 0; tp < sym->type_param_count; ++tp) {
+                                        if (strcmp(expected_pt, sym->type_params[tp]) == 0) {
+                                            is_tp = true;
+                                            if (sym->type_param_bounds) {
+                                                bound = sym->type_param_bounds[tp];
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (is_tp) {
+                                    if (bound) {
+                                        const char* arg_type = infer_expr_type(analyzer, expr->as.call.args[i]);
+                                        if (strcmp(arg_type, "Any") != 0 && !types_compatible(analyzer, bound, arg_type)) {
+                                            analyzer->had_error = true;
+                                            char msg[256];
+                                            snprintf(msg, sizeof(msg), "Type '%s' does not satisfy trait bound '%s' for type parameter '%s' in call to '%s'",
+                                                     arg_type, bound, expected_pt, fn_name);
+                                            uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, expr->as.call.args[i]->span, msg, NULL);
+                                        }
+                                    }
+                                } else if (is_valid_type_name(analyzer, expected_pt)) {
+                                    const char* arg_type = infer_expr_type(analyzer, expr->as.call.args[i]);
+                                    if (!types_compatible(analyzer, expected_pt, arg_type)) {
+                                        char msg[256];
+                                        snprintf(msg, sizeof(msg), "Type mismatch in argument %zu of call to '%s': expected '%s', got '%s'",
+                                                 i + 1, fn_name, expected_pt, arg_type);
+                                        report_type_mismatch(analyzer, expr->as.call.args[i]->span, msg);
+                                    }
                                 }
                             }
                         }
@@ -457,8 +704,14 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
         case UF_EXPR_MAP:
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
                 analyze_expr(analyzer, expr->as.map_lit.keys[i]);
-                analyze_expr(analyzer, expr->as.map_lit.values[i]);
+                if (expr->as.map_lit.values[i]) {
+                    analyze_expr(analyzer, expr->as.map_lit.values[i]);
+                }
             }
+            break;
+
+        case UF_EXPR_SPREAD:
+            analyze_expr(analyzer, expr->as.spread.operand);
             break;
 
         case UF_EXPR_FUNCTION: {
@@ -487,9 +740,20 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
                 }
             }
 
+            if (expr->as.fn_expr.param_defaults) {
+                for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
+                    if (expr->as.fn_expr.param_defaults[i]) {
+                        analyze_expr(analyzer, expr->as.fn_expr.param_defaults[i]);
+                    }
+                }
+            }
+
             if (fn_name) {
                 uf_semantic_add_symbol_with_type(analyzer, fn_name, UF_SYM_FUNCTION, expr->span,
-                                                (int)expr->as.fn_expr.param_count, "Function", return_type, param_types);
+                                                (int)expr->as.fn_expr.param_count,
+                                                (int)expr->as.fn_expr.min_param_count,
+                                                expr->as.fn_expr.has_rest,
+                                                "Function", return_type, param_types);
             }
 
             push_scope(analyzer, true);
@@ -506,13 +770,33 @@ static void analyze_expr(UfSemanticAnalyzer* analyzer, UfExpr* expr) {
                     snprintf(msg, sizeof(msg), "Duplicate parameter name '%s' in function", param);
                     uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, expr->span, msg, NULL);
                 } else {
-                    uf_semantic_add_symbol_with_type(analyzer, param, UF_SYM_VAR, expr->span, -1, ptype, NULL, NULL);
+                    uf_semantic_add_symbol_with_type(analyzer, param, UF_SYM_VAR, expr->span, -1, -1, false, ptype, NULL, NULL);
                 }
             }
 
+            bool prev_async = analyzer->is_in_async_fn;
+            analyzer->is_in_async_fn = expr->as.fn_expr.is_async;
             analyze_stmt(analyzer, expr->as.fn_expr.body);
+            analyzer->is_in_async_fn = prev_async;
             analyzer->current_fn_return_type = prev_fn_return_type;
             pop_scope(analyzer);
+            break;
+        }
+
+        case UF_EXPR_STRING_INTERP:
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                analyze_expr(analyzer, expr->as.string_interp.parts[i]);
+            }
+            break;
+
+        case UF_EXPR_AWAIT: {
+            if (!analyzer->is_in_async_fn) {
+                analyzer->had_error = true;
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, expr->span,
+                               "'await' can only be used inside an async function",
+                               "Define the enclosing function as 'async function ...'");
+            }
+            analyze_expr(analyzer, expr->as.await_expr.value);
             break;
         }
     }
@@ -526,21 +810,28 @@ static void bind_pattern_variables(UfSemanticAnalyzer* analyzer, UfPattern* pat)
             break;
         case UF_PAT_WILDCARD:
             break;
-        case UF_PAT_VARIABLE:
+        case UF_PAT_VARIABLE: {
+            UfSymbol* s = resolve_symbol(analyzer->current_scope, pat->as.var_name);
+            if (s && s->kind == UF_SYM_ENUM_VARIANT && s->arity == 0) {
+                /* Matches unit enum variant; does not bind a local variable */
+                break;
+            }
             add_symbol(analyzer, pat->as.var_name, UF_SYM_VAR, pat->span, -1);
             break;
+        }
         case UF_PAT_STRUCT: {
             const char* sname = pat->as.struct_pat.struct_name;
             UfSymbol* s = resolve_symbol(analyzer->current_scope, sname);
-            if (!s || s->kind != UF_SYM_STRUCT) {
+            if (!s || (s->kind != UF_SYM_STRUCT && s->kind != UF_SYM_ENUM_VARIANT)) {
                 analyzer->had_error = true;
                 char msg[256];
-                snprintf(msg, sizeof(msg), "Unknown struct '%s' in pattern", sname);
+                snprintf(msg, sizeof(msg), "Unknown struct or enum variant '%s' in pattern", sname);
                 uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, pat->span, msg, NULL);
             } else if (s->arity >= 0 && (int)pat->as.struct_pat.field_count != s->arity) {
                 analyzer->had_error = true;
                 char msg[256];
-                snprintf(msg, sizeof(msg), "Struct '%s' pattern expects %d field%s, but %zu provided",
+                snprintf(msg, sizeof(msg), "%s '%s' pattern expects %d field%s, but %zu provided",
+                         s->kind == UF_SYM_STRUCT ? "Struct" : "Enum variant",
                          s->name, s->arity, s->arity == 1 ? "" : "s", pat->as.struct_pat.field_count);
                 uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, pat->span, msg, NULL);
             }
@@ -548,6 +839,142 @@ static void bind_pattern_variables(UfSemanticAnalyzer* analyzer, UfPattern* pat)
                 bind_pattern_variables(analyzer, pat->as.struct_pat.field_patterns[i]);
             }
             break;
+        }
+        case UF_PAT_ARRAY:
+            for (size_t i = 0; i < pat->as.array_pat.count; ++i) {
+                bind_pattern_variables(analyzer, pat->as.array_pat.elements[i]);
+            }
+            break;
+        case UF_PAT_MAP:
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                bind_pattern_variables(analyzer, pat->as.map_pat.values[i]);
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                bind_pattern_variables(analyzer, pat->as.map_pat.rest_pattern);
+            }
+            break;
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                bind_pattern_variables(analyzer, pat->as.rest_pat.subpattern);
+            }
+            break;
+    }
+}
+
+static void check_pattern_assign_targets(UfSemanticAnalyzer* analyzer, const UfPattern* pat, SourceSpan span) {
+    if (!pat) return;
+    switch (pat->kind) {
+        case UF_PAT_VARIABLE: {
+            const char* name = pat->as.var_name;
+            UfSymbol* sym = resolve_symbol(analyzer->current_scope, name);
+            if (!sym) {
+                analyzer->had_error = true;
+                const char* closest = find_closest_symbol(analyzer->current_scope, name);
+                char hint_buf[256] = {0};
+                if (closest) {
+                    snprintf(hint_buf, sizeof(hint_buf), "Did you mean '%s'?", closest);
+                } else {
+                    snprintf(hint_buf, sizeof(hint_buf), "Declare '%s' with 'let %s = ...' before assigning to it", name, name);
+                }
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot assign to undefined identifier '%s'", name);
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, span, msg, hint_buf);
+            }
+            break;
+        }
+        case UF_PAT_WILDCARD:
+        case UF_PAT_LITERAL:
+            break;
+        case UF_PAT_ARRAY:
+            for (size_t i = 0; i < pat->as.array_pat.count; ++i) {
+                check_pattern_assign_targets(analyzer, pat->as.array_pat.elements[i], span);
+            }
+            break;
+        case UF_PAT_MAP:
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                check_pattern_assign_targets(analyzer, pat->as.map_pat.values[i], span);
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                check_pattern_assign_targets(analyzer, pat->as.map_pat.rest_pattern, span);
+            }
+            break;
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                check_pattern_assign_targets(analyzer, pat->as.rest_pat.subpattern, span);
+            }
+            break;
+        case UF_PAT_STRUCT:
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                check_pattern_assign_targets(analyzer, pat->as.struct_pat.field_patterns[i], span);
+            }
+            break;
+    }
+}
+
+static void validate_trait_methods(UfSemanticAnalyzer* analyzer, const char* struct_name,
+                                   UfTraitInfo* trait, UfStmt* impl_stmt, SourceSpan report_span) {
+    for (size_t req = 0; req < trait->method_count; ++req) {
+        const char* req_mname = trait->method_names[req];
+        bool found = false;
+        for (size_t m = 0; m < impl_stmt->as.impl_stmt.method_count; ++m) {
+            UfStmt* mstmt = impl_stmt->as.impl_stmt.methods[m];
+            if (strcmp(mstmt->as.function_stmt.name, req_mname) == 0) {
+                found = true;
+                size_t trait_pcount = trait->method_param_counts[req];
+                bool trait_has_self = (trait_pcount > 0 && trait->method_param_names &&
+                                       trait->method_param_names[req] &&
+                                       trait->method_param_names[req][0] &&
+                                       strcmp(trait->method_param_names[req][0], "self") == 0);
+                size_t expected_params = trait_has_self ? trait_pcount : (trait_pcount + 1);
+
+                if (mstmt->as.function_stmt.param_count != expected_params) {
+                    analyzer->had_error = true;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Method '%s' on struct '%s' has %zu parameter(s), but trait '%s' requires %zu",
+                             req_mname, struct_name, mstmt->as.function_stmt.param_count, trait->name, expected_params);
+                    uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, mstmt->span, msg, NULL);
+                } else {
+                    /* Check parameter types if specified */
+                    for (size_t p = 0; p < trait_pcount; ++p) {
+                        size_t m_pidx = trait_has_self ? p : (p + 1);
+                        if (trait->method_param_types && trait->method_param_types[req] &&
+                            trait->method_param_types[req][p] &&
+                            mstmt->as.function_stmt.param_types &&
+                            mstmt->as.function_stmt.param_types[m_pidx]) {
+                            const char* trait_ptype = trait->method_param_types[req][p];
+                            const char* m_ptype = mstmt->as.function_stmt.param_types[m_pidx];
+                            if (!types_compatible(analyzer, trait_ptype, m_ptype)) {
+                                analyzer->had_error = true;
+                                char msg[256];
+                                snprintf(msg, sizeof(msg), "Method '%s' parameter '%s' on struct '%s' has type '%s', but trait '%s' requires '%s'",
+                                         req_mname, mstmt->as.function_stmt.params[m_pidx], struct_name, m_ptype, trait->name, trait_ptype);
+                                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, mstmt->span, msg, NULL);
+                            }
+                        }
+                    }
+                    /* Check return type if specified */
+                    if (trait->method_return_types && trait->method_return_types[req] &&
+                        mstmt->as.function_stmt.return_type) {
+                        const char* trait_rtype = trait->method_return_types[req];
+                        const char* m_rtype = mstmt->as.function_stmt.return_type;
+                        if (!types_compatible(analyzer, trait_rtype, m_rtype)) {
+                            analyzer->had_error = true;
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "Method '%s' on struct '%s' has return type '%s', but trait '%s' requires '%s'",
+                                     req_mname, struct_name, m_rtype, trait->name, trait_rtype);
+                            uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, mstmt->span, msg, NULL);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        if (!found) {
+            analyzer->had_error = true;
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Struct '%s' does not implement required method '%s' of trait '%s'",
+                     struct_name, req_mname, trait->name);
+            uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, report_span, msg, NULL);
         }
     }
 }
@@ -557,6 +984,14 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
 
     switch (stmt->kind) {
         case UF_STMT_LET: {
+            if (stmt->as.let_stmt.pattern) {
+                if (stmt->as.let_stmt.init) {
+                    analyze_expr(analyzer, stmt->as.let_stmt.init);
+                }
+                bind_pattern_variables(analyzer, stmt->as.let_stmt.pattern);
+                break;
+            }
+
             const char* name = stmt->as.let_stmt.name;
             const char* type_annot = stmt->as.let_stmt.type_annotation;
 
@@ -582,19 +1017,30 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
 
                 if (type_annot && is_valid_type_name(analyzer, type_annot)) {
                     const char* init_type = infer_expr_type(analyzer, stmt->as.let_stmt.init);
-                    if (!types_compatible(type_annot, init_type)) {
+                    if (!types_compatible(analyzer, type_annot, init_type)) {
                         char msg[256];
                         snprintf(msg, sizeof(msg), "Type mismatch in variable declaration: expected '%s', got '%s'", type_annot, init_type);
                         report_type_mismatch(analyzer, stmt->span, msg);
                     }
+                } else if (!type_annot) {
+                    const char* inferred = infer_expr_type(analyzer, stmt->as.let_stmt.init);
+                    if (inferred && strcmp(inferred, "Any") != 0) {
+                        type_annot = inferred;
+                    }
                 }
             }
 
-            uf_semantic_add_symbol_with_type(analyzer, name, UF_SYM_VAR, stmt->span, -1, type_annot, NULL, NULL);
+            uf_semantic_add_symbol_with_type(analyzer, name, UF_SYM_VAR, stmt->span, -1, -1, false, type_annot, NULL, NULL);
             break;
         }
 
         case UF_STMT_ASSIGN: {
+            if (stmt->as.assign_stmt.pattern) {
+                analyze_expr(analyzer, stmt->as.assign_stmt.value);
+                check_pattern_assign_targets(analyzer, stmt->as.assign_stmt.pattern, stmt->span);
+                break;
+            }
+
             const char* name = stmt->as.assign_stmt.name;
             UfSymbol* sym = resolve_symbol(analyzer->current_scope, name);
             if (!sym) {
@@ -612,7 +1058,7 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
             } else if (sym->type_annotation && is_valid_type_name(analyzer, sym->type_annotation)) {
                 analyze_expr(analyzer, stmt->as.assign_stmt.value);
                 const char* val_type = infer_expr_type(analyzer, stmt->as.assign_stmt.value);
-                if (!types_compatible(sym->type_annotation, val_type)) {
+                if (!types_compatible(analyzer, sym->type_annotation, val_type)) {
                     char msg[256];
                     snprintf(msg, sizeof(msg), "Type mismatch in assignment: expected '%s', got '%s'", sym->type_annotation, val_type);
                     report_type_mismatch(analyzer, stmt->span, msg);
@@ -703,6 +1149,57 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
             const char* fn_name = stmt->as.function_stmt.name;
             const char* return_type = stmt->as.function_stmt.return_type;
             const char** param_types = stmt->as.function_stmt.param_types;
+            size_t type_param_count = stmt->as.function_stmt.type_param_count;
+            const char** type_params = stmt->as.function_stmt.type_params;
+            const char** type_param_bounds = stmt->as.function_stmt.type_param_bounds;
+
+            /* Check trait bounds on type parameters exist */
+            if (type_param_bounds) {
+                for (size_t tp = 0; tp < type_param_count; ++tp) {
+                    if (type_param_bounds[tp] && !find_trait(analyzer, type_param_bounds[tp])) {
+                        analyzer->had_error = true;
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Trait '%s' not found for type parameter '%s'",
+                                 type_param_bounds[tp], type_params[tp]);
+                        uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span, msg, NULL);
+                    }
+                }
+            }
+
+            /* Register function in enclosing scope first to permit recursion */
+            uf_semantic_add_symbol_generic(analyzer, fn_name, UF_SYM_FUNCTION, stmt->span,
+                                           (int)stmt->as.function_stmt.param_count,
+                                           (int)stmt->as.function_stmt.min_param_count,
+                                           stmt->as.function_stmt.has_rest,
+                                           "Function", return_type, param_types,
+                                           type_params, type_param_bounds, type_param_count);
+
+            /* Push function scope */
+            push_scope(analyzer, true);
+            const char* prev_fn_return_type = analyzer->current_fn_return_type;
+            analyzer->current_fn_return_type = return_type;
+
+            /* Register type parameters in function scope */
+            for (size_t tp = 0; tp < type_param_count; ++tp) {
+                UfSymbol* ts = (UfSymbol*)uf_arena_alloc(analyzer->arena, sizeof(UfSymbol));
+                ts->name = type_params[tp];
+                ts->kind = UF_SYM_TYPE_PARAM;
+                ts->span = stmt->span;
+                ts->arity = -1;
+                ts->min_arity = -1;
+                ts->has_rest = false;
+                ts->type_annotation = NULL;
+                ts->return_type = NULL;
+                ts->param_types = NULL;
+                ts->trait_bound = type_param_bounds ? type_param_bounds[tp] : NULL;
+                ts->type_params = NULL;
+                ts->type_param_bounds = NULL;
+                ts->type_param_count = 0;
+                uint32_t th = hash_symbol(ts->name);
+                size_t tidx = th & (analyzer->current_scope->bucket_count - 1);
+                ts->next = analyzer->current_scope->buckets[tidx];
+                analyzer->current_scope->buckets[tidx] = ts;
+            }
 
             /* Check return type validity */
             if (return_type && !is_valid_type_name(analyzer, return_type)) {
@@ -727,14 +1224,14 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
                 }
             }
 
-            /* Register function in enclosing scope first to permit recursion */
-            uf_semantic_add_symbol_with_type(analyzer, fn_name, UF_SYM_FUNCTION, stmt->span,
-                                            (int)stmt->as.function_stmt.param_count, "Function", return_type, param_types);
-
-            /* Push function scope */
-            push_scope(analyzer, true);
-            const char* prev_fn_return_type = analyzer->current_fn_return_type;
-            analyzer->current_fn_return_type = return_type;
+            /* Analyze default parameter expressions in enclosing scope */
+            if (stmt->as.function_stmt.param_defaults) {
+                for (size_t i = 0; i < stmt->as.function_stmt.param_count; ++i) {
+                    if (stmt->as.function_stmt.param_defaults[i]) {
+                        analyze_expr(analyzer, stmt->as.function_stmt.param_defaults[i]);
+                    }
+                }
+            }
 
             /* Check parameter uniqueness */
             for (size_t i = 0; i < stmt->as.function_stmt.param_count; ++i) {
@@ -747,11 +1244,14 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
                     snprintf(msg, sizeof(msg), "Duplicate parameter name '%s' in function '%s'", param, fn_name);
                     uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span, msg, NULL);
                 } else {
-                    uf_semantic_add_symbol_with_type(analyzer, param, UF_SYM_VAR, stmt->span, -1, ptype, NULL, NULL);
+                    uf_semantic_add_symbol_with_type(analyzer, param, UF_SYM_VAR, stmt->span, -1, -1, false, ptype, NULL, NULL);
                 }
             }
 
+            bool prev_async = analyzer->is_in_async_fn;
+            analyzer->is_in_async_fn = stmt->as.function_stmt.is_async;
             analyze_stmt(analyzer, stmt->as.function_stmt.body);
+            analyzer->is_in_async_fn = prev_async;
             analyzer->current_fn_return_type = prev_fn_return_type;
             pop_scope(analyzer);
             break;
@@ -769,7 +1269,7 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
             }
             if (analyzer->current_fn_return_type && is_valid_type_name(analyzer, analyzer->current_fn_return_type)) {
                 const char* val_type = stmt->as.return_stmt.value ? infer_expr_type(analyzer, stmt->as.return_stmt.value) : "Null";
-                if (!types_compatible(analyzer->current_fn_return_type, val_type)) {
+                if (!types_compatible(analyzer, analyzer->current_fn_return_type, val_type)) {
                     char msg[256];
                     snprintf(msg, sizeof(msg), "Type mismatch in return statement: expected '%s', got '%s'",
                              analyzer->current_fn_return_type, val_type);
@@ -786,12 +1286,17 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
 
         case UF_STMT_TRY_CATCH:
             analyze_stmt(analyzer, stmt->as.try_catch.try_block);
-            push_scope(analyzer, false);
-            if (stmt->as.try_catch.catch_var) {
-                add_symbol(analyzer, stmt->as.try_catch.catch_var, UF_SYM_VAR, stmt->span, -1);
+            if (stmt->as.try_catch.catch_block) {
+                push_scope(analyzer, false);
+                if (stmt->as.try_catch.catch_var) {
+                    add_symbol(analyzer, stmt->as.try_catch.catch_var, UF_SYM_VAR, stmt->span, -1);
+                }
+                analyze_stmt(analyzer, stmt->as.try_catch.catch_block);
+                pop_scope(analyzer);
             }
-            analyze_stmt(analyzer, stmt->as.try_catch.catch_block);
-            pop_scope(analyzer);
+            if (stmt->as.try_catch.finally_block) {
+                analyze_stmt(analyzer, stmt->as.try_catch.finally_block);
+            }
             break;
 
         case UF_STMT_IMPORT: {
@@ -812,6 +1317,40 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
 
         case UF_STMT_STRUCT: {
             const char* name = stmt->as.struct_stmt.name;
+            size_t type_param_count = stmt->as.struct_stmt.type_param_count;
+            const char** type_params = stmt->as.struct_stmt.type_params;
+            const char** type_param_bounds = stmt->as.struct_stmt.type_param_bounds;
+
+            uf_semantic_add_symbol_generic(analyzer, name, UF_SYM_STRUCT, stmt->span,
+                                            (int)stmt->as.struct_stmt.field_count,
+                                            (int)stmt->as.struct_stmt.field_count,
+                                            false,
+                                            name, name,
+                                            stmt->as.struct_stmt.field_types,
+                                            type_params, type_param_bounds, type_param_count);
+
+            push_scope(analyzer, false);
+            for (size_t tp = 0; tp < type_param_count; ++tp) {
+                UfSymbol* ts = (UfSymbol*)uf_arena_alloc(analyzer->arena, sizeof(UfSymbol));
+                ts->name = type_params[tp];
+                ts->kind = UF_SYM_TYPE_PARAM;
+                ts->span = stmt->span;
+                ts->arity = -1;
+                ts->min_arity = -1;
+                ts->has_rest = false;
+                ts->type_annotation = NULL;
+                ts->return_type = NULL;
+                ts->param_types = NULL;
+                ts->trait_bound = type_param_bounds ? type_param_bounds[tp] : NULL;
+                ts->type_params = NULL;
+                ts->type_param_bounds = NULL;
+                ts->type_param_count = 0;
+                uint32_t th = hash_symbol(ts->name);
+                size_t tidx = th & (analyzer->current_scope->bucket_count - 1);
+                ts->next = analyzer->current_scope->buckets[tidx];
+                analyzer->current_scope->buckets[tidx] = ts;
+            }
+
             if (stmt->as.struct_stmt.field_types) {
                 for (size_t i = 0; i < stmt->as.struct_stmt.field_count; ++i) {
                     const char* ftype = stmt->as.struct_stmt.field_types[i];
@@ -825,9 +1364,145 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
                     }
                 }
             }
-            uf_semantic_add_symbol_with_type(analyzer, name, UF_SYM_STRUCT, stmt->span,
-                                            (int)stmt->as.struct_stmt.field_count, name, name,
-                                            stmt->as.struct_stmt.field_types);
+            for (size_t m = 0; m < stmt->as.struct_stmt.method_count; ++m) {
+                UfStmt* method = stmt->as.struct_stmt.methods[m];
+                if (method->as.function_stmt.param_count == 0) {
+                    analyzer->had_error = true;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Method '%s' on struct '%s' must have at least one parameter ('self')",
+                             method->as.function_stmt.name, name);
+                    uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, method->span, msg,
+                                   "Add 'self' as the first parameter of the method");
+                }
+                analyze_stmt(analyzer, method);
+            }
+
+            for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+                UfStmt* impl = stmt->as.struct_stmt.impl_blocks[b];
+                const char* tname = impl->as.impl_stmt.trait_name;
+                UfTraitInfo* trait = find_trait(analyzer, tname);
+                if (!trait) {
+                    analyzer->had_error = true;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Trait '%s' not found", tname);
+                    uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, impl->span, msg, NULL);
+                    continue;
+                }
+                register_trait_impl(analyzer, name, tname);
+                validate_trait_methods(analyzer, name, trait, impl, impl->span);
+
+                for (size_t m = 0; m < impl->as.impl_stmt.method_count; ++m) {
+                    UfStmt* method = impl->as.impl_stmt.methods[m];
+                    if (method->as.function_stmt.param_count == 0) {
+                        analyzer->had_error = true;
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Method '%s' on struct '%s' must have at least one parameter ('self')",
+                                 method->as.function_stmt.name, name);
+                        uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, method->span, msg,
+                                       "Add 'self' as the first parameter of the method");
+                    }
+                    analyze_stmt(analyzer, method);
+                }
+            }
+            pop_scope(analyzer);
+            break;
+        }
+
+        case UF_STMT_TRAIT: {
+            const char* name = stmt->as.trait_stmt.name;
+            size_t type_param_count = stmt->as.trait_stmt.type_param_count;
+            const char** type_params = stmt->as.trait_stmt.type_params;
+            const char** type_param_bounds = stmt->as.trait_stmt.type_param_bounds;
+            UfSymbol* existing = find_symbol_in_scope(analyzer->current_scope, name);
+            if (existing && existing->span.start.line != stmt->span.start.line) {
+                analyzer->had_error = true;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Redeclaration of symbol '%s'", name);
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span, msg, NULL);
+                break;
+            }
+            if (!find_trait(analyzer, name)) {
+                uf_semantic_add_symbol_generic(analyzer, name, UF_SYM_TRAIT, stmt->span, -1, -1, false,
+                                               NULL, NULL, NULL, type_params, type_param_bounds, type_param_count);
+                register_trait(analyzer, name, stmt->span,
+                               stmt->as.trait_stmt.method_names,
+                               stmt->as.trait_stmt.method_param_counts,
+                               stmt->as.trait_stmt.method_param_names,
+                               stmt->as.trait_stmt.method_param_types,
+                               stmt->as.trait_stmt.method_return_types,
+                               stmt->as.trait_stmt.method_count);
+            }
+            break;
+        }
+
+        case UF_STMT_IMPL: {
+            const char* tname = stmt->as.impl_stmt.trait_name;
+            const char* sname = stmt->as.impl_stmt.struct_name;
+            UfTraitInfo* trait = find_trait(analyzer, tname);
+            if (!trait) {
+                analyzer->had_error = true;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Trait '%s' not found", tname);
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span, msg, NULL);
+                break;
+            }
+            if (!sname) {
+                analyzer->had_error = true;
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span, "Expected struct name in top-level impl declaration", NULL);
+                break;
+            }
+            UfSymbol* ssym = resolve_symbol(analyzer->current_scope, sname);
+            if (!ssym || ssym->kind != UF_SYM_STRUCT) {
+                analyzer->had_error = true;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Struct '%s' not found for impl of trait '%s'", sname, tname);
+                uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->span, msg, NULL);
+                break;
+            }
+            register_trait_impl(analyzer, sname, tname);
+            validate_trait_methods(analyzer, sname, trait, stmt, stmt->span);
+
+            for (size_t m = 0; m < stmt->as.impl_stmt.method_count; ++m) {
+                UfStmt* method = stmt->as.impl_stmt.methods[m];
+                if (method->as.function_stmt.param_count == 0) {
+                    analyzer->had_error = true;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Method '%s' on struct '%s' must have at least one parameter ('self')",
+                             method->as.function_stmt.name, sname);
+                    uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, method->span, msg,
+                                   "Add 'self' as the first parameter of the method");
+                }
+                analyze_stmt(analyzer, method);
+            }
+            break;
+        }
+
+        case UF_STMT_ENUM: {
+            const char* enum_name = stmt->as.enum_stmt.name;
+            for (size_t i = 0; i < stmt->as.enum_stmt.variant_count; ++i) {
+                const UfEnumVariant* v = &stmt->as.enum_stmt.variants[i];
+                for (size_t j = i + 1; j < stmt->as.enum_stmt.variant_count; ++j) {
+                    if (strcmp(v->name, stmt->as.enum_stmt.variants[j].name) == 0) {
+                        analyzer->had_error = true;
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Duplicate variant '%s' in enum '%s'", v->name, enum_name);
+                        uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, stmt->as.enum_stmt.variants[j].span, msg, NULL);
+                    }
+                }
+                if (v->field_types) {
+                    for (size_t f = 0; f < v->field_count; ++f) {
+                        const char* ftype = v->field_types[f];
+                        if (ftype && !is_valid_type_name(analyzer, ftype)) {
+                            analyzer->had_error = true;
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "Unknown type '%s' for field '%s' in variant '%s'",
+                                     ftype, v->field_names[f], v->name);
+                            uf_report_diag(analyzer->reporter, UF_DIAG_SEMANTIC_ERROR, v->span, msg,
+                                           "Valid types include Number, String, Boolean, Array, Map, Function, Null, Any, Error, declared structs and enums");
+                        }
+                    }
+                }
+            }
             break;
         }
 
@@ -851,19 +1526,72 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
 }
 
 bool uf_analyze_program(UfSemanticAnalyzer* analyzer, UfProgram* program) {
-    /* Pass 1: Hoist top-level function and struct declarations */
+    /* Pass 1: Hoist top-level function, struct, enum, and trait declarations */
     for (size_t i = 0; i < program->count; ++i) {
         UfStmt* stmt = program->stmts[i];
-        if (stmt->kind == UF_STMT_FUNCTION) {
-            uf_semantic_add_symbol_with_type(analyzer, stmt->as.function_stmt.name, UF_SYM_FUNCTION, stmt->span,
-                                            (int)stmt->as.function_stmt.param_count, "Function",
+        if (stmt->kind == UF_STMT_TRAIT) {
+            uf_semantic_add_symbol_generic(analyzer, stmt->as.trait_stmt.name, UF_SYM_TRAIT, stmt->span, -1, -1, false,
+                                           NULL, NULL, NULL,
+                                           stmt->as.trait_stmt.type_params,
+                                           stmt->as.trait_stmt.type_param_bounds,
+                                           stmt->as.trait_stmt.type_param_count);
+            register_trait(analyzer, stmt->as.trait_stmt.name, stmt->span,
+                           stmt->as.trait_stmt.method_names,
+                           stmt->as.trait_stmt.method_param_counts,
+                           stmt->as.trait_stmt.method_param_names,
+                           stmt->as.trait_stmt.method_param_types,
+                           stmt->as.trait_stmt.method_return_types,
+                           stmt->as.trait_stmt.method_count);
+        } else if (stmt->kind == UF_STMT_FUNCTION) {
+            uf_semantic_add_symbol_generic(analyzer, stmt->as.function_stmt.name, UF_SYM_FUNCTION, stmt->span,
+                                            (int)stmt->as.function_stmt.param_count,
+                                            (int)stmt->as.function_stmt.min_param_count,
+                                            stmt->as.function_stmt.has_rest,
+                                            "Function",
                                             stmt->as.function_stmt.return_type,
-                                            stmt->as.function_stmt.param_types);
+                                            stmt->as.function_stmt.param_types,
+                                            stmt->as.function_stmt.type_params,
+                                            stmt->as.function_stmt.type_param_bounds,
+                                            stmt->as.function_stmt.type_param_count);
         } else if (stmt->kind == UF_STMT_STRUCT) {
-            uf_semantic_add_symbol_with_type(analyzer, stmt->as.struct_stmt.name, UF_SYM_STRUCT, stmt->span,
-                                            (int)stmt->as.struct_stmt.field_count, stmt->as.struct_stmt.name,
+            uf_semantic_add_symbol_generic(analyzer, stmt->as.struct_stmt.name, UF_SYM_STRUCT, stmt->span,
+                                            (int)stmt->as.struct_stmt.field_count,
+                                            (int)stmt->as.struct_stmt.field_count,
+                                            false,
                                             stmt->as.struct_stmt.name,
-                                            stmt->as.struct_stmt.field_types);
+                                            stmt->as.struct_stmt.name,
+                                            stmt->as.struct_stmt.field_types,
+                                            stmt->as.struct_stmt.type_params,
+                                            stmt->as.struct_stmt.type_param_bounds,
+                                            stmt->as.struct_stmt.type_param_count);
+            for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+                UfStmt* impl = stmt->as.struct_stmt.impl_blocks[b];
+                register_trait_impl(analyzer, stmt->as.struct_stmt.name, impl->as.impl_stmt.trait_name);
+            }
+        } else if (stmt->kind == UF_STMT_IMPL) {
+            if (stmt->as.impl_stmt.struct_name && stmt->as.impl_stmt.trait_name) {
+                register_trait_impl(analyzer, stmt->as.impl_stmt.struct_name, stmt->as.impl_stmt.trait_name);
+            }
+        } else if (stmt->kind == UF_STMT_ENUM) {
+            uf_semantic_add_symbol_with_type(analyzer, stmt->as.enum_stmt.name, UF_SYM_ENUM, stmt->span,
+                                            (int)stmt->as.enum_stmt.variant_count,
+                                            (int)stmt->as.enum_stmt.variant_count,
+                                            false,
+                                            stmt->as.enum_stmt.name,
+                                            stmt->as.enum_stmt.name,
+                                            NULL);
+            for (size_t v = 0; v < stmt->as.enum_stmt.variant_count; ++v) {
+                const UfEnumVariant* var = &stmt->as.enum_stmt.variants[v];
+                uf_semantic_add_symbol_with_type(analyzer, var->name,
+                                                UF_SYM_ENUM_VARIANT,
+                                                var->span,
+                                                (int)var->field_count,
+                                                (int)var->field_count,
+                                                false,
+                                                stmt->as.enum_stmt.name,
+                                                stmt->as.enum_stmt.name,
+                                                var->field_types);
+            }
         }
     }
 

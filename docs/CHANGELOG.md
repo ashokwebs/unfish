@@ -7,6 +7,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-09-08
+
+### Added
+- **Visual Block Studio & GUI Editor (Phase 5.4)**:
+  - **Interactive Block Canvas**: Real-time editable block interface in Web Playground (`unfish playground`), supporting inline field editing for variables, loops, functions, expressions, pattern matching, and error recovery.
+  - **Toolbox Palette**: Categorized block toolbox allowing instant block insertion for Output (`say`), Variables (`let`, `set`), Control Flow (`if`, `while`, `for`, `repeat`), Functions (`function`, `return`), Structs & Enums (`struct`, `enum`, `match`, `when`), and Fibers/Error recovery (`try`, `catch`, `finally`, `spawn`, `yield`).
+  - **Block Structure Manipulation**: Per-block controls for reordering (▲/▼), indentation nesting adjustment (⇤/⇥), and deletion (✕).
+  - **Two-Way Bidirectional Code Sync**: Live translation from blocks to Unfish source code and vice-versa via the new `/api/blocks-import` HTTP endpoint and browser client-side code generator (`engine.blocksToCode`).
+- **Embedded ARM Runtime Profile (Phase 5.5)**:
+  - **Freestanding Minimal Runtime**: Full support for `#define UF_EMBEDDED 1` and `-DUF_EMBEDDED` without POSIX dependencies (`<unistd.h>`, system forks, sockets).
+  - **Pluggable Static Heap**: Configurable static memory arena bump allocator (`UF_EMBEDDED_HEAP_SIZE`), removing requirements for dynamic libc `malloc`/`free`.
+  - **Pluggable Output & UART Hook**: Character output routing via `uf_set_putchar` / `uf_embedded_putchar`, enabling UART/serial output on bare-metal targets.
+  - **ARM Cortex-M Cross-Compilation**: Built-in ARM syscall stubs (`_write`, `_read`, `_close`, `_lseek`, `_sbrk`, `_isatty`, `_getpid`, `_kill`) allowing clean linking with `arm-none-eabi-gcc` and `--specs=nosys.specs`.
+  - **CLI Flags**: Added `unfish emit-c --embedded`, `unfish build --embedded`, and `unfish build --arm` to build standalone ELF executables for embedded ARM microcontrollers.
+
+---
+
+## [1.8.0] - 2026-09-06
+
+### Added
+- **Async / Await & Promises (Phase 5.3)**:
+  - **Syntax & Parsing**: Added `async` and `await` keywords, supporting `async function` declarations, anonymous async function expressions, and struct/trait async methods.
+  - **Compile-Time Validation**: Semantic analysis ensures `await` only occurs inside `async function` definitions (`err_await_outside_async.unfish`).
+  - **Runtime & GC**: Added `UF_OBJ_PROMISE` and `UF_VAL_PROMISE`, `UfPromiseObject` struct tracking pending/resolved/rejected state, result/error values, and fiber wait lists. Garbage collector marks promise result/error/waiters.
+  - **Cooperative Concurrency Integration**: `await <expr>` evaluates `<expr>`; if a promise is returned, it cooperatively yields/runs scheduler tasks until resolution. Non-promise values pass through transparently.
+  - **Built-in `run_async(fn, ...args)`**: Standard library entry point bridging synchronous top-level execution and asynchronous task graphs.
+  - **5-Way Parity across All Execution Targets**:
+    - **AST Interpreter**: Dynamic promise wrapping on async returns and promise evaluation in `uf_evaluate_expression`.
+    - **Stack VM**: Added `OP_AWAIT`, `is_async` function flag, and VM dispatch.
+    - **Register VM**: Added `ROP_AWAIT`, `is_async` function flag, computed goto dispatch, and opcode execution.
+    - **Native C99 Transpiler**: Added `UF_RT_PROMISE`, `uf_promise_create_c`, `uf_promise_resolved`, `uf_promise_await_c`, `uf_await`, and `uf_run_async` in `unfish_runtime.h`, plus `async function` emission in `uf_emit_c.c`.
+    - **WebAssembly**: Fully compliant via Native C99 pipeline.
+  - **Tooling Support**: Formatter (`uf_formatter.c`), blocks export/import (`uf_blocks_export.c`, `uf_blocks_import.c`), and bytecode cache version 2 (`uf_cache.c`).
+  - **Differential Verification**: 100% 5-way differential parity across all 85 conformance tests with zero memory errors or leaks under AddressSanitizer/UBSan (`make test-asan`).
+
+---
+
+## [1.7.0] - 2026-09-05
+
+### Added
+- **Developer Ecosystem & Tooling (Phase 3)**:
+  - **First-Class Test Runner (`unfish test`, Feature 3.1)**:
+    - Automated test file discovery for files and directory hierarchies.
+    - Test annotation parsing for `# expect: <line>`, `# expect-error: <line>`, `# expect-exit: <code>`, and `# flags: <options>`.
+    - Process-isolated test execution via `fork()`, `execvp()`, and redirected `/dev/null` stdin.
+    - Timing statistics, regex filtering (`--filter`), verbose diagnostics (`-v`), and execution backend selection (`--vm`).
+  - **Documentation Generator (`unfish doc`, Feature 3.2)**:
+    - Automatic extraction of `##` docstrings across module headers, structs, methods, enums, and functions.
+    - Markdown output with structured tables of contents and function signatures.
+    - Responsive HTML output featuring a modern dark theme and mobile-friendly typography.
+    - CLI options `-f`/`--format markdown|html`, `-o <file>`, and `--title <title>`.
+  - **Package Manager (`unfish pkg`, Feature 3.3)**:
+    - Declarative `unfish.toml` manifest specification.
+    - `unfish pkg init [name]`: Standardized project scaffolding with entry point and test suite.
+    - `unfish pkg check`: Verifies manifest structure and entry point validity.
+    - `unfish pkg run`: Executes the package with automatic self-binary discovery.
+    - `unfish pkg test`: Discovers and executes package test suites.
+    - `unfish pkg build`: Compiles the package to a standalone native binary in `bin/`.
+  - **Interactive Terminal Tutorial (`unfish learn`, Feature 3.4)**:
+    - Built-in 10-lesson interactive programming tutorial directly in the CLI.
+    - Curriculum covering variables, expressions, control flow, functions, collections, destructuring, structs & methods, enums, error handling, and concurrency fibers.
+    - Real-time submission evaluation with hint (`:hint`) and solution (`:solution`) commands.
+    - Non-interactive curriculum inspection with `unfish learn --list`.
+  - **Interactive Web Playground (`unfish playground`, Feature 3.5)**:
+    - Zero-dependency built-in POSIX HTTP server serving static frontend assets from `web/`.
+    - Modern dark-themed single-page application with source code editor, line numbering, and shortcut execution (`Ctrl+Enter`).
+    - API endpoints `/api/run`, `/api/run-vm`, `/api/blocks`, `/api/ast`, `/api/format`, and `/api/shutdown`.
+    - Integrated Visual Blocks visualizer translating code into interactive Scratch/Blockly-style blocks.
+    - Interactive AST node inspector and quick syntax cheatsheet.
+    - Offline fallback simulation in `web/unfish_engine.js` when disconnected from native CLI.
+  - **Unit Testing Suite**: Added `tests/unit/test_tooling.c` covering doc generation, test discovery, package lifecycle, tutorial curriculum, and playground HTTP server. All 18 unit test suites and 75 conformance/differential tests passing cleanly under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+---
+
+## [1.6.0] - 2026-09-05
+
+### Added
+- **Enums & Sum Types / Algebraic Data Types (Feature 2.2)**: Comprehensive support for enumerated types and tagged unions across syntax, runtime, and all execution backends:
+  - **Inline Unit Enums**: Concise syntax for zero-payload enumeration variants (`enum Color: Red, Green, Blue`).
+  - **Sum Types with Payloads**: Indented block declarations for tagged unions carrying structured payloads (`enum Result: Ok(value), Err(message)`).
+  - **Namespaced & Bare Access**: Constructors accessible both via namespace (`Color.Red`, `Result.Ok(42)`) and bare identifier (`Red`, `Ok(42)`).
+  - **Pattern Matching & Deconstruction**: Deep pattern matching against enum variants with automatic payload extraction (`when Ok(val):`, `when Circle(r):`).
+  - **Introspection & Indexing**: Support for `.tag`, `.name`, named payload properties (`r.value`), and numeric subscript indexing (`r[0]`).
+  - **Structural Equality**: Deep equality comparison (`==`, `!=`) verifying definition identity, variant tag, and recursive payload element equality.
+  - **3-Way Parity across Execution Backends**:
+    - **AST Interpreter**: Dynamic enum definition objects, singleton unit instances, callable payload constructors, and pattern unpacking.
+    - **Bytecode VM**: `OP_ENUM_DEF` emission, global registration, constructor frame dispatch, and opcode match branching.
+    - **Native C99 Transpiler**: Clean C99 runtime tagged unions (`UfRtEnumDef`, `UfRtEnumVal`), static metadata tables, wrapper constructor functions, and tagged-switch pattern emission.
+  - **Tooling Support**:
+    - **Source Formatter**: Clean formatting of inline and block enum declarations.
+    - **Visual Blocks**: Full serialization/deserialization round-tripping of enums and variants to and from JSON blocks.
+    - **Optimizer**: AST optimization visitor safely traversing enum declarations.
+    - **VS Code Extension**: Syntax highlighting support for `enum` keyword.
+  - **Memory Safety & Tests**: Added `54_enums.unfish` and `err_enum_arity.unfish`. Conformance suite expanded to 75 passing tests with 100% 3-way differential parity and zero memory leaks under AddressSanitizer and UndefinedBehaviorSanitizer (`make test-asan`).
+
+---
+
+## [1.5.0] - 2026-09-05
+
+### Added
+- **Destructuring Assignment & Binding (Feature 2.7)**: Comprehensive support for destructuring arrays and maps/structs:
+  - Array destructuring: `let [a, b, c] = [1, 2, 3]`
+  - Map/struct destructuring: `let {name, age} = obj`
+  - Rest patterns: `let [head, ...tail] = arr`, `let {a, ...rest} = map`
+  - Wildcard patterns: `let [x, _, z] = arr`
+  - Nested patterns: `let [[a, b], c] = [[1, 2], 3]`
+  - Destructuring assignment: `[a, b] = [b, a]`
+  - Match integration: `when [1, ...rest]:` and `when {kind, radius}:`
+  - 3-Way Parity across AST Interpreter, Bytecode VM, and Native C99
+
+## [1.4.0] - 2026-09-04
+
+### Added
+- **Spread / Rest Operator (Feature 2.4)**: Comprehensive support for the `...` operator across parameter lists, function calls, array literals, and map literals:
+  - **Rest Parameters (`function sum(...args): ...`)**: Supports gathering variable numbers of trailing arguments into dynamic arrays. Validated to be strictly the last parameter and rejected with informative diagnostics if assigned a default value or placed before other parameters.
+  - **Function Call Spread (`foo(...args)`)**: Supports spreading any array operand into individual call arguments, with seamless interoperability across fixed parameters, default parameters, and rest parameters.
+  - **Array Literal Spread (`[...a, ...b]`)**: Emits flat concatenation of arrays inline during literal evaluation.
+  - **Map Literal Spread (`{...m1, ...m2, "k": v}`)**: Merges map entries with left-to-right precedence, properly overriding earlier entries and allowing trailing keys to override spread values.
+  - **3-Way Parity across Execution Backends**:
+    - **AST Interpreter**: Dynamic call argument unpacking, variable-length array expansion, map merging, and rest parameter binding.
+    - **Bytecode VM**: Added `OP_CALL_SPREAD`, `OP_ARRAY_PUSH`, `OP_ARRAY_EXTEND`, `OP_MAP_SET`, `OP_MAP_EXTEND` opcodes with dynamic stack resizing and argument unpacking.
+    - **Native C99 Transpiler**: Variadic helper functions `uf_make_array_spread`, `uf_make_map_spread`, `uf_call_val_spread`, and `uf_make_rest_array` ensuring strict `-std=c99 -pedantic` compliance with zero compiler warnings.
+  - **Tooling Support**:
+    - **Source Formatter**: Preserves `...` on rest parameters, in spread calls, and inside array/map literals.
+    - **Visual Blocks**: Full round-trip serialization of spread expressions and rest parameters in JSON block trees.
+    - **Optimizer**: Constant folding passes traverse spread operands safely.
+  - **Tests**: Added `52_spread_rest.unfish`, `err_rest_not_last.unfish`, and `err_rest_default.unfish`. Conformance suite expanded to 71 passing tests with 100% 3-way differential parity and zero memory leaks under AddressSanitizer and UndefinedBehaviorSanitizer (`make test-asan`).
+
+---
+
+## [1.3.0] - 2026-09-04
+
+### Added
+- **Methods on Structs (Feature 2.3)**: Comprehensive object-oriented method declaration and invocation on structs (`struct Point: fn dist(self): ...` and `function dist(self): ...`):
+  - **Contextual `fn` keyword**: Support for `fn` alongside `function` for concise method and function definitions without shadowing variable identifiers named `fn`.
+  - **AST & Semantic Analysis**: Struct definition AST includes method declarations; semantic analysis verifies that all methods declare at least one parameter (`self`), reporting clear diagnostic error hints otherwise.
+  - **First-Class Bound Methods**: Accessing `instance.method` returns a `BoundMethod` object binding the receiver instance to the function closure, supporting both direct calls (`p.dist()`) and first-class functional extraction (`let m = p.dist; m()`).
+  - **3-Way Parity across Execution Backends**:
+    - **AST Interpreter**: Dynamic receiver prepending and method invocation with complete lexical environment preservation.
+    - **Bytecode VM**: `OP_INDEX_GET` binds methods to instances on the fly; function invocation frame setup shifts arguments to inject `self` at stack slot 1.
+    - **Native C99 Transpiler**: Forward declarations, typed wrappers, static method tables, and `uf_instance_new` method metadata wiring with `uf_call_val` bound method dispatch.
+  - **Tooling Support**:
+    - **Source Formatter**: Clean indentation of method statements inside struct definitions.
+    - **Visual Blocks**: Full serialization/deserialization round-tripping of struct methods to and from visual JSON AST blocks.
+    - **Optimizer**: Recursive constant folding through struct method bodies.
+  - **Tests**: Added `51_struct_methods.unfish` and `err_struct_method_no_self.unfish`, passing 100% across all 3 execution backends with zero memory leaks under AddressSanitizer and UndefinedBehaviorSanitizer (`make test-asan`).
+
+---
+
+## [1.2.0] - 2026-09-04
+
+### Added
+- **Default Function Parameters (Feature 2.5)**: Full language support for default parameter values `function greet(name="World"): ...` across all 3 execution backends:
+  - **AST Interpreter**: Dynamic evaluation of missing arguments with fallback default expressions within the function environment.
+  - **Bytecode Compiler & VM**: Added `OP_JUMP_IF_ARG` instruction enabling conditional skip of default evaluation when arguments are supplied, with stack padding for missing arguments.
+  - **Native C99 Transpiler**: Static call site default argument filling, lambda parameter initialization with defaults, and wrapper dispatch.
+  - **Source Formatter & Visual Blocks**: Full round-trip preservation of default parameters in code formatting and JSON visual blocks serialization.
+  - **Optimizer**: Constant folding for default parameter expressions.
+  - **Conformance Suite**: Added `tests/conformance/50_default_params.unfish` with 100% 3-way differential parity across Interpreter, VM, and Native backends.
+
+---
+
 ## [0.9.0-alpha] - 2026-09-04
 
 ### Added

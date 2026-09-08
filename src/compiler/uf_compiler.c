@@ -2,15 +2,18 @@
 #include "uf_optimize.h"
 #include "../runtime/uf_module.h"
 #include "../runtime/uf_env.h"
+#include "../vm/uf_vm.h"
 #include <stdlib.h>
 #include <string.h>
 
 static void compiler_init(UfCompiler* compiler, UfCompiler* enclosing, FunctionType type,
-                          const char* fn_name, size_t arity, UfRuntime* rt, UfDiagnosticReporter* reporter) {
+                          const char* fn_name, size_t arity, size_t min_arity, bool has_rest, UfRuntime* rt, UfDiagnosticReporter* reporter) {
     compiler->enclosing = enclosing;
     compiler->type = type;
     compiler->fn_name = fn_name;
     compiler->arity = arity;
+    compiler->min_arity = min_arity;
+    compiler->has_rest = has_rest;
     compiler->rt = rt;
     compiler->reporter = reporter;
     compiler->had_error = false;
@@ -19,7 +22,7 @@ static void compiler_init(UfCompiler* compiler, UfCompiler* enclosing, FunctionT
     compiler->upvalue_count = 0;
     compiler->current_loop = NULL;
 
-    compiler->function = uf_bytecode_fn_new(rt, fn_name, arity);
+    compiler->function = uf_bytecode_fn_new(rt, fn_name, arity, min_arity, has_rest);
     compiler->chunk = &compiler->function->chunk;
 
     /* Reserve slot 0 for the function itself / call frame base */
@@ -259,20 +262,65 @@ static void compile_expr(UfCompiler* c, const UfExpr* expr) {
             compile_expr(c, expr->as.grouping.inner);
             break;
         case UF_EXPR_CALL: {
-            compile_expr(c, expr->as.call.callee);
+            bool has_spread = false;
             for (size_t i = 0; i < expr->as.call.argc; ++i) {
-                compile_expr(c, expr->as.call.args[i]);
+                if (expr->as.call.args[i]->kind == UF_EXPR_SPREAD) {
+                    has_spread = true;
+                    break;
+                }
             }
-            emit_byte(c, (uint8_t)OP_CALL, line);
-            emit_byte(c, (uint8_t)expr->as.call.argc, line);
+
+            compile_expr(c, expr->as.call.callee);
+
+            if (!has_spread) {
+                for (size_t i = 0; i < expr->as.call.argc; ++i) {
+                    compile_expr(c, expr->as.call.args[i]);
+                }
+                emit_byte(c, (uint8_t)OP_CALL, line);
+                emit_byte(c, (uint8_t)expr->as.call.argc, line);
+            } else {
+                emit_byte(c, (uint8_t)OP_BUILD_ARRAY, line);
+                emit_u16(c, 0, line);
+                for (size_t i = 0; i < expr->as.call.argc; ++i) {
+                    if (expr->as.call.args[i]->kind == UF_EXPR_SPREAD) {
+                        compile_expr(c, expr->as.call.args[i]->as.spread.operand);
+                        emit_byte(c, (uint8_t)OP_ARRAY_EXTEND, line);
+                    } else {
+                        compile_expr(c, expr->as.call.args[i]);
+                        emit_byte(c, (uint8_t)OP_ARRAY_PUSH, line);
+                    }
+                }
+                emit_byte(c, (uint8_t)OP_CALL_SPREAD, line);
+            }
             break;
         }
         case UF_EXPR_ARRAY: {
+            bool has_spread = false;
             for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
-                compile_expr(c, expr->as.array_lit.elements[i]);
+                if (expr->as.array_lit.elements[i]->kind == UF_EXPR_SPREAD) {
+                    has_spread = true;
+                    break;
+                }
             }
-            emit_byte(c, (uint8_t)OP_BUILD_ARRAY, line);
-            emit_u16(c, (uint16_t)expr->as.array_lit.count, line);
+            if (!has_spread) {
+                for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                    compile_expr(c, expr->as.array_lit.elements[i]);
+                }
+                emit_byte(c, (uint8_t)OP_BUILD_ARRAY, line);
+                emit_u16(c, (uint16_t)expr->as.array_lit.count, line);
+            } else {
+                emit_byte(c, (uint8_t)OP_BUILD_ARRAY, line);
+                emit_u16(c, 0, line);
+                for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                    if (expr->as.array_lit.elements[i]->kind == UF_EXPR_SPREAD) {
+                        compile_expr(c, expr->as.array_lit.elements[i]->as.spread.operand);
+                        emit_byte(c, (uint8_t)OP_ARRAY_EXTEND, line);
+                    } else {
+                        compile_expr(c, expr->as.array_lit.elements[i]);
+                        emit_byte(c, (uint8_t)OP_ARRAY_PUSH, line);
+                    }
+                }
+            }
             break;
         }
         case UF_EXPR_INDEX: {
@@ -282,23 +330,72 @@ static void compile_expr(UfCompiler* c, const UfExpr* expr) {
             break;
         }
         case UF_EXPR_MAP: {
+            bool has_spread = false;
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
-                compile_expr(c, expr->as.map_lit.keys[i]);
-                compile_expr(c, expr->as.map_lit.values[i]);
+                if (expr->as.map_lit.values[i] == NULL || expr->as.map_lit.keys[i]->kind == UF_EXPR_SPREAD) {
+                    has_spread = true;
+                    break;
+                }
             }
-            emit_byte(c, (uint8_t)OP_BUILD_MAP, line);
-            emit_u16(c, (uint16_t)expr->as.map_lit.count, line);
+            if (!has_spread) {
+                for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                    compile_expr(c, expr->as.map_lit.keys[i]);
+                    compile_expr(c, expr->as.map_lit.values[i]);
+                }
+                emit_byte(c, (uint8_t)OP_BUILD_MAP, line);
+                emit_u16(c, (uint16_t)expr->as.map_lit.count, line);
+            } else {
+                emit_byte(c, (uint8_t)OP_BUILD_MAP, line);
+                emit_u16(c, 0, line);
+                for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                    if (expr->as.map_lit.values[i] == NULL) {
+                        compile_expr(c, expr->as.map_lit.keys[i]->as.spread.operand);
+                        emit_byte(c, (uint8_t)OP_MAP_EXTEND, line);
+                    } else {
+                        compile_expr(c, expr->as.map_lit.keys[i]);
+                        compile_expr(c, expr->as.map_lit.values[i]);
+                        emit_byte(c, (uint8_t)OP_MAP_SET, line);
+                    }
+                }
+            }
+            break;
+        }
+        case UF_EXPR_SPREAD: {
+            compile_expr(c, expr->as.spread.operand);
+            break;
+        }
+        case UF_EXPR_AWAIT: {
+            compile_expr(c, expr->as.await_expr.value);
+            emit_byte(c, (uint8_t)OP_AWAIT, line);
             break;
         }
         case UF_EXPR_FUNCTION: {
             UfCompiler fn_compiler;
             compiler_init(&fn_compiler, c, TYPE_FUNCTION, expr->as.fn_expr.name,
-                          expr->as.fn_expr.param_count, c->rt, c->reporter);
+                          expr->as.fn_expr.param_count, expr->as.fn_expr.min_param_count, expr->as.fn_expr.has_rest, c->rt, c->reporter);
+            fn_compiler.function->is_async = expr->as.fn_expr.is_async;
             begin_scope(&fn_compiler);
 
             for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
                 add_local(&fn_compiler, expr->as.fn_expr.params[i], line);
                 mark_initialized(&fn_compiler);
+            }
+
+            for (size_t i = expr->as.fn_expr.min_param_count; i < expr->as.fn_expr.param_count; ++i) {
+                if (expr->as.fn_expr.param_defaults && expr->as.fn_expr.param_defaults[i]) {
+                    emit_byte(&fn_compiler, (uint8_t)OP_JUMP_IF_ARG, line);
+                    emit_byte(&fn_compiler, (uint8_t)i, line);
+                    emit_byte(&fn_compiler, 0xFF, line);
+                    emit_byte(&fn_compiler, 0xFF, line);
+                    int jump = (int)fn_compiler.chunk->code_count - 2;
+
+                    compile_expr(&fn_compiler, expr->as.fn_expr.param_defaults[i]);
+                    emit_byte(&fn_compiler, (uint8_t)OP_STORE_LOCAL, line);
+                    emit_u16(&fn_compiler, (uint16_t)(i + 1), line);
+                    emit_byte(&fn_compiler, (uint8_t)OP_POP, line);
+
+                    patch_jump(&fn_compiler, jump);
+                }
             }
 
             compile_stmt(&fn_compiler, expr->as.fn_expr.body);
@@ -319,6 +416,319 @@ static void compile_expr(UfCompiler* c, const UfExpr* expr) {
             }
             break;
         }
+        case UF_EXPR_STRING_INTERP: {
+            emit_constant(c, uf_val_string(c->rt, "", 0), line);
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                compile_expr(c, expr->as.string_interp.parts[i]);
+                emit_byte(c, (uint8_t)OP_ADD, line);
+            }
+            break;
+        }
+    }
+}
+
+static UfBytecodeFunction* compile_method_helper(UfCompiler* c, UfStmt* method, int line) {
+    UfCompiler fn_compiler;
+    compiler_init(&fn_compiler, c, TYPE_FUNCTION, method->as.function_stmt.name,
+                  method->as.function_stmt.param_count, method->as.function_stmt.min_param_count,
+                  method->as.function_stmt.has_rest, c->rt, c->reporter);
+    fn_compiler.function->is_async = method->as.function_stmt.is_async;
+    begin_scope(&fn_compiler);
+
+    for (size_t i = 0; i < method->as.function_stmt.param_count; ++i) {
+        add_local(&fn_compiler, method->as.function_stmt.params[i], line);
+        mark_initialized(&fn_compiler);
+    }
+
+    for (size_t i = method->as.function_stmt.min_param_count; i < method->as.function_stmt.param_count; ++i) {
+        if (method->as.function_stmt.param_defaults && method->as.function_stmt.param_defaults[i]) {
+            emit_byte(&fn_compiler, (uint8_t)OP_JUMP_IF_ARG, line);
+            emit_byte(&fn_compiler, (uint8_t)i, line);
+            emit_byte(&fn_compiler, 0xFF, line);
+            emit_byte(&fn_compiler, 0xFF, line);
+            int jump = (int)fn_compiler.chunk->code_count - 2;
+
+            compile_expr(&fn_compiler, method->as.function_stmt.param_defaults[i]);
+            emit_byte(&fn_compiler, (uint8_t)OP_STORE_LOCAL, line);
+            emit_u16(&fn_compiler, (uint16_t)(i + 1), line);
+            emit_byte(&fn_compiler, (uint8_t)OP_POP, line);
+
+            patch_jump(&fn_compiler, jump);
+        }
+    }
+
+    compile_stmt(&fn_compiler, method->as.function_stmt.body);
+
+    emit_byte(&fn_compiler, (uint8_t)OP_NULL, line);
+    emit_byte(&fn_compiler, (uint8_t)OP_RETURN, line);
+
+    fn_compiler.function->upvalue_count = fn_compiler.upvalue_count;
+    return fn_compiler.function;
+}
+
+static void compile_destructure_pattern(UfCompiler* c, const UfPattern* pat, int target_slot, int line, bool is_declaration) {
+    if (!pat) return;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+        case UF_PAT_LITERAL:
+            break;
+        case UF_PAT_VARIABLE: {
+            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+            emit_u16(c, (uint16_t)target_slot, line);
+            if (is_declaration) {
+                if (c->scope_depth > 0) {
+                    add_local(c, pat->as.var_name, line);
+                    mark_initialized(c);
+                } else {
+                    uint16_t g_idx = identifier_constant(c, pat->as.var_name);
+                    emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                    emit_u16(c, g_idx, line);
+                }
+            } else {
+                int arg = resolve_local(c, pat->as.var_name);
+                if (arg != -1) {
+                    emit_byte(c, (uint8_t)OP_STORE_LOCAL, line);
+                    emit_u16(c, (uint16_t)arg, line);
+                } else if ((arg = resolve_upvalue(c, pat->as.var_name)) != -1) {
+                    emit_byte(c, (uint8_t)OP_SET_UPVALUE, line);
+                    emit_byte(c, (uint8_t)arg, line);
+                } else {
+                    uint16_t g_idx = identifier_constant(c, pat->as.var_name);
+                    emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
+                    emit_u16(c, g_idx, line);
+                }
+                emit_byte(c, (uint8_t)OP_POP, line);
+            }
+            break;
+        }
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                compile_destructure_pattern(c, pat->as.rest_pat.subpattern, target_slot, line, is_declaration);
+            }
+            break;
+        case UF_PAT_ARRAY: {
+            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+            emit_u16(c, (uint16_t)target_slot, line);
+            emit_byte(c, (uint8_t)OP_ASSERT_ARRAY, line);
+
+            size_t normal_count = pat->as.array_pat.has_rest ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0) : pat->as.array_pat.count;
+            for (size_t i = 0; i < normal_count; ++i) {
+                UfPattern* elem = pat->as.array_pat.elements[i];
+                if (elem->kind == UF_PAT_WILDCARD) continue;
+
+                emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                emit_u16(c, (uint16_t)target_slot, line);
+                emit_byte(c, (uint8_t)OP_ARRAY_GET_SAFE, line);
+                emit_u16(c, (uint16_t)i, line);
+
+                if (elem->kind == UF_PAT_VARIABLE) {
+                    if (is_declaration) {
+                        if (c->scope_depth > 0) {
+                            add_local(c, elem->as.var_name, line);
+                            mark_initialized(c);
+                        } else {
+                            uint16_t g_idx = identifier_constant(c, elem->as.var_name);
+                            emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                            emit_u16(c, g_idx, line);
+                        }
+                    } else {
+                        int arg = resolve_local(c, elem->as.var_name);
+                        if (arg != -1) {
+                            emit_byte(c, (uint8_t)OP_STORE_LOCAL, line);
+                            emit_u16(c, (uint16_t)arg, line);
+                        } else if ((arg = resolve_upvalue(c, elem->as.var_name)) != -1) {
+                            emit_byte(c, (uint8_t)OP_SET_UPVALUE, line);
+                            emit_byte(c, (uint8_t)arg, line);
+                        } else {
+                            uint16_t g_idx = identifier_constant(c, elem->as.var_name);
+                            emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
+                            emit_u16(c, g_idx, line);
+                        }
+                        emit_byte(c, (uint8_t)OP_POP, line);
+                    }
+                } else {
+                    int sub_slot = add_local(c, "", line);
+                    mark_initialized(c);
+                    compile_destructure_pattern(c, elem, sub_slot, line, is_declaration);
+                }
+            }
+            if (pat->as.array_pat.has_rest) {
+                UfPattern* rest_elem = pat->as.array_pat.elements[normal_count];
+                if (rest_elem->kind == UF_PAT_REST) rest_elem = rest_elem->as.rest_pat.subpattern;
+                if (rest_elem && rest_elem->kind != UF_PAT_WILDCARD) {
+                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                    emit_u16(c, (uint16_t)target_slot, line);
+                    emit_byte(c, (uint8_t)OP_ARRAY_SLICE, line);
+                    emit_u16(c, (uint16_t)normal_count, line);
+
+                    if (rest_elem->kind == UF_PAT_VARIABLE) {
+                        if (is_declaration) {
+                            if (c->scope_depth > 0) {
+                                add_local(c, rest_elem->as.var_name, line);
+                                mark_initialized(c);
+                            } else {
+                                uint16_t g_idx = identifier_constant(c, rest_elem->as.var_name);
+                                emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                                emit_u16(c, g_idx, line);
+                            }
+                        } else {
+                            int arg = resolve_local(c, rest_elem->as.var_name);
+                            if (arg != -1) {
+                                emit_byte(c, (uint8_t)OP_STORE_LOCAL, line);
+                                emit_u16(c, (uint16_t)arg, line);
+                            } else if ((arg = resolve_upvalue(c, rest_elem->as.var_name)) != -1) {
+                                emit_byte(c, (uint8_t)OP_SET_UPVALUE, line);
+                                emit_byte(c, (uint8_t)arg, line);
+                            } else {
+                                uint16_t g_idx = identifier_constant(c, rest_elem->as.var_name);
+                                emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
+                                emit_u16(c, g_idx, line);
+                            }
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    } else {
+                        int sub_slot = add_local(c, "", line);
+                        mark_initialized(c);
+                        compile_destructure_pattern(c, rest_elem, sub_slot, line, is_declaration);
+                    }
+                }
+            }
+            break;
+        }
+        case UF_PAT_MAP: {
+            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+            emit_u16(c, (uint16_t)target_slot, line);
+            emit_byte(c, (uint8_t)OP_ASSERT_MAP, line);
+
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                UfPattern* val_pat = pat->as.map_pat.values[i];
+                if (val_pat->kind == UF_PAT_WILDCARD) continue;
+
+                emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                emit_u16(c, (uint16_t)target_slot, line);
+                emit_constant(c, uf_val_string_cstr(c->rt, pat->as.map_pat.keys[i]), line);
+                emit_byte(c, (uint8_t)OP_MAP_GET_SAFE, line);
+
+                if (val_pat->kind == UF_PAT_VARIABLE) {
+                    if (is_declaration) {
+                        if (c->scope_depth > 0) {
+                            add_local(c, val_pat->as.var_name, line);
+                            mark_initialized(c);
+                        } else {
+                            uint16_t g_idx = identifier_constant(c, val_pat->as.var_name);
+                            emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                            emit_u16(c, g_idx, line);
+                        }
+                    } else {
+                        int arg = resolve_local(c, val_pat->as.var_name);
+                        if (arg != -1) {
+                            emit_byte(c, (uint8_t)OP_STORE_LOCAL, line);
+                            emit_u16(c, (uint16_t)arg, line);
+                        } else if ((arg = resolve_upvalue(c, val_pat->as.var_name)) != -1) {
+                            emit_byte(c, (uint8_t)OP_SET_UPVALUE, line);
+                            emit_byte(c, (uint8_t)arg, line);
+                        } else {
+                            uint16_t g_idx = identifier_constant(c, val_pat->as.var_name);
+                            emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
+                            emit_u16(c, g_idx, line);
+                        }
+                        emit_byte(c, (uint8_t)OP_POP, line);
+                    }
+                } else {
+                    int sub_slot = add_local(c, "", line);
+                    mark_initialized(c);
+                    compile_destructure_pattern(c, val_pat, sub_slot, line, is_declaration);
+                }
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                UfPattern* rest_pat = pat->as.map_pat.rest_pattern;
+                if (rest_pat->kind != UF_PAT_WILDCARD) {
+                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                    emit_u16(c, (uint16_t)target_slot, line);
+                    emit_byte(c, (uint8_t)OP_MAP_REST, line);
+                    emit_u16(c, (uint16_t)pat->as.map_pat.count, line);
+                    for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                        uint16_t k_idx = (uint16_t)uf_chunk_add_constant(c->chunk, uf_val_string_cstr(c->rt, pat->as.map_pat.keys[i]));
+                        emit_u16(c, k_idx, line);
+                    }
+
+                    if (rest_pat->kind == UF_PAT_VARIABLE) {
+                        if (is_declaration) {
+                            if (c->scope_depth > 0) {
+                                add_local(c, rest_pat->as.var_name, line);
+                                mark_initialized(c);
+                            } else {
+                                uint16_t g_idx = identifier_constant(c, rest_pat->as.var_name);
+                                emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                                emit_u16(c, g_idx, line);
+                            }
+                        } else {
+                            int arg = resolve_local(c, rest_pat->as.var_name);
+                            if (arg != -1) {
+                                emit_byte(c, (uint8_t)OP_STORE_LOCAL, line);
+                                emit_u16(c, (uint16_t)arg, line);
+                            } else if ((arg = resolve_upvalue(c, rest_pat->as.var_name)) != -1) {
+                                emit_byte(c, (uint8_t)OP_SET_UPVALUE, line);
+                                emit_byte(c, (uint8_t)arg, line);
+                            } else {
+                                uint16_t g_idx = identifier_constant(c, rest_pat->as.var_name);
+                                emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
+                                emit_u16(c, g_idx, line);
+                            }
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    } else {
+                        int sub_slot = add_local(c, "", line);
+                        mark_initialized(c);
+                        compile_destructure_pattern(c, rest_pat, sub_slot, line, is_declaration);
+                    }
+                }
+            }
+            break;
+        }
+        case UF_PAT_STRUCT: {
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                UfPattern* fp = pat->as.struct_pat.field_patterns[i];
+                if (fp->kind == UF_PAT_WILDCARD) continue;
+
+                emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                emit_u16(c, (uint16_t)target_slot, line);
+                emit_constant(c, uf_val_number((double)i), line);
+                emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+
+                if (fp->kind == UF_PAT_VARIABLE) {
+                    if (is_declaration) {
+                        if (c->scope_depth > 0) {
+                            add_local(c, fp->as.var_name, line);
+                            mark_initialized(c);
+                        } else {
+                            uint16_t g_idx = identifier_constant(c, fp->as.var_name);
+                            emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                            emit_u16(c, g_idx, line);
+                        }
+                    } else {
+                        int arg = resolve_local(c, fp->as.var_name);
+                        if (arg != -1) {
+                            emit_byte(c, (uint8_t)OP_STORE_LOCAL, line);
+                            emit_u16(c, (uint16_t)arg, line);
+                        } else if ((arg = resolve_upvalue(c, fp->as.var_name)) != -1) {
+                            emit_byte(c, (uint8_t)OP_SET_UPVALUE, line);
+                            emit_byte(c, (uint8_t)arg, line);
+                        } else {
+                            uint16_t g_idx = identifier_constant(c, fp->as.var_name);
+                            emit_byte(c, (uint8_t)OP_STORE_GLOBAL, line);
+                            emit_u16(c, g_idx, line);
+                        }
+                        emit_byte(c, (uint8_t)OP_POP, line);
+                    }
+                } else {
+                    int sub_slot = add_local(c, "", line);
+                    mark_initialized(c);
+                    compile_destructure_pattern(c, fp, sub_slot, line, is_declaration);
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -328,6 +738,22 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 
     switch (stmt->kind) {
         case UF_STMT_LET: {
+            if (stmt->as.let_stmt.pattern) {
+                if (stmt->as.let_stmt.init) {
+                    compile_expr(c, stmt->as.let_stmt.init);
+                } else {
+                    emit_byte(c, (uint8_t)OP_NULL, line);
+                }
+                int target_slot = add_local(c, "", line);
+                mark_initialized(c);
+                compile_destructure_pattern(c, stmt->as.let_stmt.pattern, target_slot, line, true);
+                if (c->scope_depth == 0) {
+                    emit_byte(c, (uint8_t)OP_POP, line);
+                    c->local_count--;
+                }
+                break;
+            }
+
             if (stmt->as.let_stmt.init) {
                 compile_expr(c, stmt->as.let_stmt.init);
             } else {
@@ -345,6 +771,16 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             break;
         }
         case UF_STMT_ASSIGN: {
+            if (stmt->as.assign_stmt.pattern) {
+                compile_expr(c, stmt->as.assign_stmt.value);
+                int target_slot = add_local(c, "", line);
+                mark_initialized(c);
+                compile_destructure_pattern(c, stmt->as.assign_stmt.pattern, target_slot, line, false);
+                emit_byte(c, (uint8_t)OP_POP, line);
+                c->local_count--;
+                break;
+            }
+
             compile_expr(c, stmt->as.assign_stmt.value);
             const char* name = stmt->as.assign_stmt.name;
             int arg = resolve_local(c, name);
@@ -588,7 +1024,11 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             /* Pop any locals inside current loop */
             for (int i = c->local_count - 1; i >= 0; --i) {
                 if (c->locals[i].depth > c->current_loop->scope_depth) {
-                    emit_byte(c, (uint8_t)OP_POP, line);
+                    if (c->locals[i].is_captured) {
+                        emit_byte(c, (uint8_t)OP_CLOSE_UPVALUE, line);
+                    } else {
+                        emit_byte(c, (uint8_t)OP_POP, line);
+                    }
                 }
             }
             int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
@@ -607,7 +1047,11 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             }
             for (int i = c->local_count - 1; i >= 0; --i) {
                 if (c->locals[i].depth > c->current_loop->scope_depth) {
-                    emit_byte(c, (uint8_t)OP_POP, line);
+                    if (c->locals[i].is_captured) {
+                        emit_byte(c, (uint8_t)OP_CLOSE_UPVALUE, line);
+                    } else {
+                        emit_byte(c, (uint8_t)OP_POP, line);
+                    }
                 }
             }
             int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
@@ -622,12 +1066,31 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
         case UF_STMT_FUNCTION: {
             UfCompiler fn_compiler;
             compiler_init(&fn_compiler, c, TYPE_FUNCTION, stmt->as.function_stmt.name,
-                          stmt->as.function_stmt.param_count, c->rt, c->reporter);
+                          stmt->as.function_stmt.param_count, stmt->as.function_stmt.min_param_count,
+                          stmt->as.function_stmt.has_rest, c->rt, c->reporter);
+            fn_compiler.function->is_async = stmt->as.function_stmt.is_async;
             begin_scope(&fn_compiler);
 
             for (size_t i = 0; i < stmt->as.function_stmt.param_count; ++i) {
                 add_local(&fn_compiler, stmt->as.function_stmt.params[i], line);
                 mark_initialized(&fn_compiler);
+            }
+
+            for (size_t i = stmt->as.function_stmt.min_param_count; i < stmt->as.function_stmt.param_count; ++i) {
+                if (stmt->as.function_stmt.param_defaults && stmt->as.function_stmt.param_defaults[i]) {
+                    emit_byte(&fn_compiler, (uint8_t)OP_JUMP_IF_ARG, line);
+                    emit_byte(&fn_compiler, (uint8_t)i, line);
+                    emit_byte(&fn_compiler, 0xFF, line);
+                    emit_byte(&fn_compiler, 0xFF, line);
+                    int jump = (int)fn_compiler.chunk->code_count - 2;
+
+                    compile_expr(&fn_compiler, stmt->as.function_stmt.param_defaults[i]);
+                    emit_byte(&fn_compiler, (uint8_t)OP_STORE_LOCAL, line);
+                    emit_u16(&fn_compiler, (uint16_t)(i + 1), line);
+                    emit_byte(&fn_compiler, (uint8_t)OP_POP, line);
+
+                    patch_jump(&fn_compiler, jump);
+                }
             }
 
             compile_stmt(&fn_compiler, stmt->as.function_stmt.body);
@@ -679,29 +1142,119 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             compile_stmt(c, stmt->as.try_catch.try_block);
 
             emit_byte(c, (uint8_t)OP_POP_TRY, line);
-            int end_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
+            int try_success_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
 
             patch_jump(c, catch_jump);
 
-            begin_scope(c);
-            if (stmt->as.try_catch.catch_var) {
-                add_local(c, stmt->as.try_catch.catch_var, line);
-                mark_initialized(c);
+            if (stmt->as.try_catch.catch_block) {
+                begin_scope(c);
+                if (stmt->as.try_catch.catch_var) {
+                    add_local(c, stmt->as.try_catch.catch_var, line);
+                    mark_initialized(c);
+                } else {
+                    emit_byte(c, (uint8_t)OP_POP, line);
+                }
+
+                compile_stmt(c, stmt->as.try_catch.catch_block);
+                end_scope(c, line);
+
+                patch_jump(c, try_success_jump);
+
+                if (stmt->as.try_catch.finally_block) {
+                    compile_stmt(c, stmt->as.try_catch.finally_block);
+                }
             } else {
-                emit_byte(c, (uint8_t)OP_POP, line);
+                begin_scope(c);
+                add_local(c, "", line);
+                mark_initialized(c);
+                uint16_t err_slot = (uint16_t)(c->local_count - 1);
+
+                if (stmt->as.try_catch.finally_block) {
+                    compile_stmt(c, stmt->as.try_catch.finally_block);
+                }
+
+                emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                emit_u16(c, err_slot, line);
+                emit_byte(c, (uint8_t)OP_RETHROW, line);
+                end_scope(c, line);
+
+                patch_jump(c, try_success_jump);
+
+                if (stmt->as.try_catch.finally_block) {
+                    compile_stmt(c, stmt->as.try_catch.finally_block);
+                }
             }
-
-            compile_stmt(c, stmt->as.try_catch.catch_block);
-            end_scope(c, line);
-
-            patch_jump(c, end_jump);
+            break;
+        }
+        case UF_STMT_TRAIT: {
+            UfValue tdef = uf_val_trait_def(c->rt,
+                                             stmt->as.trait_stmt.name,
+                                             stmt->as.trait_stmt.method_count,
+                                             stmt->as.trait_stmt.method_names,
+                                             stmt->as.trait_stmt.method_param_counts,
+                                             stmt->as.trait_stmt.method_param_names,
+                                             stmt->as.trait_stmt.method_param_types,
+                                             stmt->as.trait_stmt.method_return_types);
+            uf_env_declare(c->rt->global_env, stmt->as.trait_stmt.name, tdef);
+            size_t c_idx = make_constant(c, tdef);
+            emit_byte(c, (uint8_t)OP_CONSTANT, line);
+            emit_u16(c, (uint16_t)c_idx, line);
+            if (c->scope_depth == 0) {
+                uint16_t g_idx = identifier_constant(c, stmt->as.trait_stmt.name);
+                emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                emit_u16(c, g_idx, line);
+            }
             break;
         }
         case UF_STMT_STRUCT: {
-            UfValue sval = uf_val_struct_def(c->rt, stmt->as.struct_stmt.name,
-                                             stmt->as.struct_stmt.field_names,
-                                             stmt->as.struct_stmt.field_types,
-                                             stmt->as.struct_stmt.field_count);
+            size_t direct_mcount = stmt->as.struct_stmt.method_count;
+            size_t total_mcount = direct_mcount;
+            for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+                total_mcount += stmt->as.struct_stmt.impl_blocks[b]->as.impl_stmt.method_count;
+            }
+            const char** mnames = NULL;
+            UfValue* mvals = NULL;
+            if (total_mcount > 0) {
+                mnames = (const char**)malloc(total_mcount * sizeof(const char*));
+                mvals = (UfValue*)malloc(total_mcount * sizeof(UfValue));
+                size_t idx = 0;
+                for (size_t i = 0; i < direct_mcount; ++i) {
+                    UfStmt* m = stmt->as.struct_stmt.methods[i];
+                    mnames[idx] = m->as.function_stmt.name;
+                    UfBytecodeFunction* bfn = compile_method_helper(c, m, line);
+                    UfClosureObject* cl = uf_closure_new(c->rt, bfn);
+                    mvals[idx] = uf_val_closure(c->rt, cl);
+                    idx++;
+                }
+                for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+                    UfStmt* ib = stmt->as.struct_stmt.impl_blocks[b];
+                    for (size_t i = 0; i < ib->as.impl_stmt.method_count; ++i) {
+                        UfStmt* m = ib->as.impl_stmt.methods[i];
+                        mnames[idx] = m->as.function_stmt.name;
+                        UfBytecodeFunction* bfn = compile_method_helper(c, m, line);
+                        UfClosureObject* cl = uf_closure_new(c->rt, bfn);
+                        mvals[idx] = uf_val_closure(c->rt, cl);
+                        idx++;
+                    }
+                }
+            }
+            size_t trait_count = stmt->as.struct_stmt.impl_block_count;
+            const char** traits = NULL;
+            if (trait_count > 0) {
+                traits = (const char**)malloc(trait_count * sizeof(const char*));
+                for (size_t b = 0; b < trait_count; ++b) {
+                    traits[b] = stmt->as.struct_stmt.impl_blocks[b]->as.impl_stmt.trait_name;
+                }
+            }
+            UfValue sval = uf_val_struct_def_with_traits(c->rt, stmt->as.struct_stmt.name,
+                                                         stmt->as.struct_stmt.field_names,
+                                                         stmt->as.struct_stmt.field_types,
+                                                         stmt->as.struct_stmt.field_count,
+                                                         mnames,
+                                                         mvals,
+                                                         total_mcount,
+                                                         traits,
+                                                         trait_count);
             uf_env_declare(c->rt->global_env, stmt->as.struct_stmt.name, sval);
             size_t c_idx = make_constant(c, sval);
             emit_byte(c, (uint8_t)OP_STRUCT_DEF, line);
@@ -710,6 +1263,70 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                 uint16_t g_idx = identifier_constant(c, stmt->as.struct_stmt.name);
                 emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
                 emit_u16(c, g_idx, line);
+            }
+            break;
+        }
+        case UF_STMT_IMPL: {
+            const char* sname = stmt->as.impl_stmt.struct_name;
+            if (sname) {
+                UfValue sval;
+                if (uf_env_lookup(c->rt->global_env, sname, &sval) && sval.kind == UF_VAL_STRUCT_DEF) {
+                    UfStructDefObject* sdef = sval.as.struct_def;
+                    size_t add_mcount = stmt->as.impl_stmt.method_count;
+                    if (add_mcount > 0) {
+                        size_t new_mcount = sdef->method_count + add_mcount;
+                        sdef->method_names = (const char**)realloc((void*)sdef->method_names, new_mcount * sizeof(const char*));
+                        sdef->method_values = (UfValue*)realloc((void*)sdef->method_values, new_mcount * sizeof(UfValue));
+                        for (size_t i = 0; i < add_mcount; ++i) {
+                            UfStmt* m = stmt->as.impl_stmt.methods[i];
+                            sdef->method_names[sdef->method_count + i] = m->as.function_stmt.name;
+                            UfBytecodeFunction* bfn = compile_method_helper(c, m, line);
+                            UfClosureObject* cl = uf_closure_new(c->rt, bfn);
+                            sdef->method_values[sdef->method_count + i] = uf_val_closure(c->rt, cl);
+                        }
+                        sdef->method_count = new_mcount;
+                    }
+                    if (stmt->as.impl_stmt.trait_name) {
+                        sdef->impl_traits = (const char**)realloc((void*)sdef->impl_traits, (sdef->impl_trait_count + 1) * sizeof(const char*));
+                        sdef->impl_traits[sdef->impl_trait_count++] = stmt->as.impl_stmt.trait_name;
+                    }
+                }
+            }
+            break;
+        }
+        case UF_STMT_ENUM: {
+            size_t vcount = stmt->as.enum_stmt.variant_count;
+            const char** vnames = (const char**)malloc(vcount * sizeof(const char*));
+            size_t* vfcounts = (size_t*)malloc(vcount * sizeof(size_t));
+            const char*** vfnames = (const char***)malloc(vcount * sizeof(const char**));
+            const char*** vftypes = (const char***)malloc(vcount * sizeof(const char**));
+            for (size_t i = 0; i < vcount; ++i) {
+                vnames[i] = stmt->as.enum_stmt.variants[i].name;
+                vfcounts[i] = stmt->as.enum_stmt.variants[i].field_count;
+                vfnames[i] = stmt->as.enum_stmt.variants[i].field_names;
+                vftypes[i] = stmt->as.enum_stmt.variants[i].field_types;
+            }
+            UfValue edef = uf_val_enum_def(c->rt, stmt->as.enum_stmt.name, vcount, vnames, vfcounts, vfnames, vftypes);
+            uf_env_declare(c->rt->global_env, stmt->as.enum_stmt.name, edef);
+            size_t c_idx = make_constant(c, edef);
+            emit_byte(c, (uint8_t)OP_CONSTANT, line);
+            emit_u16(c, (uint16_t)c_idx, line);
+            if (c->scope_depth == 0) {
+                uint16_t g_idx = identifier_constant(c, stmt->as.enum_stmt.name);
+                emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                emit_u16(c, g_idx, line);
+            }
+            for (size_t i = 0; i < vcount; ++i) {
+                UfValue val_tmpl = uf_val_enum_val(c->rt, edef.as.enum_def, (int)i, vnames[i], NULL, 0);
+                uf_env_declare(c->rt->global_env, vnames[i], val_tmpl);
+                size_t v_idx = make_constant(c, val_tmpl);
+                emit_byte(c, (uint8_t)OP_CONSTANT, line);
+                emit_u16(c, (uint16_t)v_idx, line);
+                if (c->scope_depth == 0) {
+                    uint16_t g_idx = identifier_constant(c, vnames[i]);
+                    emit_byte(c, (uint8_t)OP_DEFINE_GLOBAL, line);
+                    emit_u16(c, g_idx, line);
+                }
             }
             break;
         }
@@ -756,7 +1373,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 
             for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
                 UfMatchArm* arm = &stmt->as.match_stmt.arms[i];
-                int fail_jumps[16];
+                int fail_jumps[256];
                 size_t fail_jump_count = 0;
 
                 begin_scope(c);
@@ -766,13 +1383,34 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     emit_u16(c, (uint16_t)match_val_slot, line);
                     compile_expr(c, arm->pattern->as.literal);
                     emit_byte(c, (uint8_t)OP_EQ, line);
-                    fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    if (fail_jump_count < 256) {
+                        fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    } else {
+                        c->had_error = true;
+                    }
                     emit_byte(c, (uint8_t)OP_POP, line);
                 } else if (arm->pattern->kind == UF_PAT_VARIABLE) {
-                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
-                    emit_u16(c, (uint16_t)match_val_slot, line);
-                    add_local(c, arm->pattern->as.var_name, line);
-                    mark_initialized(c);
+                    UfValue existing = uf_val_null();
+                    if (uf_env_lookup(c->rt->global_env, arm->pattern->as.var_name, &existing) &&
+                        existing.kind == UF_VAL_ENUM_VAL && existing.as.enum_val && existing.as.enum_val->field_count == 0) {
+                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                        emit_u16(c, (uint16_t)match_val_slot, line);
+                        size_t c_idx = make_constant(c, existing);
+                        emit_byte(c, (uint8_t)OP_CONSTANT, line);
+                        emit_u16(c, (uint16_t)c_idx, line);
+                        emit_byte(c, (uint8_t)OP_EQ, line);
+                        if (fail_jump_count < 256) {
+                            fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                        } else {
+                            c->had_error = true;
+                        }
+                        emit_byte(c, (uint8_t)OP_POP, line);
+                    } else {
+                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                        emit_u16(c, (uint16_t)match_val_slot, line);
+                        add_local(c, arm->pattern->as.var_name, line);
+                        mark_initialized(c);
+                    }
                 } else if (arm->pattern->kind == UF_PAT_WILDCARD) {
                     /* Matches unconditionally */
                 } else if (arm->pattern->kind == UF_PAT_STRUCT) {
@@ -781,22 +1419,39 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     emit_u16(c, (uint16_t)match_val_slot, line);
                     emit_byte(c, (uint8_t)OP_INSTANCE, line);
                     emit_u16(c, s_idx, line);
-                    fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    if (fail_jump_count < 256) {
+                        fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    } else {
+                        c->had_error = true;
+                    }
                     emit_byte(c, (uint8_t)OP_POP, line);
 
-                    UfStructDefObject* sdef = NULL;
-                    UfValue sdef_val;
-                    if (uf_env_lookup(c->rt->global_env, arm->pattern->as.struct_pat.struct_name, &sdef_val) &&
-                        sdef_val.kind == UF_VAL_STRUCT_DEF) {
-                        sdef = sdef_val.as.struct_def;
+                    const char** field_names_lookup = NULL;
+                    size_t field_names_count = 0;
+                    UfValue val_lookup;
+                    if (uf_env_lookup(c->rt->global_env, arm->pattern->as.struct_pat.struct_name, &val_lookup)) {
+                        if (val_lookup.kind == UF_VAL_STRUCT_DEF) {
+                            field_names_lookup = val_lookup.as.struct_def->field_names;
+                            field_names_count = val_lookup.as.struct_def->field_count;
+                        } else if (val_lookup.kind == UF_VAL_ENUM_VAL && val_lookup.as.enum_val && val_lookup.as.enum_val->def) {
+                            UfEnumValObject* ev = val_lookup.as.enum_val;
+                            if (ev->def->variant_field_names && (size_t)ev->tag < ev->def->variant_count) {
+                                field_names_lookup = ev->def->variant_field_names[ev->tag];
+                                field_names_count = ev->def->variant_field_counts[ev->tag];
+                            }
+                        }
                     }
 
                     for (size_t f = 0; f < arm->pattern->as.struct_pat.field_count; ++f) {
                         UfPattern* fp = arm->pattern->as.struct_pat.field_patterns[f];
-                        const char* fname = (sdef && f < sdef->field_count) ? sdef->field_names[f] : "";
+                        const char* fname = (field_names_lookup && f < field_names_count) ? field_names_lookup[f] : "";
                         emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
                         emit_u16(c, (uint16_t)match_val_slot, line);
-                        emit_constant(c, uf_val_string_cstr(c->rt, fname), line);
+                        if (fname && fname[0] != '\0') {
+                            emit_constant(c, uf_val_string_cstr(c->rt, fname), line);
+                        } else {
+                            emit_constant(c, uf_val_number((double)f), line);
+                        }
                         emit_byte(c, (uint8_t)OP_INDEX_GET, line);
 
                         if (fp->kind == UF_PAT_VARIABLE) {
@@ -805,7 +1460,72 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         } else if (fp->kind == UF_PAT_LITERAL) {
                             compile_expr(c, fp->as.literal);
                             emit_byte(c, (uint8_t)OP_EQ, line);
-                            fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                            if (fail_jump_count < 256) {
+                                fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                            } else {
+                                c->had_error = true;
+                            }
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    }
+                } else if (arm->pattern->kind == UF_PAT_ARRAY) {
+                    size_t normal_count = arm->pattern->as.array_pat.has_rest ? (arm->pattern->as.array_pat.count > 0 ? arm->pattern->as.array_pat.count - 1 : 0) : arm->pattern->as.array_pat.count;
+                    for (size_t f = 0; f < normal_count; ++f) {
+                        UfPattern* ep = arm->pattern->as.array_pat.elements[f];
+                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                        emit_u16(c, (uint16_t)match_val_slot, line);
+                        emit_constant(c, uf_val_number((double)f), line);
+                        emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+
+                        if (ep->kind == UF_PAT_VARIABLE) {
+                            add_local(c, ep->as.var_name, line);
+                            mark_initialized(c);
+                        } else if (ep->kind == UF_PAT_LITERAL) {
+                            compile_expr(c, ep->as.literal);
+                            emit_byte(c, (uint8_t)OP_EQ, line);
+                            if (fail_jump_count < 256) {
+                                fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                            } else {
+                                c->had_error = true;
+                            }
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        } else if (ep->kind == UF_PAT_WILDCARD) {
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    }
+                    if (arm->pattern->as.array_pat.has_rest) {
+                        UfPattern* rp = arm->pattern->as.array_pat.elements[normal_count];
+                        if (rp->kind == UF_PAT_REST) rp = rp->as.rest_pat.subpattern;
+                        if (rp && rp->kind == UF_PAT_VARIABLE) {
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            emit_byte(c, (uint8_t)OP_ARRAY_SLICE, line);
+                            emit_u16(c, (uint16_t)normal_count, line);
+                            add_local(c, rp->as.var_name, line);
+                            mark_initialized(c);
+                        }
+                    }
+                } else if (arm->pattern->kind == UF_PAT_MAP) {
+                    for (size_t f = 0; f < arm->pattern->as.map_pat.count; ++f) {
+                        UfPattern* vp = arm->pattern->as.map_pat.values[f];
+                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                        emit_u16(c, (uint16_t)match_val_slot, line);
+                        emit_constant(c, uf_val_string_cstr(c->rt, arm->pattern->as.map_pat.keys[f]), line);
+                        emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+
+                        if (vp->kind == UF_PAT_VARIABLE) {
+                            add_local(c, vp->as.var_name, line);
+                            mark_initialized(c);
+                        } else if (vp->kind == UF_PAT_LITERAL) {
+                            compile_expr(c, vp->as.literal);
+                            emit_byte(c, (uint8_t)OP_EQ, line);
+                            if (fail_jump_count < 256) {
+                                fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                            } else {
+                                c->had_error = true;
+                            }
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        } else if (vp->kind == UF_PAT_WILDCARD) {
                             emit_byte(c, (uint8_t)OP_POP, line);
                         }
                     }
@@ -813,7 +1533,11 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 
                 if (arm->guard) {
                     compile_expr(c, arm->guard);
-                    fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    if (fail_jump_count < 256) {
+                        fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    } else {
+                        c->had_error = true;
+                    }
                     emit_byte(c, (uint8_t)OP_POP, line);
                 }
 
@@ -854,12 +1578,12 @@ UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagno
     uf_optimize_ast((UfProgram*)program, rt);
 
     UfCompiler compiler;
-    compiler_init(&compiler, NULL, TYPE_SCRIPT, "<script>", 0, rt, reporter);
+    compiler_init(&compiler, NULL, TYPE_SCRIPT, "<script>", 0, 0, false, rt, reporter);
 
-    /* Pass 1: Hoisted definitions (functions, structs, imports) */
+    /* Pass 1: Hoisted definitions (functions, traits, structs, impls, enums, imports) */
     for (size_t i = 0; i < program->count; ++i) {
         UfStmtKind k = program->stmts[i]->kind;
-        if (k == UF_STMT_FUNCTION || k == UF_STMT_STRUCT || k == UF_STMT_IMPORT || k == UF_STMT_FROM_IMPORT) {
+        if (k == UF_STMT_FUNCTION || k == UF_STMT_TRAIT || k == UF_STMT_STRUCT || k == UF_STMT_IMPL || k == UF_STMT_ENUM || k == UF_STMT_IMPORT || k == UF_STMT_FROM_IMPORT) {
             compile_stmt(&compiler, program->stmts[i]);
             if (compiler.had_error) break;
         }
@@ -868,7 +1592,7 @@ UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagno
     /* Pass 2: Executable statements */
     for (size_t i = 0; i < program->count; ++i) {
         UfStmtKind k = program->stmts[i]->kind;
-        if (k != UF_STMT_FUNCTION && k != UF_STMT_STRUCT && k != UF_STMT_IMPORT && k != UF_STMT_FROM_IMPORT) {
+        if (k != UF_STMT_FUNCTION && k != UF_STMT_TRAIT && k != UF_STMT_STRUCT && k != UF_STMT_IMPL && k != UF_STMT_ENUM && k != UF_STMT_IMPORT && k != UF_STMT_FROM_IMPORT) {
             compile_stmt(&compiler, program->stmts[i]);
             if (compiler.had_error) break;
         }

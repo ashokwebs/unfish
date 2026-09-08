@@ -16,6 +16,28 @@
 /* STRING STANDARD LIBRARY FUNCTIONS                                         */
 /* ========================================================================= */
 
+static const void* uf_memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len) {
+    if (needle_len == 0) return haystack;
+    if (haystack_len < needle_len) return NULL;
+    const unsigned char* h = (const unsigned char*)haystack;
+    const unsigned char* n = (const unsigned char*)needle;
+    unsigned char first = n[0];
+    size_t max_offset = haystack_len - needle_len;
+    for (size_t i = 0; i <= max_offset; ++i) {
+        if (h[i] == first && memcmp(h + i, n, needle_len) == 0) {
+            return (const void*)(h + i);
+        }
+    }
+    return NULL;
+}
+
+static inline int64_t safe_num_to_i64(double d) {
+    if (isnan(d) || isinf(d)) return 0;
+    if (d > 9223372036854775807.0) return 9223372036854775807LL;
+    if (d < -9223372036854775808.0) return (-9223372036854775807LL - 1);
+    return (int64_t)d;
+}
+
 static UfValue std_split(UfRuntime* rt, int argc, UfValue* args) {
     if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
@@ -42,13 +64,14 @@ static UfValue std_split(UfRuntime* rt, int argc, UfValue* args) {
     const char* p = str->chars;
     const char* end = str->chars + str->length;
     while (p < end) {
-        const char* next = strstr(p, delim->chars);
+        size_t rem = (size_t)(end - p);
+        const char* next = (const char*)uf_memmem(p, rem, delim->chars, delim->length);
         if (!next) {
-            UfValue s = uf_val_string(rt, p, strlen(p));
+            UfValue s = uf_val_string(rt, p, rem);
             uf_array_push(rt, res.as.array, s);
             break;
         }
-        UfValue s = uf_val_string(rt, p, next - p);
+        UfValue s = uf_val_string(rt, p, (size_t)(next - p));
         uf_array_push(rt, res.as.array, s);
         p = next + delim->length;
         if (p == end) {
@@ -143,9 +166,13 @@ static UfValue std_replace(UfRuntime* rt, int argc, UfValue* args) {
     /* Count occurrences */
     size_t count = 0;
     const char* p = str->chars;
-    while ((p = strstr(p, old_sub->chars)) != NULL) {
+    const char* end = str->chars + str->length;
+    while (p < end) {
+        size_t rem = (size_t)(end - p);
+        const char* match = (const char*)uf_memmem(p, rem, old_sub->chars, old_sub->length);
+        if (!match) break;
         count++;
-        p += old_sub->length;
+        p = match + old_sub->length;
     }
 
     if (count == 0) {
@@ -157,19 +184,21 @@ static UfValue std_replace(UfRuntime* rt, int argc, UfValue* args) {
     char* cur = buffer;
     p = str->chars;
 
-    while (*p) {
-        const char* match = strstr(p, old_sub->chars);
+    while (p < end) {
+        size_t rem = (size_t)(end - p);
+        const char* match = (const char*)uf_memmem(p, rem, old_sub->chars, old_sub->length);
         if (!match) {
-            size_t rem = strlen(p);
             memcpy(cur, p, rem);
             cur += rem;
             break;
         }
-        size_t seg = match - p;
+        size_t seg = (size_t)(match - p);
         memcpy(cur, p, seg);
         cur += seg;
-        memcpy(cur, new_sub->chars, new_sub->length);
-        cur += new_sub->length;
+        if (new_sub->length > 0) {
+            memcpy(cur, new_sub->chars, new_sub->length);
+            cur += new_sub->length;
+        }
         p = match + old_sub->length;
     }
     *cur = '\0';
@@ -219,7 +248,8 @@ static UfValue std_contains(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'contains()' expects two strings (haystack, needle)");
         return uf_val_null();
     }
-    return uf_val_bool(strstr(args[0].as.string->chars, args[1].as.string->chars) != NULL);
+    return uf_val_bool(uf_memmem(args[0].as.string->chars, args[0].as.string->length,
+                                 args[1].as.string->chars, args[1].as.string->length) != NULL);
 }
 
 static UfValue std_starts_with(UfRuntime* rt, int argc, UfValue* args) {
@@ -243,7 +273,7 @@ static UfValue std_ends_with(UfRuntime* rt, int argc, UfValue* args) {
     UfStringObject* str = args[0].as.string;
     UfStringObject* sfx = args[1].as.string;
     if (str->length < sfx->length) return uf_val_bool(false);
-    return uf_val_bool(strcmp(str->chars + (str->length - sfx->length), sfx->chars) == 0);
+    return uf_val_bool(memcmp(str->chars + (str->length - sfx->length), sfx->chars, sfx->length) == 0);
 }
 
 static UfValue std_char_at(UfRuntime* rt, int argc, UfValue* args) {
@@ -253,7 +283,7 @@ static UfValue std_char_at(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfStringObject* str = args[0].as.string;
-    int64_t idx = (int64_t)args[1].as.number;
+    int64_t idx = safe_num_to_i64(args[1].as.number);
     if (idx < 0) idx += str->length;
     if (idx < 0 || (size_t)idx >= str->length) {
         return uf_val_string(rt, "", 0);
@@ -298,7 +328,7 @@ static UfValue std_repeat_string(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfStringObject* str = args[0].as.string;
-    int64_t count = (int64_t)args[1].as.number;
+    int64_t count = safe_num_to_i64(args[1].as.number);
     if (count <= 0 || str->length == 0) {
         return uf_val_string(rt, "", 0);
     }
@@ -324,8 +354,8 @@ static UfValue std_substring(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfStringObject* str = args[0].as.string;
-    int64_t start = (int64_t)args[1].as.number;
-    int64_t end = (argc >= 3 && args[2].kind == UF_VAL_NUMBER) ? (int64_t)args[2].as.number : (int64_t)str->length;
+    int64_t start = safe_num_to_i64(args[1].as.number);
+    int64_t end = (argc >= 3 && args[2].kind == UF_VAL_NUMBER) ? safe_num_to_i64(args[2].as.number) : (int64_t)str->length;
 
     if (start < 0) start += str->length;
     if (end < 0) end += str->length;
@@ -345,7 +375,8 @@ static UfValue std_index_of(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'index_of()' expects two strings (haystack, needle)");
         return uf_val_null();
     }
-    const char* match = strstr(args[0].as.string->chars, args[1].as.string->chars);
+    const char* match = (const char*)uf_memmem(args[0].as.string->chars, args[0].as.string->length,
+                                               args[1].as.string->chars, args[1].as.string->length);
     if (!match) return uf_val_number(-1);
     return uf_val_number((double)(match - args[0].as.string->chars));
 }
@@ -491,8 +522,8 @@ static UfValue std_random_int(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'random_int()' expects two numbers (min, max)");
         return uf_val_null();
     }
-    int64_t min_v = (int64_t)args[0].as.number;
-    int64_t max_v = (int64_t)args[1].as.number;
+    int64_t min_v = safe_num_to_i64(args[0].as.number);
+    int64_t max_v = safe_num_to_i64(args[1].as.number);
     if (max_v < min_v) {
         int64_t tmp = min_v;
         min_v = max_v;
@@ -504,6 +535,9 @@ static UfValue std_random_int(UfRuntime* rt, int argc, UfValue* args) {
         seeded = true;
     }
     int64_t span = max_v - min_v + 1;
+    if (span <= 0) {
+        return uf_val_number((double)min_v);
+    }
     int64_t res = min_v + (rand() % span);
     return uf_val_number((double)res);
 }
@@ -605,6 +639,32 @@ static UfValue std_run_scheduler(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_number((double)count);
 }
 
+static UfValue std_run_async(UfRuntime* rt, int argc, UfValue* args) {
+    if (argc < 1) {
+        SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
+        uf_runtime_error(rt, source_span_make(loc, loc), "'run_async()' expects at least 1 argument");
+        return uf_val_null();
+    }
+    UfValue target = args[0];
+    UfValue result = uf_val_null();
+    SourceSpan span = source_span_make(source_loc_make("<run_async>", 0, 0, 0), source_loc_make("<run_async>", 0, 0, 0));
+
+    if (target.kind == UF_VAL_PROMISE && target.as.promise) {
+        result = uf_promise_await(rt, target.as.promise);
+    } else {
+        size_t call_argc = (size_t)(argc > 1 ? argc - 1 : 0);
+        UfValue* call_args = (argc > 1) ? &args[1] : NULL;
+        UfValue val = uf_runtime_call(rt, target, call_argc, call_args, span);
+        if (val.kind == UF_VAL_PROMISE && val.as.promise) {
+            result = uf_promise_await(rt, val.as.promise);
+        } else {
+            result = val;
+        }
+    }
+    uf_scheduler_run(rt);
+    return result;
+}
+
 /* ========================================================================= */
 /* SYSTEMS PROGRAMMING / LOW-LEVEL BUFFER / MEMORY FUNCTIONS                 */
 /* ========================================================================= */
@@ -656,7 +716,7 @@ static UfValue std_buffer_get(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)offset >= buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Buffer offset %ld out of bounds (size %zu)", (long)offset, buf->size);
@@ -672,7 +732,7 @@ static UfValue std_buffer_set(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)offset >= buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Buffer offset %ld out of bounds (size %zu)", (long)offset, buf->size);
@@ -704,13 +764,13 @@ static UfValue std_buffer_slice(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t start = (int64_t)args[1].as.number;
+    int64_t start = safe_num_to_i64(args[1].as.number);
     if (start < 0) start = 0;
     if ((size_t)start > buf->size) start = (int64_t)buf->size;
 
     size_t length = buf->size - (size_t)start;
     if (argc >= 3 && args[2].kind == UF_VAL_NUMBER) {
-        int64_t user_len = (int64_t)args[2].as.number;
+        int64_t user_len = safe_num_to_i64(args[2].as.number);
         if (user_len < 0) user_len = 0;
         if ((size_t)user_len < length) length = (size_t)user_len;
     }
@@ -726,7 +786,7 @@ static UfValue std_buffer_read_u16_le(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)(offset + 2) > buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Read past buffer end (offset %ld + 2 > size %zu)", (long)offset, buf->size);
@@ -743,7 +803,7 @@ static UfValue std_buffer_write_u16_le(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)(offset + 2) > buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Write past buffer end (offset %ld + 2 > size %zu)", (long)offset, buf->size);
@@ -762,7 +822,7 @@ static UfValue std_buffer_read_u32_le(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)(offset + 4) > buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Read past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
@@ -782,7 +842,7 @@ static UfValue std_buffer_write_u32_le(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)(offset + 4) > buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Write past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
@@ -803,7 +863,7 @@ static UfValue std_buffer_read_i32_le(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)(offset + 4) > buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Read past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
@@ -816,6 +876,7 @@ static UfValue std_buffer_read_i32_le(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_number((double)v);
 }
 
+
 static UfValue std_buffer_write_i32_le(UfRuntime* rt, int argc, UfValue* args) {
     if (argc < 3 || args[0].kind != UF_VAL_BUFFER || args[1].kind != UF_VAL_NUMBER || args[2].kind != UF_VAL_NUMBER) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
@@ -823,13 +884,13 @@ static UfValue std_buffer_write_i32_le(UfRuntime* rt, int argc, UfValue* args) {
         return uf_val_null();
     }
     UfBufferObject* buf = args[0].as.buffer;
-    int64_t offset = (int64_t)args[1].as.number;
+    int64_t offset = safe_num_to_i64(args[1].as.number);
     if (offset < 0 || (size_t)(offset + 4) > buf->size) {
         SourceLoc loc = source_loc_make("<native>", 0, 0, 0);
         uf_runtime_error(rt, source_span_make(loc, loc), "IndexOutOfBounds: Write past buffer end (offset %ld + 4 > size %zu)", (long)offset, buf->size);
         return uf_val_null();
     }
-    int32_t v = (int32_t)args[2].as.number;
+    int32_t v = (int32_t)safe_num_to_i64(args[2].as.number);
     buf->data[offset] = (uint8_t)(v & 0xFF);
     buf->data[offset + 1] = (uint8_t)((v >> 8) & 0xFF);
     buf->data[offset + 2] = (uint8_t)((v >> 16) & 0xFF);
@@ -840,37 +901,37 @@ static UfValue std_buffer_write_i32_le(UfRuntime* rt, int argc, UfValue* args) {
 static UfValue std_u8(UfRuntime* rt, int argc, UfValue* args) {
     (void)rt;
     if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
-    return uf_val_number((double)((uint8_t)(int64_t)args[0].as.number));
+    return uf_val_number((double)((uint8_t)safe_num_to_i64(args[0].as.number)));
 }
 
 static UfValue std_i8(UfRuntime* rt, int argc, UfValue* args) {
     (void)rt;
     if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
-    return uf_val_number((double)((int8_t)(int64_t)args[0].as.number));
+    return uf_val_number((double)((int8_t)safe_num_to_i64(args[0].as.number)));
 }
 
 static UfValue std_u16(UfRuntime* rt, int argc, UfValue* args) {
     (void)rt;
     if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
-    return uf_val_number((double)((uint16_t)(int64_t)args[0].as.number));
+    return uf_val_number((double)((uint16_t)safe_num_to_i64(args[0].as.number)));
 }
 
 static UfValue std_i16(UfRuntime* rt, int argc, UfValue* args) {
     (void)rt;
     if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
-    return uf_val_number((double)((int16_t)(int64_t)args[0].as.number));
+    return uf_val_number((double)((int16_t)safe_num_to_i64(args[0].as.number)));
 }
 
 static UfValue std_u32(UfRuntime* rt, int argc, UfValue* args) {
     (void)rt;
     if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
-    return uf_val_number((double)((uint32_t)(int64_t)args[0].as.number));
+    return uf_val_number((double)((uint32_t)safe_num_to_i64(args[0].as.number)));
 }
 
 static UfValue std_i32(UfRuntime* rt, int argc, UfValue* args) {
     (void)rt;
     if (argc < 1 || args[0].kind != UF_VAL_NUMBER) return uf_val_number(0);
-    return uf_val_number((double)((int32_t)(int64_t)args[0].as.number));
+    return uf_val_number((double)((int32_t)safe_num_to_i64(args[0].as.number)));
 }
 
 static UfValue std_band(UfRuntime* rt, int argc, UfValue* args) {
@@ -879,8 +940,8 @@ static UfValue std_band(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'band()' expects two numbers");
         return uf_val_null();
     }
-    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
-    uint32_t b = (uint32_t)(int64_t)args[1].as.number;
+    uint32_t a = (uint32_t)safe_num_to_i64(args[0].as.number);
+    uint32_t b = (uint32_t)safe_num_to_i64(args[1].as.number);
     return uf_val_number((double)(a & b));
 }
 
@@ -890,8 +951,8 @@ static UfValue std_bor(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'bor()' expects two numbers");
         return uf_val_null();
     }
-    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
-    uint32_t b = (uint32_t)(int64_t)args[1].as.number;
+    uint32_t a = (uint32_t)safe_num_to_i64(args[0].as.number);
+    uint32_t b = (uint32_t)safe_num_to_i64(args[1].as.number);
     return uf_val_number((double)(a | b));
 }
 
@@ -901,8 +962,8 @@ static UfValue std_bxor(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'bxor()' expects two numbers");
         return uf_val_null();
     }
-    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
-    uint32_t b = (uint32_t)(int64_t)args[1].as.number;
+    uint32_t a = (uint32_t)safe_num_to_i64(args[0].as.number);
+    uint32_t b = (uint32_t)safe_num_to_i64(args[1].as.number);
     return uf_val_number((double)(a ^ b));
 }
 
@@ -912,7 +973,7 @@ static UfValue std_bnot(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'bnot()' expects a number");
         return uf_val_null();
     }
-    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
+    uint32_t a = (uint32_t)safe_num_to_i64(args[0].as.number);
     return uf_val_number((double)(~a));
 }
 
@@ -922,8 +983,8 @@ static UfValue std_shl(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'shl()' expects two numbers");
         return uf_val_null();
     }
-    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
-    uint32_t b = (uint32_t)(int64_t)args[1].as.number & 31;
+    uint32_t a = (uint32_t)safe_num_to_i64(args[0].as.number);
+    uint32_t b = (uint32_t)safe_num_to_i64(args[1].as.number) & 31;
     return uf_val_number((double)(a << b));
 }
 
@@ -933,8 +994,8 @@ static UfValue std_shr(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'shr()' expects two numbers");
         return uf_val_null();
     }
-    uint32_t a = (uint32_t)(int64_t)args[0].as.number;
-    uint32_t b = (uint32_t)(int64_t)args[1].as.number & 31;
+    uint32_t a = (uint32_t)safe_num_to_i64(args[0].as.number);
+    uint32_t b = (uint32_t)safe_num_to_i64(args[1].as.number) & 31;
     return uf_val_number((double)(a >> b));
 }
 
@@ -944,8 +1005,8 @@ static UfValue std_sar(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'sar()' expects two numbers");
         return uf_val_null();
     }
-    int32_t a = (int32_t)(int64_t)args[0].as.number;
-    uint32_t b = (uint32_t)(int64_t)args[1].as.number & 31;
+    int32_t a = (int32_t)safe_num_to_i64(args[0].as.number);
+    uint32_t b = (uint32_t)safe_num_to_i64(args[1].as.number) & 31;
     return uf_val_number((double)(a >> b));
 }
 
@@ -955,7 +1016,7 @@ static UfValue std_to_hex(UfRuntime* rt, int argc, UfValue* args) {
         uf_runtime_error(rt, source_span_make(loc, loc), "'to_hex()' expects a number");
         return uf_val_null();
     }
-    uint64_t v = (uint64_t)(int64_t)args[0].as.number;
+    uint64_t v = (uint64_t)safe_num_to_i64(args[0].as.number);
     char buf[32];
     snprintf(buf, sizeof(buf), "%lx", (unsigned long)v);
     return uf_val_string(rt, buf, strlen(buf));
@@ -1172,6 +1233,7 @@ void uf_stdlib_register_runtime(UfRuntime* rt) {
     uf_env_declare(rt->global_env, "recv",          uf_val_native("recv",          std_recv,          1));
     uf_env_declare(rt->global_env, "close_channel", uf_val_native("close_channel", std_close_channel, 1));
     uf_env_declare(rt->global_env, "run_scheduler", uf_val_native("run_scheduler", std_run_scheduler, 0));
+    uf_env_declare(rt->global_env, "run_async",     uf_val_native("run_async",     std_run_async,     -1));
 
     /* Systems / Buffer / Low-Level functions */
     uf_env_declare(rt->global_env, "buffer",              uf_val_native("buffer",              std_buffer,              1));

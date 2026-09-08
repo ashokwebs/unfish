@@ -1,0 +1,19 @@
+enum Result:
+    Ok(value)
+    Err(code)
+
+function process(res):
+    match res:
+        when Ok(v):
+            return v * 2
+        when Err(c):
+            return c
+
+let sum = 0
+let i = 0
+while i < 10000:
+    let r = Result.Ok(i)
+    sum = sum + process(r)
+    i = i + 1
+
+say sum

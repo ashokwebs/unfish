@@ -1,0 +1,4 @@
+# expect-exit: 1
+# expect-error: Syntax Error: Rest parameter cannot have a default value
+function foo(...a = [1]):
+    return a

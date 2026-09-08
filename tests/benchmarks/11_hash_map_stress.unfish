@@ -1,0 +1,12 @@
+let m = {}
+let i = 0
+while i < 20000:
+    m[to_string(i)] = i * 2
+    i = i + 1
+
+let sum = 0
+let j = 0
+while j < 20000:
+    sum = sum + m[to_string(j)]
+    j = j + 1
+say sum

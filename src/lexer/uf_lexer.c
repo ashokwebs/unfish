@@ -45,13 +45,21 @@ static char peek_next(const UfLexer* lexer) {
 
 static char advance(UfLexer* lexer) {
     char c = *lexer->current++;
-    if (c == '\n') {
+    if (c == '\r') {
+        if (*lexer->current == '\n') {
+            lexer->current++;
+        }
         lexer->line++;
         lexer->col = 1;
+        return '\n';
+    } else if (c == '\n') {
+        lexer->line++;
+        lexer->col = 1;
+        return '\n';
     } else {
         lexer->col++;
+        return c;
     }
-    return c;
 }
 
 static bool match(UfLexer* lexer, char expected) {
@@ -112,6 +120,56 @@ static void skip_horizontal_whitespace_and_comments(UfLexer* lexer) {
     }
 }
 
+static UfToken scan_multiline_string(UfLexer* lexer) {
+    UfStrBuf buf;
+    uf_strbuf_init(&buf);
+
+    while (!is_at_end(lexer)) {
+        if (peek(lexer) == '"' && peek_next(lexer) == '"' &&
+            lexer->current[1] != '\0' && lexer->current[2] == '"') {
+            advance(lexer);
+            advance(lexer);
+            advance(lexer);
+
+            char* str_copy = uf_arena_strdup(lexer->arena, buf.data ? buf.data : "");
+            uf_strbuf_free(&buf);
+
+            UfToken token;
+            token.kind = UF_TOK_STRING;
+            token.span = make_span(lexer);
+            token.lexeme = lexer->start;
+            token.length = (size_t)(lexer->current - lexer->start);
+            token.as.string_val = str_copy;
+            return finish_token(lexer, token);
+        }
+
+        char c = advance(lexer);
+        if (c == '\\') {
+            if (is_at_end(lexer)) {
+                uf_strbuf_free(&buf);
+                return error_token(lexer, "Unterminated escape sequence in string", NULL);
+            }
+            char esc = advance(lexer);
+            switch (esc) {
+                case 'n': uf_strbuf_append_char(&buf, '\n'); break;
+                case 't': uf_strbuf_append_char(&buf, '\t'); break;
+                case '"': uf_strbuf_append_char(&buf, '"'); break;
+                case '\\': uf_strbuf_append_char(&buf, '\\'); break;
+                case '\n': break;
+                default:
+                    uf_strbuf_append_char(&buf, '\\');
+                    uf_strbuf_append_char(&buf, esc);
+                    break;
+            }
+        } else {
+            uf_strbuf_append_char(&buf, c);
+        }
+    }
+
+    uf_strbuf_free(&buf);
+    return error_token(lexer, "Unterminated multi-line string literal: missing closing '\"\"\"'", "Add '\"\"\"' to close the string");
+}
+
 static UfToken scan_string(UfLexer* lexer) {
     UfStrBuf buf;
     uf_strbuf_init(&buf);
@@ -134,6 +192,12 @@ static UfToken scan_string(UfLexer* lexer) {
                 case '"': uf_strbuf_append_char(&buf, '"'); break;
                 case '\\': uf_strbuf_append_char(&buf, '\\'); break;
                 default: {
+                    while (!is_at_end(lexer) && peek(lexer) != '"' && peek(lexer) != '\n') {
+                        advance(lexer);
+                    }
+                    if (!is_at_end(lexer) && peek(lexer) == '"') {
+                        advance(lexer);
+                    }
                     uf_strbuf_free(&buf);
                     return error_token(lexer, "Invalid escape sequence in string", "Valid escapes are \\n, \\t, \\\", \\\\");
                 }
@@ -161,6 +225,118 @@ static UfToken scan_string(UfLexer* lexer) {
     token.length = (size_t)(lexer->current - lexer->start);
     token.as.string_val = str_copy;
     return finish_token(lexer, token);
+}
+
+static UfToken scan_fstring(UfLexer* lexer, bool is_multiline) {
+    UfStrBuf buf;
+    uf_strbuf_init(&buf);
+
+    int brace_depth = 0;
+    bool in_expr_string = false;
+
+    while (!is_at_end(lexer)) {
+        if (brace_depth == 0) {
+            if (is_multiline) {
+                if (peek(lexer) == '"' && peek_next(lexer) == '"' &&
+                    lexer->current[1] != '\0' && lexer->current[2] == '"') {
+                    advance(lexer);
+                    advance(lexer);
+                    advance(lexer);
+
+                    char* str_copy = uf_arena_strdup(lexer->arena, buf.data ? buf.data : "");
+                    uf_strbuf_free(&buf);
+
+                    UfToken token;
+                    token.kind = UF_TOK_FSTRING;
+                    token.span = make_span(lexer);
+                    token.lexeme = lexer->start;
+                    token.length = (size_t)(lexer->current - lexer->start);
+                    token.as.string_val = str_copy;
+                    return finish_token(lexer, token);
+                }
+            } else {
+                if (peek(lexer) == '"') {
+                    advance(lexer);
+
+                    char* str_copy = uf_arena_strdup(lexer->arena, buf.data ? buf.data : "");
+                    uf_strbuf_free(&buf);
+
+                    UfToken token;
+                    token.kind = UF_TOK_FSTRING;
+                    token.span = make_span(lexer);
+                    token.lexeme = lexer->start;
+                    token.length = (size_t)(lexer->current - lexer->start);
+                    token.as.string_val = str_copy;
+                    return finish_token(lexer, token);
+                }
+                if (peek(lexer) == '\n') {
+                    uf_strbuf_free(&buf);
+                    return error_token(lexer, "Unterminated f-string literal: string cannot span multiple physical lines without escape", "Close the f-string with '\"'");
+                }
+            }
+        }
+
+        char c = advance(lexer);
+
+        if (c == '\\') {
+            if (is_at_end(lexer)) {
+                uf_strbuf_free(&buf);
+                return error_token(lexer, "Unterminated escape sequence in f-string", NULL);
+            }
+            char esc = advance(lexer);
+            if (brace_depth > 0 && esc == '"') {
+                in_expr_string = !in_expr_string;
+                uf_strbuf_append_char(&buf, '"');
+            } else {
+                uf_strbuf_append_char(&buf, '\\');
+                uf_strbuf_append_char(&buf, esc);
+            }
+            continue;
+        }
+
+        if (brace_depth > 0) {
+            if (c == '"') {
+                in_expr_string = !in_expr_string;
+                uf_strbuf_append_char(&buf, '"');
+                continue;
+            }
+            if (!in_expr_string) {
+                if (c == '{') brace_depth++;
+                else if (c == '}') brace_depth--;
+            }
+            uf_strbuf_append_char(&buf, c);
+            continue;
+        }
+
+        if (c == '{') {
+            if (peek(lexer) == '{') {
+                advance(lexer);
+                uf_strbuf_append(&buf, "{{");
+                continue;
+            }
+            brace_depth = 1;
+            in_expr_string = false;
+            uf_strbuf_append_char(&buf, '{');
+            continue;
+        }
+
+        if (c == '}') {
+            if (peek(lexer) == '}') {
+                advance(lexer);
+                uf_strbuf_append(&buf, "}}");
+                continue;
+            }
+            uf_strbuf_append_char(&buf, '}');
+            continue;
+        }
+
+        uf_strbuf_append_char(&buf, c);
+    }
+
+    uf_strbuf_free(&buf);
+    return error_token(lexer, is_multiline ?
+                       "Unterminated multi-line f-string literal: missing closing '\"\"\"'" :
+                       "Unterminated f-string literal: missing closing '\"'", NULL);
 }
 
 static UfToken scan_number(UfLexer* lexer) {
@@ -200,12 +376,18 @@ static UfToken scan_number(UfLexer* lexer) {
 
     size_t len = (size_t)(lexer->current - lexer->start);
     char num_buf[64];
-    if (len >= sizeof(num_buf)) len = sizeof(num_buf) - 1;
-    memcpy(num_buf, lexer->start, len);
-    num_buf[len] = '\0';
+    char* buf = num_buf;
+    if (len >= sizeof(num_buf)) {
+        buf = (char*)malloc(len + 1);
+    }
+    memcpy(buf, lexer->start, len);
+    buf[len] = '\0';
 
     char* endptr = NULL;
-    double val = strtod(num_buf, &endptr);
+    double val = strtod(buf, &endptr);
+    if (buf != num_buf) {
+        free(buf);
+    }
 
     UfToken token;
     token.kind = UF_TOK_NUMBER;
@@ -234,6 +416,8 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             break;
         case 4:
             if (memcmp(word, "else", 4) == 0) return UF_TOK_ELSE;
+            if (memcmp(word, "enum", 4) == 0) return UF_TOK_ENUM;
+            if (memcmp(word, "impl", 4) == 0) return UF_TOK_IMPL;
             if (memcmp(word, "true", 4) == 0) return UF_TOK_TRUE;
             if (memcmp(word, "null", 4) == 0) return UF_TOK_NULL;
             if (memcmp(word, "from", 4) == 0) return UF_TOK_FROM;
@@ -242,6 +426,9 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
         case 5:
             if (memcmp(word, "while", 5) == 0) return UF_TOK_WHILE;
             if (memcmp(word, "times", 5) == 0) return UF_TOK_TIMES;
+            if (memcmp(word, "trait", 5) == 0) return UF_TOK_TRAIT;
+            if (memcmp(word, "async", 5) == 0) return UF_TOK_ASYNC;
+            if (memcmp(word, "await", 5) == 0) return UF_TOK_AWAIT;
             if (memcmp(word, "false", 5) == 0) return UF_TOK_FALSE;
             if (memcmp(word, "break", 5) == 0) return UF_TOK_BREAK;
             if (memcmp(word, "catch", 5) == 0) return UF_TOK_CATCH;
@@ -252,6 +439,9 @@ static UfTokenKind check_keyword(const char* word, size_t len) {
             if (memcmp(word, "repeat", 6) == 0) return UF_TOK_REPEAT;
             if (memcmp(word, "import", 6) == 0) return UF_TOK_IMPORT;
             if (memcmp(word, "struct", 6) == 0) return UF_TOK_STRUCT;
+            break;
+        case 7:
+            if (memcmp(word, "finally", 7) == 0) return UF_TOK_FINALLY;
             break;
         case 8:
             if (memcmp(word, "function", 8) == 0) return UF_TOK_FUNCTION;
@@ -275,9 +465,7 @@ static UfToken scan_identifier_or_keyword(UfLexer* lexer) {
     token.lexeme = lexer->start;
     token.length = len;
     token.as.number_val = 0;
-    if (kind == UF_TOK_IDENTIFIER) {
-        token.as.string_val = uf_intern(lexer->interner, lexer->start, len);
-    }
+    token.as.string_val = uf_intern(lexer->interner, lexer->start, len);
     return finish_token(lexer, token);
 }
 
@@ -344,8 +532,11 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
 
                 uint32_t current_indent = spaces;
                 uint32_t prev_indent = lexer->indent_stack[lexer->indent_depth];
-
-                if (lexer->paren_depth == 0) {
+                bool allow_indent = (lexer->paren_depth == 0) ||
+                                    (lexer->paren_depth > 0 &&
+                                     (lexer->indent_depth > lexer->paren_indent_stack[lexer->paren_depth - 1] ||
+                                      current_indent > prev_indent));
+                if (allow_indent) {
                     if (current_indent > prev_indent) {
                         if (lexer->indent_depth + 1 >= UF_MAX_INDENT_DEPTH) {
                             return error_token(lexer, "Indentation exceeds maximum nesting depth", NULL);
@@ -423,7 +614,10 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
         char c = advance(lexer);
 
         if (c == '\n') {
-            if (lexer->paren_depth == 0) {
+            bool in_callback = (lexer->paren_depth > 0 &&
+                (lexer->last_token_kind == UF_TOK_COLON ||
+                 lexer->indent_depth > (lexer->paren_depth > 0 ? lexer->paren_indent_stack[lexer->paren_depth - 1] : 0)));
+            if (lexer->paren_depth == 0 || in_callback) {
                 lexer->at_line_start = true;
                 return make_token(lexer, UF_TOK_NEWLINE);
             }
@@ -432,7 +626,10 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
 
         if (c == '\r') {
             if (peek(lexer) == '\n') advance(lexer);
-            if (lexer->paren_depth == 0) {
+            bool in_callback = (lexer->paren_depth > 0 &&
+                (lexer->last_token_kind == UF_TOK_COLON ||
+                 lexer->indent_depth > (lexer->paren_depth > 0 ? lexer->paren_indent_stack[lexer->paren_depth - 1] : 0)));
+            if (lexer->paren_depth == 0 || in_callback) {
                 lexer->at_line_start = true;
                 return make_token(lexer, UF_TOK_NEWLINE);
             }
@@ -443,11 +640,26 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
             return scan_number(lexer);
         }
 
+        if ((c == 'f' || c == 'F') && peek(lexer) == '"') {
+            advance(lexer);
+            if (peek(lexer) == '"' && peek_next(lexer) == '"') {
+                advance(lexer);
+                advance(lexer);
+                return scan_fstring(lexer, true);
+            }
+            return scan_fstring(lexer, false);
+        }
+
         if (isalpha((unsigned char)c) || c == '_') {
             return scan_identifier_or_keyword(lexer);
         }
 
         if (c == '"') {
+            if (peek(lexer) == '"' && peek_next(lexer) == '"') {
+                advance(lexer);
+                advance(lexer);
+                return scan_multiline_string(lexer);
+            }
             return scan_string(lexer);
         }
 
@@ -460,24 +672,38 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
             case ':': return make_token(lexer, UF_TOK_COLON);
             case ',': return make_token(lexer, UF_TOK_COMMA);
             case '(':
+                if (lexer->paren_depth < UF_MAX_INDENT_DEPTH) {
+                    lexer->paren_indent_stack[lexer->paren_depth] = lexer->indent_depth;
+                }
                 lexer->paren_depth++;
                 return make_token(lexer, UF_TOK_LPAREN);
             case ')':
                 if (lexer->paren_depth > 0) lexer->paren_depth--;
                 return make_token(lexer, UF_TOK_RPAREN);
             case '[':
+                if (lexer->paren_depth < UF_MAX_INDENT_DEPTH) {
+                    lexer->paren_indent_stack[lexer->paren_depth] = lexer->indent_depth;
+                }
                 lexer->paren_depth++;
                 return make_token(lexer, UF_TOK_LBRACKET);
             case ']':
                 if (lexer->paren_depth > 0) lexer->paren_depth--;
                 return make_token(lexer, UF_TOK_RBRACKET);
             case '{':
+                if (lexer->paren_depth < UF_MAX_INDENT_DEPTH) {
+                    lexer->paren_indent_stack[lexer->paren_depth] = lexer->indent_depth;
+                }
                 lexer->paren_depth++;
                 return make_token(lexer, UF_TOK_LBRACE);
             case '}':
                 if (lexer->paren_depth > 0) lexer->paren_depth--;
                 return make_token(lexer, UF_TOK_RBRACE);
             case '.':
+                if (peek(lexer) == '.' && peek_next(lexer) == '.') {
+                    advance(lexer);
+                    advance(lexer);
+                    return make_token(lexer, UF_TOK_DOTDOTDOT);
+                }
                 return make_token(lexer, UF_TOK_DOT);
             case '=':
                 return make_token(lexer, match(lexer, '=') ? UF_TOK_EQEQ : UF_TOK_EQUAL);
@@ -488,7 +714,10 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
                 return make_token(lexer, match(lexer, '=') ? UF_TOK_LTEQ : UF_TOK_LT);
             case '>':
                 return make_token(lexer, match(lexer, '=') ? UF_TOK_GTEQ : UF_TOK_GT);
+            case '|':
+                return make_token(lexer, match(lexer, '>') ? UF_TOK_PIPE_RIGHT : UF_TOK_PIPE);
         }
+
 
         return error_token(lexer, "Unexpected character in source", "Check for non-ASCII characters or unsupported symbols");
     }

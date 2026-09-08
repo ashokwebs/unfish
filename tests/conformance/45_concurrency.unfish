@@ -1,0 +1,30 @@
+# expect: channel
+# expect: fiber
+# expect: fiber
+# expect: fibers executed: 2
+# expect: from-fiber-1
+# expect: from-fiber-2
+# expect: null
+
+# Test cooperative fibers and channels
+
+function worker(id, ch):
+    send(ch, "from-fiber-" + to_string(id))
+    yield(id)
+
+let ch = channel(4)
+say(type_of(ch))
+
+let f1 = spawn(worker, 1, ch)
+let f2 = spawn(worker, 2, ch)
+say(type_of(f1))
+say(type_of(f2))
+
+let count = run_scheduler()
+say("fibers executed: " + to_string(count))
+
+say(recv(ch))
+say(recv(ch))
+
+close_channel(ch)
+say(recv(ch))

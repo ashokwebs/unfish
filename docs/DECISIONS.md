@@ -540,3 +540,23 @@
      - Added comprehensive unit test suite `tests/unit/test_systems.c` testing zero-allocation buffers, byte manipulations, slices, string round-trips, little-endian access, signed integer conversions, memory inspection, and GC sweeps under stress.
      - Verified clean pass across all 16 unit test suites, stress tests, 51/51 conformance tests, and 51/51 differential tests with AddressSanitizer and UndefinedBehaviorSanitizer enabled.
 * **Consequences**: Equips Unfish with systems programming capabilities, binary serialization tools, and low-level debugging facilities without sacrificing memory safety.
+
+## ADR 035: Native C99 Concurrency & 3-Way Differential Parity Hardening
+* **Date**: Phase 1 Hardening (v1.1.0)
+* **Status**: Accepted
+* **Context**: While AST Interpreter and Bytecode VM supported cooperative fibers and channels, the native C99 emission backend (`build`) lacked concurrency primitives and buffer slice compatibility, preventing 100% 3-way differential parity across all test suites.
+* **Decision**:
+  1. **Native Concurrency Runtime**: Integrated `UfRtFiber`, `UfRtChannel`, and `UfRtScheduler` directly into `src/codegen/unfish_runtime.h`, with `uf_spawn`, `uf_channel`, `uf_send`, `uf_recv`, `uf_close_channel`, `uf_yield`, and `uf_run_scheduler`.
+  2. **Codegen Dispatch**: Extended `is_builtin_name` and `emit_expr` in `src/codegen/uf_emit_c.c` to emit native concurrency calls with dynamic closure wrapping for function pointers.
+  3. **Buffer Slice Alignment**: Unified `buffer_slice` across AST interpreter, VM, and native C backend to uniformly accept `(buffer, start, [len])` with boundary clamping.
+* **Consequences**: Complete 3-way differential execution parity is maintained across AST Interpreter, Bytecode VM, and compiled Native C99 binaries.
+
+## ADR 036: Undefined Behavior Guards on Bitwise Conversions & JSON Unicode Escapes
+* **Date**: Phase 1 Hardening (v1.1.0)
+* **Status**: Accepted
+* **Context**: Casting `NaN` or `Inf` floating-point numbers to `int64_t` or `uint32_t` is undefined behavior in ANSI C99. Additionally, JSON strings containing `\uXXXX` unicode escape sequences must decode portably across all platforms without external dependencies.
+* **Decision**:
+  1. **Safe Numerical Clamping**: Implemented `safe_num_to_i64` (runtime) and `_uf_safe_to_i64` (native backend) checking `isnan()` and `isinf()` and clamping to `INT64_MAX` / `INT64_MIN` before casting.
+  2. **In-Tree UTF-8 Hex Decoder**: Added portable `\uXXXX` 1-to-4 byte UTF-8 encoding/decoding in `uf_mod_json.c`, `unfish_runtime.h`, and `uf_blocks_import.c`.
+* **Consequences**: Eliminates undefined behavior traps under Clang/GCC sanitizers and ensures RFC 8259 JSON conformance without third-party libraries.
+

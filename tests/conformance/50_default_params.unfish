@@ -1,0 +1,74 @@
+# expect: Hello, World!
+# expect: Hello, Alice!
+# expect: 15
+# expect: 6
+# expect: 10
+# expect: Hello, World! You are 25 years old.
+# expect: Hello, Bob! You are 30 years old.
+# expect: Hello, Charlie! You are 18 years old.
+# expect: 3
+# expect: inner_default
+# expect: override
+# expect: 55
+# expect: result
+
+# 1. Basic default parameter
+function greet(name="World"):
+    return "Hello, " + name + "!"
+
+say greet()
+say greet("Alice")
+
+# 2. Multiple params with some defaults
+function add(a, b=10):
+    return a + b
+
+say add(5)
+say add(3, 3)
+
+# 3. All params with defaults
+function with_all_defaults(x=10):
+    return x
+
+say with_all_defaults()
+
+# 4. Multiple default params
+function info(name="World", age=25):
+    return "Hello, " + name + "! You are " + age + " years old."
+
+say info()
+say info("Bob", 30)
+say info("Charlie", 18)
+
+# 5. Default params with expressions
+function add_offset(a, offset=1+2):
+    return a + offset
+
+say add_offset(0)
+
+# 6. Default params in closures
+function make_greeter(dval="inner_default"):
+    let captured = dval
+    function inner():
+        return captured
+    return inner
+
+let g = make_greeter()
+say g()
+let g2 = make_greeter("override")
+say g2()
+
+# 7. Default params with recursion
+function fib(n, memo=null):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+say fib(10)
+
+# 8. Default param with function expression
+let identity = function(x): return x
+let process = function(val, transform=identity):
+    return transform(val)
+
+say process("result")

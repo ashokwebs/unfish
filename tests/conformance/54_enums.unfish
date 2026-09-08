@@ -1,0 +1,112 @@
+# expect: Color.Red
+# expect: Color.Green
+# expect: Color.Blue
+# expect: true
+# expect: false
+# expect: 0
+# expect: Red
+# expect: 2
+# expect: Blue
+# expect: Status.Active
+# expect: Status.Pending
+# expect: Circle(10)
+# expect: Rectangle(4, 5)
+# expect: Shape.Point
+# expect: 0
+# expect: Circle
+# expect: 10
+# expect: 4
+# expect: 5
+# expect: 4
+# expect: 5
+# expect: true
+# expect: false
+# expect: false
+# expect: Circle with radius 10
+# expect: Rect 4x5
+# expect: A point
+# expect: It is red
+# expect: It is green
+# expect: It is blue
+# expect: 42
+
+# Unit enums block
+enum Color:
+    Red
+    Green
+    Blue
+
+say Color.Red
+say Color.Green
+say Color.Blue
+say Color.Red == Red
+say Red == Blue
+say Color.Red.tag
+say Color.Red.name
+say Color.Blue.tag
+say Color.Blue.name
+
+# Inline enums
+enum Status: Active, Inactive, Pending
+say Status.Active
+say Pending
+
+# Sum types with payloads
+enum Shape:
+    Circle(radius)
+    Rectangle(width, height)
+    Point
+
+let c = Circle(10)
+let r = Rectangle(4, 5)
+let p = Shape.Point
+
+say c
+say r
+say p
+say c.tag
+say c.name
+say c.radius
+say r.width
+say r.height
+say r[0]
+say r[1]
+
+let c2 = Circle(10)
+let c3 = Circle(20)
+say c == c2
+say c == c3
+say c == r
+
+# Pattern matching sum types
+function describe_shape(s):
+    match s:
+        when Shape.Circle(rad):
+            say "Circle with radius " + to_string(rad)
+        when Rectangle(w, h):
+            say "Rect " + to_string(w) + "x" + to_string(h)
+        when Point:
+            say "A point"
+
+describe_shape(c)
+describe_shape(r)
+describe_shape(p)
+
+# Pattern matching unit enums
+function describe_color(col):
+    match col:
+        when Color.Red:
+            say "It is red"
+        when Green:
+            say "It is green"
+        when Blue:
+            say "It is blue"
+
+describe_color(Red)
+describe_color(Color.Green)
+describe_color(Blue)
+
+# First-class variant constructors
+let mk_circle = Shape.Circle
+let c4 = mk_circle(42)
+say c4.radius

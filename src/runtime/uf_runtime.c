@@ -4,6 +4,8 @@
 #include "uf_module.h"
 #include "../compiler/uf_chunk.h"
 #include "../vm/uf_vm.h"
+#include "../vm2/uf_regvm.h"
+#include "../tooling/uf_profiler.h"
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
@@ -481,9 +483,11 @@ static void register_builtins(UfRuntime* rt) {
 }
 
 void uf_runtime_push_temp_root(UfRuntime* rt, UfValue val) {
-    if (rt->temp_root_count < UF_MAX_TEMP_ROOTS) {
-        rt->temp_roots[rt->temp_root_count++] = val;
+    if (rt->temp_root_count >= UF_MAX_TEMP_ROOTS) {
+        fprintf(stderr, "Fatal error: Temp root stack overflow (> %d)\n", UF_MAX_TEMP_ROOTS);
+        abort();
     }
+    rt->temp_roots[rt->temp_root_count++] = val;
 }
 
 void uf_runtime_pop_temp_root(UfRuntime* rt) {
@@ -501,6 +505,7 @@ void uf_runtime_pop_temp_roots(UfRuntime* rt, size_t count) {
 }
 
 void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj, size_t size) {
+    obj->size = size;
     rt->bytes_allocated += size;
 
     if (rt->bytes_allocated > rt->next_gc_threshold) {
@@ -555,6 +560,33 @@ void uf_gc_mark_value(UfValue val) {
     } else if (val.kind == UF_VAL_STRUCT_DEF) {
         if (val.as.struct_def && !val.as.struct_def->obj.marked) {
             val.as.struct_def->obj.marked = true;
+            for (size_t i = 0; i < val.as.struct_def->method_count; ++i) {
+                uf_gc_mark_value(val.as.struct_def->method_values[i]);
+            }
+        }
+    } else if (val.kind == UF_VAL_ENUM_DEF) {
+        if (val.as.enum_def && !val.as.enum_def->obj.marked) {
+            val.as.enum_def->obj.marked = true;
+        }
+    } else if (val.kind == UF_VAL_TRAIT_DEF) {
+        if (val.as.trait_def && !val.as.trait_def->obj.marked) {
+            val.as.trait_def->obj.marked = true;
+        }
+    } else if (val.kind == UF_VAL_ENUM_VAL) {
+        if (val.as.enum_val && !val.as.enum_val->obj.marked) {
+            val.as.enum_val->obj.marked = true;
+            if (val.as.enum_val->def && !val.as.enum_val->def->obj.marked) {
+                val.as.enum_val->def->obj.marked = true;
+            }
+            for (size_t i = 0; i < val.as.enum_val->field_count; ++i) {
+                uf_gc_mark_value(val.as.enum_val->fields[i]);
+            }
+        }
+    } else if (val.kind == UF_VAL_BOUND_METHOD) {
+        if (val.as.bound_method && !val.as.bound_method->obj.marked) {
+            val.as.bound_method->obj.marked = true;
+            uf_gc_mark_value(val.as.bound_method->receiver);
+            uf_gc_mark_value(val.as.bound_method->method);
         }
     } else if (val.kind == UF_VAL_INSTANCE) {
         if (val.as.instance && !val.as.instance->obj.marked) {
@@ -593,6 +625,33 @@ void uf_gc_mark_value(UfValue val) {
                 }
             }
         }
+    } else if (val.kind == UF_VAL_REG_FN) {
+        if (val.as.reg_fn && !val.as.reg_fn->obj.marked) {
+            val.as.reg_fn->obj.marked = true;
+            for (size_t i = 0; i < val.as.reg_fn->chunk.const_count; ++i) {
+                uf_gc_mark_value(val.as.reg_fn->chunk.constants[i]);
+            }
+        }
+    } else if (val.kind == UF_VAL_REG_CLOSURE) {
+        UfRegClosure* cl = val.as.reg_closure;
+        if (cl && !cl->obj.marked) {
+            cl->obj.marked = true;
+            if (cl->function && !cl->function->obj.marked) {
+                cl->function->obj.marked = true;
+                for (size_t i = 0; i < cl->function->chunk.const_count; ++i) {
+                    uf_gc_mark_value(cl->function->chunk.constants[i]);
+                }
+            }
+            for (size_t i = 0; i < cl->upvalue_count; ++i) {
+                UfUpvalueCell* cell = cl->upvalues[i];
+                if (cell && !cell->obj.marked) {
+                    cell->obj.marked = true;
+                    if (cell->location) {
+                        uf_gc_mark_value(*cell->location);
+                    }
+                }
+            }
+        }
     } else if (val.kind == UF_VAL_FIBER) {
         if (val.as.fiber && !val.as.fiber->obj.marked) {
             val.as.fiber->obj.marked = true;
@@ -606,8 +665,10 @@ void uf_gc_mark_value(UfValue val) {
         if (val.as.channel && !val.as.channel->obj.marked) {
             val.as.channel->obj.marked = true;
             UfChannel* ch = val.as.channel;
-            for (size_t i = 0; i < ch->count; ++i) {
-                uf_gc_mark_value(ch->buffer[(ch->head + i) % ch->capacity]);
+            if (ch->capacity > 0) {
+                for (size_t i = 0; i < ch->count; ++i) {
+                    uf_gc_mark_value(ch->buffer[(ch->head + i) % ch->capacity]);
+                }
             }
             UfFiber* f = ch->wait_send_head;
             while (f) {
@@ -622,6 +683,17 @@ void uf_gc_mark_value(UfValue val) {
         }
     } else if (val.kind == UF_VAL_BUFFER) {
         if (val.as.buffer) val.as.buffer->obj.marked = true;
+    } else if (val.kind == UF_VAL_PROMISE) {
+        if (val.as.promise && !val.as.promise->obj.marked) {
+            val.as.promise->obj.marked = true;
+            uf_gc_mark_value(val.as.promise->result);
+            uf_gc_mark_value(val.as.promise->error);
+            for (size_t i = 0; i < val.as.promise->waiter_count; ++i) {
+                if (val.as.promise->waiters[i]) {
+                    uf_gc_mark_value(uf_val_fiber(NULL, val.as.promise->waiters[i]));
+                }
+            }
+        }
     }
 }
 
@@ -655,6 +727,7 @@ void uf_gc_collect(UfRuntime* rt) {
 
     for (size_t i = 0; i < rt->frame_count; ++i) {
         uf_gc_mark_env(rt->frames[i].env);
+        uf_gc_mark_env(rt->frames[i].caller_env);
     }
 
     for (size_t i = 0; i < rt->temp_root_count; ++i) {
@@ -704,6 +777,33 @@ void uf_gc_collect(UfRuntime* rt) {
         }
     }
 
+    /* Mark active RegVM stack, frames, and open upvalues */
+    if (rt->active_regvm) {
+        UfRegVM* vm = (UfRegVM*)rt->active_regvm;
+        for (UfValue* slot = vm->stack; slot < vm->stack_top; ++slot) {
+            uf_gc_mark_value(*slot);
+        }
+        for (int i = 0; i < vm->frame_count; ++i) {
+            if (vm->frames[i].closure) {
+                uf_gc_mark_value(uf_val_reg_closure(rt, vm->frames[i].closure));
+            }
+        }
+        for (UfUpvalueCell* up = vm->open_upvalues; up != NULL; up = up->next) {
+            up->obj.marked = true;
+            if (up->location) {
+                uf_gc_mark_value(*up->location);
+            }
+            uf_gc_mark_value(up->closed);
+        }
+    }
+
+    /* Mark try handlers */
+    for (size_t i = 0; i < rt->try_handler_count; ++i) {
+        if (rt->try_handlers[i].scope_env) {
+            uf_gc_mark_env(rt->try_handlers[i].scope_env);
+        }
+    }
+
     /* 2. Sweep */
     UfObj** curr = &rt->all_objects;
     while (*curr) {
@@ -713,6 +813,11 @@ void uf_gc_collect(UfRuntime* rt) {
             curr = &obj->next;
         } else {
             *curr = obj->next;
+            if (rt->bytes_allocated >= obj->size) {
+                rt->bytes_allocated -= obj->size;
+            } else {
+                rt->bytes_allocated = 0;
+            }
             if (obj->kind == UF_OBJ_ENV) {
                 uf_env_free((UfEnv*)obj);
             } else if (obj->kind == UF_OBJ_ARRAY) {
@@ -738,13 +843,43 @@ void uf_gc_collect(UfRuntime* rt) {
                 free(inst);
             } else if (obj->kind == UF_OBJ_STRUCT_DEF) {
                 UfStructDefObject* sdef = (UfStructDefObject*)obj;
+                if (sdef->method_names) free((void*)sdef->method_names);
+                if (sdef->method_values) free((void*)sdef->method_values);
+                if (sdef->impl_traits) free((void*)sdef->impl_traits);
                 free(sdef);
+            } else if (obj->kind == UF_OBJ_BOUND_METHOD) {
+                UfBoundMethodObject* bm = (UfBoundMethodObject*)obj;
+                free(bm);
+            } else if (obj->kind == UF_OBJ_TRAIT_DEF) {
+                UfTraitDefObject* tdef = (UfTraitDefObject*)obj;
+                free(tdef);
+            } else if (obj->kind == UF_OBJ_ENUM_DEF) {
+                UfEnumDefObject* edef = (UfEnumDefObject*)obj;
+                if (edef->variant_names) free((void*)edef->variant_names);
+                if (edef->variant_field_counts) free((void*)edef->variant_field_counts);
+                if (edef->variant_field_names) free((void*)edef->variant_field_names);
+                if (edef->variant_field_types) free((void*)edef->variant_field_types);
+                free(edef);
+            } else if (obj->kind == UF_OBJ_ENUM_VAL) {
+                UfEnumValObject* ev = (UfEnumValObject*)obj;
+                if (ev->fields) free(ev->fields);
+                free(ev);
             } else if (obj->kind == UF_OBJ_BYTECODE_FN) {
                 UfBytecodeFunction* bfn = (UfBytecodeFunction*)obj;
                 uf_chunk_free(&bfn->chunk);
                 free(bfn);
             } else if (obj->kind == UF_OBJ_CLOSURE) {
                 UfClosureObject* cl = (UfClosureObject*)obj;
+                if (cl->upvalues) free(cl->upvalues);
+                free(cl);
+            } else if (obj->kind == UF_OBJ_REG_FN) {
+                UfRegFunction* rfn = (UfRegFunction*)obj;
+                uf_reg_chunk_free(&rfn->chunk);
+                if (rfn->upvalues) free(rfn->upvalues);
+                if (rfn->name) free((char*)rfn->name);
+                free(rfn);
+            } else if (obj->kind == UF_OBJ_REG_CLOSURE) {
+                UfRegClosure* cl = (UfRegClosure*)obj;
                 if (cl->upvalues) free(cl->upvalues);
                 free(cl);
             } else if (obj->kind == UF_OBJ_UPVALUE) {
@@ -757,6 +892,8 @@ void uf_gc_collect(UfRuntime* rt) {
                 UfBufferObject* buf = (UfBufferObject*)obj;
                 if (buf->data) free(buf->data);
                 free(buf);
+            } else if (obj->kind == UF_OBJ_PROMISE) {
+                uf_promise_free((UfPromiseObject*)obj);
             } else {
                 free(obj);
             }
@@ -799,6 +936,7 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->current_error = uf_val_null();
     rt->call_fn = NULL;
     rt->active_vm = NULL;
+    rt->active_regvm = NULL;
     rt->out_stream = stdout;
     rt->err_stream = stderr;
     rt->reporter = reporter;
@@ -806,6 +944,7 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->debug_user_ctx = NULL;
     rt->argc = 0;
     rt->argv = NULL;
+    rt->profiler = NULL;
     rt->scheduler = NULL;
     uf_scheduler_init(rt);
 
@@ -855,13 +994,40 @@ void uf_runtime_free(UfRuntime* rt) {
             free(inst);
         } else if (obj->kind == UF_OBJ_STRUCT_DEF) {
             UfStructDefObject* sdef = (UfStructDefObject*)obj;
+            if (sdef->method_names) free((void*)sdef->method_names);
+            if (sdef->method_values) free((void*)sdef->method_values);
+            if (sdef->impl_traits) free((void*)sdef->impl_traits);
             free(sdef);
+        } else if (obj->kind == UF_OBJ_TRAIT_DEF) {
+            UfTraitDefObject* tdef = (UfTraitDefObject*)obj;
+            free(tdef);
+        } else if (obj->kind == UF_OBJ_ENUM_DEF) {
+            UfEnumDefObject* edef = (UfEnumDefObject*)obj;
+            if (edef->variant_names) free((void*)edef->variant_names);
+            if (edef->variant_field_counts) free((void*)edef->variant_field_counts);
+            if (edef->variant_field_names) free((void*)edef->variant_field_names);
+            if (edef->variant_field_types) free((void*)edef->variant_field_types);
+            free(edef);
+        } else if (obj->kind == UF_OBJ_ENUM_VAL) {
+            UfEnumValObject* ev = (UfEnumValObject*)obj;
+            if (ev->fields) free(ev->fields);
+            free(ev);
         } else if (obj->kind == UF_OBJ_BYTECODE_FN) {
             UfBytecodeFunction* bfn = (UfBytecodeFunction*)obj;
             uf_chunk_free(&bfn->chunk);
             free(bfn);
         } else if (obj->kind == UF_OBJ_CLOSURE) {
             UfClosureObject* cl = (UfClosureObject*)obj;
+            if (cl->upvalues) free(cl->upvalues);
+            free(cl);
+        } else if (obj->kind == UF_OBJ_REG_FN) {
+            UfRegFunction* rfn = (UfRegFunction*)obj;
+            uf_reg_chunk_free(&rfn->chunk);
+            if (rfn->upvalues) free(rfn->upvalues);
+            if (rfn->name) free((char*)rfn->name);
+            free(rfn);
+        } else if (obj->kind == UF_OBJ_REG_CLOSURE) {
+            UfRegClosure* cl = (UfRegClosure*)obj;
             if (cl->upvalues) free(cl->upvalues);
             free(cl);
         } else if (obj->kind == UF_OBJ_UPVALUE) {
@@ -874,6 +1040,8 @@ void uf_runtime_free(UfRuntime* rt) {
             UfBufferObject* buf = (UfBufferObject*)obj;
             if (buf->data) free(buf->data);
             free(buf);
+        } else if (obj->kind == UF_OBJ_PROMISE) {
+            uf_promise_free((UfPromiseObject*)obj);
         } else {
             free(obj);
         }
@@ -892,13 +1060,22 @@ bool uf_runtime_push_frame(UfRuntime* rt, const char* fn_name, SourceSpan call_s
     rt->frames[rt->frame_count].fn_name = fn_name;
     rt->frames[rt->frame_count].call_span = call_span;
     rt->frames[rt->frame_count].env = env;
+    rt->frames[rt->frame_count].caller_env = rt->current_env;
     rt->frame_count++;
+    if (rt->profiler) {
+        uf_profiler_enter(rt->profiler, fn_name);
+    }
     return true;
 }
 
 void uf_runtime_pop_frame(UfRuntime* rt) {
     if (rt->frame_count > 0) {
         rt->frame_count--;
+        if (rt->profiler) {
+            uf_profiler_exit(rt->profiler, rt->frames[rt->frame_count].fn_name);
+        }
+        rt->frames[rt->frame_count].env = NULL;
+        rt->frames[rt->frame_count].caller_env = NULL;
     }
 }
 

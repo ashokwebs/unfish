@@ -1,0 +1,12 @@
+# expect-exit: 2
+# expect-error: Method 'scale' on struct 'Box' has 1 parameter(s), but trait 'Resizable' requires 2
+
+trait Resizable:
+    fn scale(factor: Number) -> Number
+
+struct Box:
+    size: Number
+
+    impl Resizable:
+        fn scale(self) -> Number:
+            return self.size

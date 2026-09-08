@@ -1,4 +1,6 @@
-#define _POSIX_C_SOURCE 199309L
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "uf_mod_time.h"
 #include "../runtime/uf_runtime.h"
 #include <time.h>

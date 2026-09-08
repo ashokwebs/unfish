@@ -1,0 +1,8 @@
+# expect-exit: 3
+# expect-error: TypeError: Enum variant 'Ok' expects 1 argument, but 2 provided
+
+enum Result:
+    Ok(val)
+    Err(msg)
+
+let c = Result.Ok(1, 2)

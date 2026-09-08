@@ -24,6 +24,55 @@
     "strings": {
       "patterns": [
         {
+          "name": "string.interpolated.triple.unfish",
+          "begin": "[fF]\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.unfish",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.line.unfish",
+              "begin": "(?<!\\{)\\{(?!\\{)",
+              "end": "\\}",
+              "patterns": [
+                { "include": "$self" }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.double.unfish",
+          "begin": "[fF]\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.unfish",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.line.unfish",
+              "begin": "(?<!\\{)\\{(?!\\{)",
+              "end": "\\}",
+              "patterns": [
+                { "include": "$self" }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.triple.double.unfish",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.unfish",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
           "name": "string.quoted.double.unfish",
           "begin": "\"",
           "end": "\"",
@@ -40,7 +89,7 @@
       "patterns": [
         {
           "name": "keyword.control.unfish",
-          "match": "\\b(let|function|return|if|else|while|repeat|for|in|break|continue|try|catch|import|from|as|struct|match|when)\\b"
+          "match": "\\b(let|function|return|if|else|while|repeat|times|for|in|break|continue|try|catch|import|from|as|struct|enum|match|when)\\b"
         }
       ]
     },
@@ -48,7 +97,7 @@
       "patterns": [
         {
           "name": "entity.name.type.unfish",
-          "match": "\\b(Number|String|Boolean|Array|Map|Function|Null|Any|Error)\\b"
+          "match": "\\b(Number|String|Boolean|Array|Map|Function|Null|Any|Error|Buffer|Channel|Fiber)\\b"
         }
       ]
     },
@@ -56,7 +105,7 @@
       "patterns": [
         {
           "name": "constant.language.unfish",
-          "match": "\\b(true|false|null)\\b"
+          "match": "\\b(true|false|null|PI|E|INFINITY)\\b"
         }
       ]
     },
@@ -64,7 +113,7 @@
       "patterns": [
         {
           "name": "constant.numeric.unfish",
-          "match": "\\b\\d+(\\.\\d+)?\\b"
+          "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
         }
       ]
     },
@@ -72,7 +121,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.unfish",
-          "match": "\\b(say|print|len|type_of|push|pop|keys|values|has_key|delete|abs|sqrt|floor|ceil|round|min|max|pow)\\b"
+          "match": "\\b(say|print|len|type_of|push|pop|keys|values|has_key|delete|map|filter|reduce|sort|reverse|find|every|some|range|abs|sqrt|floor|ceil|round|min|max|pow|log|sin|cos|tan|random|random_int|trim|to_upper|to_lower|contains|starts_with|ends_with|char_at|to_number|to_string|repeat_string|substring|index_of|split|join|replace|buffer|buffer_from_string|buffer_to_string|buffer_size|buffer_get|buffer_set|buffer_fill|buffer_slice|buffer_read_u16_le|buffer_write_u16_le|buffer_read_u32_le|buffer_write_u32_le|buffer_read_i32_le|buffer_write_i32_le|u8|i8|u16|i16|u32|i32|band|bor|bxor|bnot|shl|shr|sar|to_hex|from_hex|buffer_to_hex|buffer_from_hex|spawn|yield|channel|send|recv|close_channel|run_scheduler|clock|assert|error|inspect)\\b"
         }
       ]
     },

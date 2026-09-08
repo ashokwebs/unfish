@@ -2,7 +2,10 @@
 
 import sys
 
-assert(sys.platform() == "linux")
+let plat = sys.platform()
+assert(plat == "linux" or plat == "wasi" or plat == "wasm" or plat == "darwin" or plat == "windows")
+
+
 
 let args = sys.args()
 assert(len(args) >= 1)

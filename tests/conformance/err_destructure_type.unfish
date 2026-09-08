@@ -1,0 +1,3 @@
+# expect-exit: 3
+# expect-error: TypeError: Cannot destructure non-array value
+let [x, y] = "not an array"

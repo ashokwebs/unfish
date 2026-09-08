@@ -1,0 +1,47 @@
+# expect: Hello World!
+# expect: Sum of 10 + 20 = 30
+# expect: Upper: UNFISH
+# expect: Number: 42, Bool: true, Null: null
+# expect: Literal {brace} and 10
+# expect: just plain text
+# expect: empty: ''
+# expect: Value: val
+# expect: Multi line:
+# expect: A = 10
+# expect: B = 20
+# expect: Done
+
+let name = "World"
+let greeting = f"Hello {name}!"
+say greeting
+
+let a = 10
+let b = 20
+let sum_str = f"Sum of {a} + {b} = {a + b}"
+say sum_str
+
+let upper = f"Upper: {to_upper(\"unfish\")}"
+say upper
+
+let mixed = f"Number: {42}, Bool: {true}, Null: {null}"
+say mixed
+
+let escaped = f"Literal {{brace}} and {a}"
+say escaped
+
+let plain = f"just plain text"
+say plain
+
+let empty = f""
+say f"empty: '{empty}'"
+
+let m = {"key": "val"}
+let lookup = f"Value: {m[\"key\"]}"
+say lookup
+
+let multi_f = f"""Multi line:
+A = {a}
+B = {b}"""
+say multi_f
+
+say "Done"

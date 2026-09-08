@@ -16,6 +16,7 @@ typedef enum {
     UF_TOK_IDENTIFIER,
     UF_TOK_NUMBER,
     UF_TOK_STRING,
+    UF_TOK_FSTRING,
 
     /* Keywords */
     UF_TOK_LET,
@@ -33,10 +34,16 @@ typedef enum {
     UF_TOK_CONTINUE,
     UF_TOK_TRY,
     UF_TOK_CATCH,
+    UF_TOK_FINALLY,
     UF_TOK_IMPORT,
     UF_TOK_FROM,
     UF_TOK_AS,
     UF_TOK_STRUCT,
+    UF_TOK_ENUM,
+    UF_TOK_TRAIT,
+    UF_TOK_IMPL,
+    UF_TOK_ASYNC,
+    UF_TOK_AWAIT,
     UF_TOK_MATCH,
     UF_TOK_WHEN,
     UF_TOK_AND,
@@ -67,8 +74,12 @@ typedef enum {
     UF_TOK_RBRACKET,   /* ] */
     UF_TOK_LBRACE,     /* { */
     UF_TOK_RBRACE,     /* } */
-    UF_TOK_DOT         /* . */
+    UF_TOK_DOT,        /* . */
+    UF_TOK_DOTDOTDOT,  /* ... */
+    UF_TOK_PIPE,       /* | */
+    UF_TOK_PIPE_RIGHT  /* |> */
 } UfTokenKind;
+
 
 typedef struct {
     UfTokenKind kind;

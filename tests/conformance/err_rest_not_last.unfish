@@ -1,0 +1,4 @@
+# expect-exit: 1
+# expect-error: Syntax Error: Rest parameter must be the last parameter
+function foo(...a, b):
+    return a

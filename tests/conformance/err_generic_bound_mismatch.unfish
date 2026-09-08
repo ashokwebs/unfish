@@ -1,0 +1,14 @@
+# expect-exit: 2
+# expect-error: Type 'Dog' does not satisfy trait bound 'Describable' for type parameter 'T' in call to 'show'
+
+trait Describable:
+    fn describe() -> String
+
+struct Dog:
+    name: String
+
+fn show<T: Describable>(x: T):
+    say x
+
+let d = Dog("Rover")
+show(d)

@@ -5,6 +5,9 @@
 It is designed to provide an unbroken path of intellectual ascent: from visual block programming, into clean indentation-based text programming, to algorithms, data structures, runtime architecture, garbage collection, bytecode virtual machines, and low-level systems programming.
 
 > *"Hide complexity until the learner is ready — never hide it forever."*
+> 
+> [!IMPORTANT]
+> **AI AGENTS**: A comprehensive roadmap and state audit has been compiled. Please read [unfish_master_plan.md](unfish_master_plan.md) before starting any work on the codebase.
 
 ---
 

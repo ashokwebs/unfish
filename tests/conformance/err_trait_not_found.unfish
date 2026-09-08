@@ -1,0 +1,9 @@
+# expect-exit: 2
+# expect-error: Trait 'NonExistentTrait' not found
+
+struct Widget:
+    id: Number
+
+    impl NonExistentTrait:
+        fn do_something(self):
+            return 0

@@ -1,0 +1,91 @@
+# expect: 8
+# expect: 65
+# expect: 66
+# expect: 67
+# expect: 42
+# expect: 42
+# expect: 13
+# expect: Hello, World!
+# expect: World!
+# expect: 12345
+# expect: 305419896
+# expect: -42
+# expect: 1
+# expect: -1
+# expect: 1
+# expect: -1
+# expect: 8
+# expect: 14
+# expect: 6
+# expect: 4294967295
+# expect: 16
+# expect: 4
+# expect: -4
+# expect: ff
+# expect: 255
+# expect: 255
+# expect: 414243
+# expect: ABC
+
+# Test systems buffers and bitwise operations
+let b = buffer(8)
+say(buffer_size(b))
+
+# buffer_set and buffer_get
+buffer_set(b, 0, 65)
+buffer_set(b, 1, 66)
+buffer_set(b, 2, 67)
+say(buffer_get(b, 0))
+say(buffer_get(b, 1))
+say(buffer_get(b, 2))
+
+# buffer_fill
+buffer_fill(b, 42)
+say(buffer_get(b, 0))
+say(buffer_get(b, 7))
+
+# buffer_from_string and buffer_to_string
+let b2 = buffer_from_string("Hello, World!")
+say(buffer_size(b2))
+say(buffer_to_string(b2))
+
+# buffer_slice
+let sliced = buffer_slice(b2, 7, 12)
+say(buffer_to_string(sliced))
+
+# 16-bit and 32-bit LE read/write
+let num_buf = buffer(16)
+buffer_write_u16_le(num_buf, 0, 12345)
+say(buffer_read_u16_le(num_buf, 0))
+
+buffer_write_u32_le(num_buf, 4, 305419896)
+say(buffer_read_u32_le(num_buf, 4))
+
+buffer_write_i32_le(num_buf, 8, -42)
+say(buffer_read_i32_le(num_buf, 8))
+
+# Integer casting
+say(u8(257))
+say(i8(255))
+say(u16(65537))
+say(i16(65535))
+
+# Bitwise ops
+say(band(12, 10))
+say(bor(12, 10))
+say(bxor(12, 10))
+say(bnot(0))
+say(shl(1, 4))
+say(shr(16, 2))
+say(sar(-16, 2))
+
+# Hex utilities
+say(to_hex(255))
+say(from_hex("ff"))
+say(from_hex("0xff"))
+
+let hex_buf = buffer_from_string("ABC")
+let hex_str = buffer_to_hex(hex_buf)
+say(hex_str)
+let back_buf = buffer_from_hex(hex_str)
+say(buffer_to_string(back_buf))

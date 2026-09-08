@@ -1,5 +1,8 @@
-# Unfish Standard Testing Framework
+## Unfish Standard Testing Framework
+## Module for assertions and lightweight test suite execution.
 
+## Compares actual == expected. Raises AssertionError if they differ.
+## Parameters: actual, expected, message (required; string or null)
 function assert_equal(actual, expected, message):
     if actual != expected:
         let msg = "Assertion failed: expected " + expected + ", got " + actual
@@ -7,6 +10,8 @@ function assert_equal(actual, expected, message):
             msg = message + " (" + msg + ")"
         error(msg, "AssertionError")
 
+## Asserts that condition evaluates to true. Raises AssertionError if false.
+## Parameters: condition, message (required; string or null)
 function assert_true(condition, message):
     if not condition:
         let msg = "Assertion failed: expected true"
@@ -14,6 +19,8 @@ function assert_true(condition, message):
             msg = message + " (" + msg + ")"
         error(msg, "AssertionError")
 
+## Asserts that invoking fn() throws an error. Raises AssertionError if fn() succeeds.
+## Parameters: fn, message (required; string or null)
 function assert_throws(fn, message):
     let threw = false
     try:

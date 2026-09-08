@@ -1,6 +1,8 @@
 #include "uf_interpreter.h"
 #include "uf_module.h"
+#include "../runtime/uf_fiber.h"
 #include "../vm/uf_vm.h"
+#include "../vm2/uf_regvm.h"
 #include <math.h>
 
 typedef enum {
@@ -57,19 +59,31 @@ static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_s
 UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args, SourceSpan span) {
     if (rt->had_runtime_error) return uf_val_null();
 
-    uf_runtime_push_temp_root(rt, callee);
-    for (size_t i = 0; i < argc; ++i) {
-        uf_runtime_push_temp_root(rt, args[i]);
-    }
-
     UfValue result = uf_val_null();
 
     if (callee.kind == UF_VAL_FUNCTION) {
         UfFunctionObject* fn = callee.as.function;
-        if (fn->param_count != argc) {
-            uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
-                             fn->name ? fn->name : "anonymous", fn->param_count, argc);
+        bool arity_ok = false;
+        if (fn->has_rest) {
+            arity_ok = (argc >= fn->min_param_count);
+            if (!arity_ok) {
+                uf_runtime_error(rt, span, "Function '%s' expects at least %zu arguments, but %zu provided",
+                                 fn->name ? fn->name : "anonymous", fn->min_param_count, argc);
+            }
         } else {
+            arity_ok = (argc >= fn->min_param_count && argc <= fn->param_count);
+            if (!arity_ok) {
+                if (fn->min_param_count == fn->param_count) {
+                    uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
+                                     fn->name ? fn->name : "anonymous", fn->param_count, argc);
+                } else {
+                    uf_runtime_error(rt, span, "Function '%s' expects %zu to %zu arguments, but %zu provided",
+                                     fn->name ? fn->name : "anonymous", fn->min_param_count, fn->param_count, argc);
+                }
+            }
+        }
+
+        if (arity_ok) {
             UfEnv* call_env = uf_env_create(rt, fn->closure_env);
             if (uf_runtime_push_frame(rt, fn->name ? fn->name : "<anonymous>", span, call_env)) {
                 UfEnv* prev_env = rt->current_env;
@@ -78,8 +92,37 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
                 if (fn->name) {
                     uf_env_declare(call_env, fn->name, callee);
                 }
-                for (size_t i = 0; i < argc; ++i) {
-                    uf_env_declare(call_env, fn->params[i], args[i]);
+                if (fn->has_rest) {
+                    size_t fixed_count = fn->param_count - 1;
+                    for (size_t i = 0; i < fixed_count && i < argc; ++i) {
+                        uf_env_declare(call_env, fn->params[i], args[i]);
+                    }
+                    for (size_t i = argc; i < fixed_count; ++i) {
+                        UfValue def_val = uf_val_null();
+                        if (fn->param_defaults && fn->param_defaults[i]) {
+                            def_val = uf_evaluate_expression(rt, call_env, fn->param_defaults[i]);
+                            if (rt->had_runtime_error) break;
+                        }
+                        uf_env_declare(call_env, fn->params[i], def_val);
+                    }
+                    size_t rest_count = (argc > fixed_count) ? (argc - fixed_count) : 0;
+                    UfValue rest_arr = uf_val_array(rt, rest_count);
+                    for (size_t i = 0; i < rest_count; ++i) {
+                        uf_array_push(rt, rest_arr.as.array, args[fixed_count + i]);
+                    }
+                    uf_env_declare(call_env, fn->params[fixed_count], rest_arr);
+                } else {
+                    for (size_t i = 0; i < argc; ++i) {
+                        uf_env_declare(call_env, fn->params[i], args[i]);
+                    }
+                    for (size_t i = argc; i < fn->param_count; ++i) {
+                        UfValue def_val = uf_val_null();
+                        if (fn->param_defaults && fn->param_defaults[i]) {
+                            def_val = uf_evaluate_expression(rt, call_env, fn->param_defaults[i]);
+                            if (rt->had_runtime_error) break;
+                        }
+                        uf_env_declare(call_env, fn->params[i], def_val);
+                    }
                 }
 
                 if (rt->debug_hook) {
@@ -111,6 +154,11 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
                 } else {
                     result = uf_val_null();
                 }
+                if (fn->is_async) {
+                    UfPromiseObject* p = uf_promise_create(rt);
+                    uf_promise_resolve(rt, p, result);
+                    result = uf_val_promise(rt, p);
+                }
             }
         }
     } else if (callee.kind == UF_VAL_NATIVE_FN) {
@@ -130,21 +178,86 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
         } else {
             result = uf_val_instance(rt, sdef, args, argc);
         }
+    } else if (callee.kind == UF_VAL_ENUM_VAL) {
+        UfEnumValObject* ev = callee.as.enum_val;
+        if (ev->def && (size_t)ev->tag < ev->def->variant_count) {
+            size_t expected = ev->def->variant_field_counts[ev->tag];
+            if (expected != argc) {
+                uf_runtime_error(rt, span, "TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided",
+                                 ev->variant_name, expected, expected == 1 ? "" : "s", argc);
+            } else {
+                result = uf_val_enum_val(rt, ev->def, ev->tag, ev->variant_name, args, argc);
+            }
+        }
     } else if (callee.kind == UF_VAL_CLOSURE) {
         UfClosureObject* cl = callee.as.closure;
-        if (cl->function->arity != argc) {
-            uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
-                             cl->function->name ? cl->function->name : "anonymous", cl->function->arity, argc);
-        } else if (rt->active_vm) {
-            result = uf_vm_run_closure((UfVM*)rt->active_vm, cl, argc, args);
+        bool arity_ok = false;
+        if (cl->function->has_rest) {
+            arity_ok = (argc >= cl->function->min_arity);
+            if (!arity_ok) {
+                uf_runtime_error(rt, span, "Function '%s' expects at least %zu arguments, but %zu provided",
+                                 cl->function->name ? cl->function->name : "anonymous", cl->function->min_arity, argc);
+            }
         } else {
-            uf_runtime_error(rt, span, "Cannot call bytecode closure without active VM");
+            arity_ok = (argc >= cl->function->min_arity && argc <= cl->function->arity);
+            if (!arity_ok) {
+                if (cl->function->min_arity == cl->function->arity) {
+                    uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
+                                     cl->function->name ? cl->function->name : "anonymous", cl->function->arity, argc);
+                } else {
+                    uf_runtime_error(rt, span, "Function '%s' expects %zu to %zu arguments, but %zu provided",
+                                     cl->function->name ? cl->function->name : "anonymous", cl->function->min_arity, cl->function->arity, argc);
+                }
+            }
         }
+        if (arity_ok) {
+            if (rt->active_vm) {
+                result = uf_vm_run_closure((UfVM*)rt->active_vm, cl, argc, args);
+            } else {
+                uf_runtime_error(rt, span, "Cannot call bytecode closure without active VM");
+            }
+        }
+    } else if (callee.kind == UF_VAL_REG_CLOSURE) {
+        UfRegClosure* cl = callee.as.reg_closure;
+        bool arity_ok = false;
+        if (cl->function->has_rest) {
+            arity_ok = (argc >= cl->function->min_arity);
+            if (!arity_ok) {
+                uf_runtime_error(rt, span, "Function '%s' expects at least %zu arguments, but %zu provided",
+                                 cl->function->name ? cl->function->name : "anonymous", cl->function->min_arity, argc);
+            }
+        } else {
+            arity_ok = (argc >= cl->function->min_arity && argc <= cl->function->arity);
+            if (!arity_ok) {
+                if (cl->function->min_arity == cl->function->arity) {
+                    uf_runtime_error(rt, span, "Function '%s' expects %zu arguments, but %zu provided",
+                                     cl->function->name ? cl->function->name : "anonymous", cl->function->arity, argc);
+                } else {
+                    uf_runtime_error(rt, span, "Function '%s' expects %zu to %zu arguments, but %zu provided",
+                                     cl->function->name ? cl->function->name : "anonymous", cl->function->min_arity, cl->function->arity, argc);
+                }
+            }
+        }
+        if (arity_ok) {
+            if (rt->active_regvm) {
+                result = uf_regvm_run_closure((UfRegVM*)rt->active_regvm, cl, argc, args);
+            } else {
+                uf_runtime_error(rt, span, "Cannot call register closure without active RegVM");
+            }
+        }
+    } else if (callee.kind == UF_VAL_BOUND_METHOD) {
+        UfBoundMethodObject* bm = callee.as.bound_method;
+        UfValue* new_args = (UfValue*)malloc((argc + 1) * sizeof(UfValue));
+        new_args[0] = bm->receiver;
+        for (size_t i = 0; i < argc; ++i) {
+            new_args[i + 1] = args[i];
+        }
+        result = uf_call_value(rt, bm->method, argc + 1, new_args, span);
+        free(new_args);
     } else {
         uf_runtime_error(rt, span, "Cannot call non-function of type '%s'", uf_val_type_name(callee));
     }
 
-    uf_runtime_pop_temp_roots(rt, 1 + argc);
     return result;
 }
 
@@ -155,19 +268,100 @@ static UfValue evaluate_call(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
     }
     uf_runtime_push_temp_root(rt, callee);
 
-    size_t argc = expr->as.call.argc;
-    UfValue args[64];
-    for (size_t i = 0; i < argc; ++i) {
-        args[i] = uf_evaluate_expression(rt, env, expr->as.call.args[i]);
-        if (rt->had_runtime_error) {
-            uf_runtime_pop_temp_roots(rt, 1 + i);
+    size_t cap = expr->as.call.argc < 16 ? 16 : expr->as.call.argc;
+    UfValue inline_args[16];
+    UfValue* args = inline_args;
+    if (cap > 16) {
+        args = (UfValue*)malloc(cap * sizeof(UfValue));
+        if (!args) {
+            uf_runtime_error(rt, expr->span, "Out of memory");
+            uf_runtime_pop_temp_roots(rt, 1);
             return uf_val_null();
         }
-        uf_runtime_push_temp_root(rt, args[i]);
     }
 
-    UfValue result = uf_call_value(rt, callee, argc, args, expr->span);
-    uf_runtime_pop_temp_roots(rt, 1 + argc);
+    size_t total_args = 0;
+    for (size_t i = 0; i < expr->as.call.argc; ++i) {
+        const UfExpr* arg_expr = expr->as.call.args[i];
+        if (arg_expr->kind == UF_EXPR_SPREAD) {
+            UfValue op = uf_evaluate_expression(rt, env, arg_expr->as.spread.operand);
+            if (rt->had_runtime_error) {
+                if (args != inline_args) free(args);
+                uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                return uf_val_null();
+            }
+            if (op.kind != UF_VAL_ARRAY) {
+                uf_runtime_error(rt, arg_expr->span, "Spread operand in function call must be an array, got '%s'",
+                                 uf_val_type_name(op));
+                if (args != inline_args) free(args);
+                uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                return uf_val_null();
+            }
+            UfArrayObject* arr = op.as.array;
+            size_t new_cap = total_args + arr->count;
+            if (new_cap > cap) {
+                cap = new_cap < cap * 2 ? cap * 2 : new_cap;
+                if (args == inline_args) {
+                    args = (UfValue*)malloc(cap * sizeof(UfValue));
+                    if (!args) {
+                        uf_runtime_error(rt, expr->span, "Out of memory");
+                        uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                        return uf_val_null();
+                    }
+                    memcpy(args, inline_args, total_args * sizeof(UfValue));
+                } else {
+                    UfValue* new_args = (UfValue*)realloc(args, cap * sizeof(UfValue));
+                    if (!new_args) {
+                        free(args);
+                        uf_runtime_error(rt, expr->span, "Out of memory");
+                        uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                        return uf_val_null();
+                    }
+                    args = new_args;
+                }
+            }
+            for (size_t j = 0; j < arr->count; ++j) {
+                args[total_args++] = arr->elements[j];
+                uf_runtime_push_temp_root(rt, arr->elements[j]);
+            }
+        } else {
+            UfValue val = uf_evaluate_expression(rt, env, arg_expr);
+            if (rt->had_runtime_error) {
+                if (args != inline_args) free(args);
+                uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                return uf_val_null();
+            }
+            if (total_args >= cap) {
+                cap = cap * 2;
+                if (args == inline_args) {
+                    args = (UfValue*)malloc(cap * sizeof(UfValue));
+                    if (!args) {
+                        uf_runtime_error(rt, expr->span, "Out of memory");
+                        uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                        return uf_val_null();
+                    }
+                    memcpy(args, inline_args, total_args * sizeof(UfValue));
+                } else {
+                    UfValue* new_args = (UfValue*)realloc(args, cap * sizeof(UfValue));
+                    if (!new_args) {
+                        free(args);
+                        uf_runtime_error(rt, expr->span, "Out of memory");
+                        uf_runtime_pop_temp_roots(rt, 1 + total_args);
+                        return uf_val_null();
+                    }
+                    args = new_args;
+                }
+            }
+            args[total_args++] = val;
+            uf_runtime_push_temp_root(rt, val);
+        }
+    }
+
+    UfValue result = uf_call_value(rt, callee, total_args, args, expr->span);
+    uf_runtime_pop_temp_roots(rt, 1 + total_args);
+    if (args != inline_args) {
+        free(args);
+    }
     return result;
 }
 
@@ -351,12 +545,30 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
             uf_runtime_push_temp_root(rt, arr_val);
 
             for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
-                UfValue elem = uf_evaluate_expression(rt, env, expr->as.array_lit.elements[i]);
-                if (rt->had_runtime_error) {
-                    uf_runtime_pop_temp_root(rt);
-                    return uf_val_null();
+                const UfExpr* elem_expr = expr->as.array_lit.elements[i];
+                if (elem_expr->kind == UF_EXPR_SPREAD) {
+                    UfValue other = uf_evaluate_expression(rt, env, elem_expr->as.spread.operand);
+                    if (rt->had_runtime_error) {
+                        uf_runtime_pop_temp_root(rt);
+                        return uf_val_null();
+                    }
+                    if (other.kind != UF_VAL_ARRAY) {
+                        uf_runtime_error(rt, elem_expr->span, "Spread operand in array literal must be an array, got '%s'",
+                                         uf_val_type_name(other));
+                        uf_runtime_pop_temp_root(rt);
+                        return uf_val_null();
+                    }
+                    for (size_t j = 0; j < other.as.array->count; ++j) {
+                        uf_array_push(rt, arr_val.as.array, other.as.array->elements[j]);
+                    }
+                } else {
+                    UfValue elem = uf_evaluate_expression(rt, env, elem_expr);
+                    if (rt->had_runtime_error) {
+                        uf_runtime_pop_temp_root(rt);
+                        return uf_val_null();
+                    }
+                    uf_array_push(rt, arr_val.as.array, elem);
                 }
-                uf_array_push(rt, arr_val.as.array, elem);
             }
 
             uf_runtime_pop_temp_root(rt);
@@ -368,6 +580,28 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
             uf_runtime_push_temp_root(rt, map_val);
 
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                if (expr->as.map_lit.values[i] == NULL) {
+                    const UfExpr* spread_expr = expr->as.map_lit.keys[i];
+                    const UfExpr* operand = spread_expr->kind == UF_EXPR_SPREAD ? spread_expr->as.spread.operand : spread_expr;
+                    UfValue other = uf_evaluate_expression(rt, env, operand);
+                    if (rt->had_runtime_error) {
+                        uf_runtime_pop_temp_root(rt);
+                        return uf_val_null();
+                    }
+                    if (other.kind != UF_VAL_MAP) {
+                        uf_runtime_error(rt, spread_expr->span, "Spread operand in map literal must be a map, got '%s'",
+                                         uf_val_type_name(other));
+                        uf_runtime_pop_temp_root(rt);
+                        return uf_val_null();
+                    }
+                    for (size_t j = 0; j < other.as.map->order_count; ++j) {
+                        UfValue k = other.as.map->order_keys[j];
+                        UfValue v = uf_map_get(other.as.map, k);
+                        uf_map_set(rt, map_val.as.map, k, v);
+                    }
+                    continue;
+                }
+
                 UfValue k = uf_evaluate_expression(rt, env, expr->as.map_lit.keys[i]);
                 if (rt->had_runtime_error) {
                     uf_runtime_pop_temp_root(rt);
@@ -480,10 +714,74 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                             break;
                         }
                     }
-                    if (fidx < 0) {
-                        uf_runtime_error(rt, expr->span, "Struct '%s' has no field '%s'", inst->def->name, fname);
-                    } else {
+                    if (fidx >= 0) {
                         result = inst->fields[fidx];
+                    } else {
+                        bool found_method = false;
+                        for (size_t i = 0; i < inst->def->method_count; ++i) {
+                            if (strcmp(inst->def->method_names[i], fname) == 0) {
+                                result = uf_val_bound_method(rt, target, inst->def->method_values[i]);
+                                found_method = true;
+                                break;
+                            }
+                        }
+                        if (!found_method) {
+                            uf_runtime_error(rt, expr->span, "Struct '%s' has no field or method '%s'", inst->def->name, fname);
+                        }
+                    }
+                }
+            } else if (target.kind == UF_VAL_ENUM_DEF) {
+                if (idx_val.kind != UF_VAL_STRING) {
+                    uf_runtime_error(rt, expr->span, "Enum member access expects a string variant name, got '%s'", uf_val_type_name(idx_val));
+                } else {
+                    const char* vname = idx_val.as.string->chars;
+                    UfEnumDefObject* def = target.as.enum_def;
+                    bool found = false;
+                    for (size_t i = 0; i < def->variant_count; ++i) {
+                        if (strcmp(def->variant_names[i], vname) == 0) {
+                            found = true;
+                            result = uf_val_enum_val(rt, def, (int)i, def->variant_names[i], NULL, 0);
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        uf_runtime_error(rt, expr->span, "Enum '%s' has no variant '%s'", def->name ? def->name : "", vname);
+                    }
+                }
+            } else if (target.kind == UF_VAL_ENUM_VAL) {
+                UfEnumValObject* ev = target.as.enum_val;
+                if (idx_val.kind == UF_VAL_NUMBER) {
+                    long idx = (long)idx_val.as.number;
+                    if (idx >= 0 && (size_t)idx < ev->field_count) {
+                        result = ev->fields[idx];
+                    } else {
+                        result = uf_val_null();
+                    }
+                } else if (idx_val.kind != UF_VAL_STRING) {
+                    uf_runtime_error(rt, expr->span, "Enum property access expects a string name, got '%s'", uf_val_type_name(idx_val));
+                } else {
+                    const char* prop = idx_val.as.string->chars;
+                    if (strcmp(prop, "tag") == 0) {
+                        result = uf_val_number((double)ev->tag);
+                    } else if (strcmp(prop, "name") == 0) {
+                        result = uf_val_string_cstr(rt, ev->variant_name ? ev->variant_name : "");
+                    } else {
+                        bool found = false;
+                        if (ev->def && (size_t)ev->tag < ev->def->variant_count && ev->def->variant_field_names) {
+                            const char** fnames = ev->def->variant_field_names[ev->tag];
+                            if (fnames) {
+                                for (size_t f = 0; f < ev->field_count; ++f) {
+                                    if (strcmp(fnames[f], prop) == 0) {
+                                        result = ev->fields[f];
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!found) {
+                            uf_runtime_error(rt, expr->span, "Enum variant '%s' has no field '%s'", ev->variant_name ? ev->variant_name : "", prop);
+                        }
                     }
                 }
             } else {
@@ -498,10 +796,44 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
             UfValue fn = uf_val_function(rt,
                                          expr->as.fn_expr.name,
                                          expr->as.fn_expr.params,
+                                         expr->as.fn_expr.param_defaults,
                                          expr->as.fn_expr.param_count,
+                                         expr->as.fn_expr.min_param_count,
+                                         expr->as.fn_expr.has_rest,
                                          expr->as.fn_expr.body,
                                          env);
+            fn.as.function->is_async = expr->as.fn_expr.is_async;
             return fn;
+        }
+
+        case UF_EXPR_SPREAD:
+            return uf_evaluate_expression(rt, env, expr->as.spread.operand);
+
+        case UF_EXPR_AWAIT: {
+            UfValue val = uf_evaluate_expression(rt, env, expr->as.await_expr.value);
+            if (rt->had_runtime_error) return uf_val_null();
+            if (val.kind == UF_VAL_PROMISE && val.as.promise) {
+                return uf_promise_await(rt, val.as.promise);
+            }
+            return val;
+        }
+
+        case UF_EXPR_STRING_INTERP: {
+            UfStrBuf buf;
+            uf_strbuf_init(&buf);
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                UfValue val = uf_evaluate_expression(rt, env, expr->as.string_interp.parts[i]);
+                if (rt->had_runtime_error) {
+                    uf_strbuf_free(&buf);
+                    return uf_val_null();
+                }
+                char* s = uf_val_to_string(val);
+                uf_strbuf_append(&buf, s ? s : "");
+                free(s);
+            }
+            UfValue result = uf_val_string(rt, buf.data ? buf.data : "", buf.length);
+            uf_strbuf_free(&buf);
+            return result;
         }
     }
 
@@ -514,9 +846,16 @@ static bool match_pattern_and_bind(UfRuntime* rt, UfEnv* env, const UfPattern* p
         case UF_PAT_WILDCARD:
             return true;
 
-        case UF_PAT_VARIABLE:
+        case UF_PAT_VARIABLE: {
+            UfValue existing = uf_val_null();
+            if (uf_env_lookup(env, pat->as.var_name, &existing)) {
+                if (existing.kind == UF_VAL_ENUM_VAL && existing.as.enum_val && existing.as.enum_val->field_count == 0) {
+                    return uf_val_equal(val, existing);
+                }
+            }
             uf_env_declare(env, pat->as.var_name, val);
             return true;
+        }
 
         case UF_PAT_LITERAL: {
             UfValue lit_val = uf_evaluate_expression(rt, env, pat->as.literal);
@@ -525,12 +864,105 @@ static bool match_pattern_and_bind(UfRuntime* rt, UfEnv* env, const UfPattern* p
         }
 
         case UF_PAT_STRUCT: {
-            if (val.kind != UF_VAL_INSTANCE) return false;
-            if (!val.as.instance || !val.as.instance->def) return false;
-            if (strcmp(val.as.instance->def->name, pat->as.struct_pat.struct_name) != 0) return false;
-            if (val.as.instance->field_count != pat->as.struct_pat.field_count) return false;
-            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
-                if (!match_pattern_and_bind(rt, env, pat->as.struct_pat.field_patterns[i], val.as.instance->fields[i])) {
+            if (val.kind == UF_VAL_INSTANCE) {
+                if (!val.as.instance || !val.as.instance->def) return false;
+                if (strcmp(val.as.instance->def->name, pat->as.struct_pat.struct_name) != 0) return false;
+                if (val.as.instance->field_count != pat->as.struct_pat.field_count) return false;
+                for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                    if (!match_pattern_and_bind(rt, env, pat->as.struct_pat.field_patterns[i], val.as.instance->fields[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if (val.kind == UF_VAL_ENUM_VAL) {
+                if (!val.as.enum_val || !val.as.enum_val->variant_name) return false;
+                if (strcmp(val.as.enum_val->variant_name, pat->as.struct_pat.struct_name) != 0) return false;
+                if (val.as.enum_val->field_count != pat->as.struct_pat.field_count) return false;
+                for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                    if (!match_pattern_and_bind(rt, env, pat->as.struct_pat.field_patterns[i], val.as.enum_val->fields[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                return match_pattern_and_bind(rt, env, pat->as.rest_pat.subpattern, val);
+            }
+            return true;
+
+        case UF_PAT_ARRAY: {
+            if (val.kind != UF_VAL_ARRAY) return false;
+            UfArrayObject* arr = val.as.array;
+            size_t min_count = pat->as.array_pat.has_rest ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0) : pat->as.array_pat.count;
+            if (!pat->as.array_pat.has_rest) {
+                if (arr->count != pat->as.array_pat.count) return false;
+            } else {
+                if (arr->count < min_count) return false;
+            }
+            for (size_t i = 0; i < min_count; ++i) {
+                if (!match_pattern_and_bind(rt, env, pat->as.array_pat.elements[i], arr->elements[i])) {
+                    return false;
+                }
+            }
+            if (pat->as.array_pat.has_rest) {
+                size_t rest_len = arr->count >= min_count ? arr->count - min_count : 0;
+                UfValue rest_val = uf_val_array(rt, rest_len);
+                for (size_t i = 0; i < rest_len; ++i) {
+                    uf_array_push(rt, rest_val.as.array, arr->elements[min_count + i]);
+                }
+                UfPattern* rest_pat = pat->as.array_pat.elements[min_count];
+                if (!match_pattern_and_bind(rt, env, rest_pat, rest_val)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        case UF_PAT_MAP: {
+            if (val.kind != UF_VAL_MAP && val.kind != UF_VAL_INSTANCE) return false;
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                const char* k_str = pat->as.map_pat.keys[i];
+                UfValue item_val = uf_val_null();
+                if (val.kind == UF_VAL_MAP) {
+                    UfValue k_val = uf_val_string(rt, k_str, strlen(k_str));
+                    item_val = uf_map_get(val.as.map, k_val);
+                } else if (val.kind == UF_VAL_INSTANCE && val.as.instance->def) {
+                    for (size_t f = 0; f < val.as.instance->field_count; ++f) {
+                        if (strcmp(val.as.instance->def->field_names[f], k_str) == 0) {
+                            item_val = val.as.instance->fields[f];
+                            break;
+                        }
+                    }
+                }
+                if (!match_pattern_and_bind(rt, env, pat->as.map_pat.values[i], item_val)) {
+                    return false;
+                }
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                UfValue rest_map = uf_val_map(rt, 0);
+                if (val.kind == UF_VAL_MAP) {
+                    UfMapObject* m = val.as.map;
+                    for (size_t i = 0; i < m->order_count; ++i) {
+                        UfValue k = m->order_keys[i];
+                        if (k.kind == UF_VAL_STRING) {
+                            bool excluded = false;
+                            for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+                                if (strcmp(k.as.string->chars, pat->as.map_pat.keys[j]) == 0) {
+                                    excluded = true;
+                                    break;
+                                }
+                            }
+                            if (!excluded) {
+                                uf_map_set(rt, rest_map.as.map, k, uf_map_get(m, k));
+                            }
+                        }
+                    }
+                }
+                if (!match_pattern_and_bind(rt, env, pat->as.map_pat.rest_pattern, rest_map)) {
                     return false;
                 }
             }
@@ -538,6 +970,111 @@ static bool match_pattern_and_bind(UfRuntime* rt, UfEnv* env, const UfPattern* p
         }
     }
     return false;
+}
+
+static void destructure_and_bind(UfRuntime* rt, UfEnv* env, const UfPattern* pat, UfValue val, SourceSpan span, bool is_declaration) {
+    if (!pat || rt->had_runtime_error) return;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+            break;
+        case UF_PAT_VARIABLE:
+            if (is_declaration) {
+                uf_env_declare(env, pat->as.var_name, val);
+            } else {
+                if (!uf_env_assign(env, pat->as.var_name, val)) {
+                    uf_runtime_error(rt, span, "Cannot assign to undefined identifier '%s'", pat->as.var_name);
+                }
+            }
+            break;
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                destructure_and_bind(rt, env, pat->as.rest_pat.subpattern, val, span, is_declaration);
+            }
+            break;
+        case UF_PAT_ARRAY: {
+            if (val.kind != UF_VAL_ARRAY) {
+                uf_runtime_error(rt, span, "TypeError: Cannot destructure non-array value of type '%s'", uf_val_type_name(val));
+                return;
+            }
+            UfArrayObject* arr = val.as.array;
+            size_t normal_count = pat->as.array_pat.has_rest ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0) : pat->as.array_pat.count;
+            for (size_t i = 0; i < normal_count; ++i) {
+                UfValue elem = (i < arr->count) ? arr->elements[i] : uf_val_null();
+                destructure_and_bind(rt, env, pat->as.array_pat.elements[i], elem, span, is_declaration);
+                if (rt->had_runtime_error) return;
+            }
+            if (pat->as.array_pat.has_rest) {
+                size_t rest_len = arr->count >= normal_count ? arr->count - normal_count : 0;
+                UfValue rest_val = uf_val_array(rt, rest_len);
+                for (size_t i = 0; i < rest_len; ++i) {
+                    uf_array_push(rt, rest_val.as.array, arr->elements[normal_count + i]);
+                }
+                UfPattern* rest_pat = pat->as.array_pat.elements[normal_count];
+                destructure_and_bind(rt, env, rest_pat, rest_val, span, is_declaration);
+            }
+            break;
+        }
+        case UF_PAT_MAP: {
+            if (val.kind != UF_VAL_MAP && val.kind != UF_VAL_INSTANCE) {
+                uf_runtime_error(rt, span, "TypeError: Cannot destructure non-map value of type '%s'", uf_val_type_name(val));
+                return;
+            }
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                const char* k_str = pat->as.map_pat.keys[i];
+                UfValue item_val = uf_val_null();
+                if (val.kind == UF_VAL_MAP) {
+                    UfValue k_val = uf_val_string(rt, k_str, strlen(k_str));
+                    item_val = uf_map_get(val.as.map, k_val);
+                } else if (val.kind == UF_VAL_INSTANCE && val.as.instance->def) {
+                    for (size_t f = 0; f < val.as.instance->field_count; ++f) {
+                        if (strcmp(val.as.instance->def->field_names[f], k_str) == 0) {
+                            item_val = val.as.instance->fields[f];
+                            break;
+                        }
+                    }
+                }
+                destructure_and_bind(rt, env, pat->as.map_pat.values[i], item_val, span, is_declaration);
+                if (rt->had_runtime_error) return;
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                UfValue rest_map = uf_val_map(rt, 0);
+                if (val.kind == UF_VAL_MAP) {
+                    UfMapObject* m = val.as.map;
+                    for (size_t i = 0; i < m->order_count; ++i) {
+                        UfValue k = m->order_keys[i];
+                        if (k.kind == UF_VAL_STRING) {
+                            bool excluded = false;
+                            for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+                                if (strcmp(k.as.string->chars, pat->as.map_pat.keys[j]) == 0) {
+                                    excluded = true;
+                                    break;
+                                }
+                            }
+                            if (!excluded) {
+                                uf_map_set(rt, rest_map.as.map, k, uf_map_get(m, k));
+                            }
+                        }
+                    }
+                }
+                destructure_and_bind(rt, env, pat->as.map_pat.rest_pattern, rest_map, span, is_declaration);
+            }
+            break;
+        }
+        case UF_PAT_STRUCT: {
+            if (val.kind != UF_VAL_INSTANCE) {
+                uf_runtime_error(rt, span, "TypeError: Cannot destructure struct from non-instance value");
+                return;
+            }
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                UfValue f_val = (i < val.as.instance->field_count) ? val.as.instance->fields[i] : uf_val_null();
+                destructure_and_bind(rt, env, pat->as.struct_pat.field_patterns[i], f_val, span, is_declaration);
+                if (rt->had_runtime_error) return;
+            }
+            break;
+        }
+        case UF_PAT_LITERAL:
+            break;
+    }
 }
 
 static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_stmt) {
@@ -548,6 +1085,120 @@ static ExecResult execute_block(UfRuntime* rt, UfEnv* env, const UfStmt* block_s
         }
     }
     return exec_ok();
+}
+
+static void execute_trait_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
+    UfValue tdef = uf_val_trait_def(rt,
+                                     stmt->as.trait_stmt.name,
+                                     stmt->as.trait_stmt.method_count,
+                                     stmt->as.trait_stmt.method_names,
+                                     stmt->as.trait_stmt.method_param_counts,
+                                     stmt->as.trait_stmt.method_param_names,
+                                     stmt->as.trait_stmt.method_param_types,
+                                     stmt->as.trait_stmt.method_return_types);
+    uf_env_declare(env, stmt->as.trait_stmt.name, tdef);
+}
+
+static void execute_struct_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
+    size_t direct_mcount = stmt->as.struct_stmt.method_count;
+    size_t total_mcount = direct_mcount;
+    for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+        total_mcount += stmt->as.struct_stmt.impl_blocks[b]->as.impl_stmt.method_count;
+    }
+    const char** mnames = NULL;
+    UfValue* mvals = NULL;
+    if (total_mcount > 0) {
+        mnames = (const char**)malloc(total_mcount * sizeof(const char*));
+        mvals = (UfValue*)malloc(total_mcount * sizeof(UfValue));
+        size_t idx = 0;
+        for (size_t i = 0; i < direct_mcount; ++i) {
+            UfStmt* m = stmt->as.struct_stmt.methods[i];
+            mnames[idx] = m->as.function_stmt.name;
+            mvals[idx] = uf_val_function(rt,
+                                       m->as.function_stmt.name,
+                                       m->as.function_stmt.params,
+                                       m->as.function_stmt.param_defaults,
+                                       m->as.function_stmt.param_count,
+                                       m->as.function_stmt.min_param_count,
+                                       m->as.function_stmt.has_rest,
+                                       m->as.function_stmt.body,
+                                       env);
+            mvals[idx].as.function->is_async = m->as.function_stmt.is_async;
+            idx++;
+        }
+        for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+            UfStmt* iblock = stmt->as.struct_stmt.impl_blocks[b];
+            for (size_t i = 0; i < iblock->as.impl_stmt.method_count; ++i) {
+                UfStmt* m = iblock->as.impl_stmt.methods[i];
+                mnames[idx] = m->as.function_stmt.name;
+                mvals[idx] = uf_val_function(rt,
+                                           m->as.function_stmt.name,
+                                           m->as.function_stmt.params,
+                                           m->as.function_stmt.param_defaults,
+                                           m->as.function_stmt.param_count,
+                                           m->as.function_stmt.min_param_count,
+                                           m->as.function_stmt.has_rest,
+                                           m->as.function_stmt.body,
+                                           env);
+                mvals[idx].as.function->is_async = m->as.function_stmt.is_async;
+                idx++;
+            }
+        }
+    }
+    size_t trait_count = stmt->as.struct_stmt.impl_block_count;
+    const char** traits = NULL;
+    if (trait_count > 0) {
+        traits = (const char**)malloc(trait_count * sizeof(const char*));
+        for (size_t b = 0; b < trait_count; ++b) {
+            traits[b] = stmt->as.struct_stmt.impl_blocks[b]->as.impl_stmt.trait_name;
+        }
+    }
+    UfValue sdef = uf_val_struct_def_with_traits(rt,
+                                                 stmt->as.struct_stmt.name,
+                                                 stmt->as.struct_stmt.field_names,
+                                                 stmt->as.struct_stmt.field_types,
+                                                 stmt->as.struct_stmt.field_count,
+                                                 mnames,
+                                                 mvals,
+                                                 total_mcount,
+                                                 traits,
+                                                 trait_count);
+    uf_env_declare(env, stmt->as.struct_stmt.name, sdef);
+}
+
+static void execute_impl_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
+    const char* sname = stmt->as.impl_stmt.struct_name;
+    if (sname) {
+        UfValue sval;
+        if (uf_env_lookup(env, sname, &sval) && sval.kind == UF_VAL_STRUCT_DEF) {
+            UfStructDefObject* sdef = sval.as.struct_def;
+            size_t add_mcount = stmt->as.impl_stmt.method_count;
+            if (add_mcount > 0) {
+                size_t new_mcount = sdef->method_count + add_mcount;
+                sdef->method_names = (const char**)realloc((void*)sdef->method_names, new_mcount * sizeof(const char*));
+                sdef->method_values = (UfValue*)realloc((void*)sdef->method_values, new_mcount * sizeof(UfValue));
+                for (size_t i = 0; i < add_mcount; ++i) {
+                    UfStmt* m = stmt->as.impl_stmt.methods[i];
+                    sdef->method_names[sdef->method_count + i] = m->as.function_stmt.name;
+                    sdef->method_values[sdef->method_count + i] = uf_val_function(rt,
+                                                                                  m->as.function_stmt.name,
+                                                                                  m->as.function_stmt.params,
+                                                                                  m->as.function_stmt.param_defaults,
+                                                                                  m->as.function_stmt.param_count,
+                                                                                  m->as.function_stmt.min_param_count,
+                                                                                  m->as.function_stmt.has_rest,
+                                                                                  m->as.function_stmt.body,
+                                                                                  env);
+                    sdef->method_values[sdef->method_count + i].as.function->is_async = m->as.function_stmt.is_async;
+                }
+                sdef->method_count = new_mcount;
+            }
+            if (stmt->as.impl_stmt.trait_name) {
+                sdef->impl_traits = (const char**)realloc((void*)sdef->impl_traits, (sdef->impl_trait_count + 1) * sizeof(const char*));
+                sdef->impl_traits[sdef->impl_trait_count++] = stmt->as.impl_stmt.trait_name;
+            }
+        }
+    }
 }
 
 static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
@@ -577,6 +1228,14 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 if (rt->had_runtime_error) return exec_error();
                 uf_runtime_push_temp_root(rt, init_val);
             }
+            if (stmt->as.let_stmt.pattern) {
+                destructure_and_bind(rt, env, stmt->as.let_stmt.pattern, init_val, stmt->span, true);
+                if (stmt->as.let_stmt.init) {
+                    uf_runtime_pop_temp_root(rt);
+                }
+                if (rt->had_runtime_error) return exec_error();
+                return exec_ok();
+            }
             uf_env_declare(env, stmt->as.let_stmt.name, init_val);
             if (rt->debug_hook) {
                 UfDebugEvent ev;
@@ -597,6 +1256,12 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             UfValue val = uf_evaluate_expression(rt, env, stmt->as.assign_stmt.value);
             if (rt->had_runtime_error) return exec_error();
             uf_runtime_push_temp_root(rt, val);
+            if (stmt->as.assign_stmt.pattern) {
+                destructure_and_bind(rt, env, stmt->as.assign_stmt.pattern, val, stmt->span, false);
+                uf_runtime_pop_temp_root(rt);
+                if (rt->had_runtime_error) return exec_error();
+                return exec_ok();
+            }
             if (!uf_env_assign(env, stmt->as.assign_stmt.name, val)) {
                 uf_runtime_error(rt, stmt->span, "Cannot assign to undefined identifier '%s'", stmt->as.assign_stmt.name);
                 uf_runtime_pop_temp_root(rt);
@@ -854,9 +1519,13 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             UfValue fn = uf_val_function(rt,
                                          stmt->as.function_stmt.name,
                                          stmt->as.function_stmt.params,
+                                         stmt->as.function_stmt.param_defaults,
                                          stmt->as.function_stmt.param_count,
+                                         stmt->as.function_stmt.min_param_count,
+                                         stmt->as.function_stmt.has_rest,
                                          stmt->as.function_stmt.body,
                                          env);
+            fn.as.function->is_async = stmt->as.function_stmt.is_async;
             uf_env_declare(env, stmt->as.function_stmt.name, fn);
             return exec_ok();
         }
@@ -884,29 +1553,86 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             h->frame_count = rt->frame_count;
             h->temp_root_count = rt->temp_root_count;
 
+            ExecResult res = exec_ok();
+            bool had_exception = false;
+            UfValue caught_err = uf_val_null();
+
             if (setjmp(h->jmp) == 0) {
-                ExecResult res = execute_statement(rt, env, stmt->as.try_catch.try_block);
+                res = execute_statement(rt, env, stmt->as.try_catch.try_block);
                 if (rt->try_handler_count > 0 && &rt->try_handlers[rt->try_handler_count - 1] == h) {
                     rt->try_handler_count--;
                 }
-                return res;
             } else {
-                /* Exception was caught via longjmp */
-                UfValue caught_err = rt->current_error;
-                uf_runtime_push_temp_root(rt, caught_err);
-                UfEnv* catch_env = uf_env_create(rt, env);
-                if (stmt->as.try_catch.catch_var) {
-                    uf_env_declare(catch_env, stmt->as.try_catch.catch_var, caught_err);
-                }
-                UfEnv* prev_env = rt->current_env;
-                rt->current_env = catch_env;
-                ExecResult res = execute_statement(rt, catch_env, stmt->as.try_catch.catch_block);
-                rt->current_env = prev_env;
-                uf_runtime_pop_temp_roots(rt, 1);
-                rt->current_error = uf_val_null();
+                had_exception = true;
                 rt->had_runtime_error = false;
-                return res;
+                caught_err = rt->current_error;
+                rt->current_error = uf_val_null();
             }
+
+            if (had_exception) {
+                if (stmt->as.try_catch.catch_block) {
+                    uf_runtime_push_temp_root(rt, caught_err);
+                    UfEnv* catch_env = uf_env_create(rt, env);
+                    if (stmt->as.try_catch.catch_var) {
+                        uf_env_declare(catch_env, stmt->as.try_catch.catch_var, caught_err);
+                    }
+                    UfEnv* prev_env = rt->current_env;
+                    rt->current_env = catch_env;
+                    res = execute_statement(rt, catch_env, stmt->as.try_catch.catch_block);
+                    rt->current_env = prev_env;
+                    uf_runtime_pop_temp_roots(rt, 1);
+                    if (res.status == EXEC_OK || res.status == EXEC_RETURN) {
+                        rt->had_runtime_error = false;
+                    }
+                }
+            }
+
+            if (stmt->as.try_catch.finally_block) {
+                if (had_exception && !stmt->as.try_catch.catch_block) {
+                    uf_runtime_push_temp_root(rt, caught_err);
+                }
+                ExecResult fin_res = execute_statement(rt, env, stmt->as.try_catch.finally_block);
+                if (had_exception && !stmt->as.try_catch.catch_block) {
+                    uf_runtime_pop_temp_roots(rt, 1);
+                }
+                if (fin_res.status == EXEC_RETURN || fin_res.status == EXEC_ERROR ||
+                    fin_res.status == EXEC_BREAK || fin_res.status == EXEC_CONTINUE) {
+                    res = fin_res;
+                } else if (had_exception && !stmt->as.try_catch.catch_block) {
+                    if (!rt->had_runtime_error) {
+                        rt->had_runtime_error = true;
+                        rt->current_error = caught_err;
+                        if (rt->try_handler_count > 0) {
+                            UfTryHandler* outer = &rt->try_handlers[--rt->try_handler_count];
+                            rt->frame_count = outer->frame_count;
+                            rt->temp_root_count = outer->temp_root_count;
+                            rt->current_env = outer->scope_env;
+                            longjmp(outer->jmp, 1);
+                        } else {
+                            rt->had_runtime_error = true;
+                            if (caught_err.kind == UF_VAL_ERROR && caught_err.as.error) {
+                                const char* msg = caught_err.as.error->message ? caught_err.as.error->message->chars : "Error";
+                                SourceSpan sp = {
+                                    .start = { .line = (uint32_t)caught_err.as.error->line, .col = 1, .file = caught_err.as.error->file },
+                                    .end = { .line = (uint32_t)caught_err.as.error->line, .col = 1, .file = caught_err.as.error->file }
+                                };
+                                if (rt->reporter) {
+                                    uf_report_diag(rt->reporter, UF_DIAG_RUNTIME_ERROR, sp, msg, NULL);
+                                } else {
+                                    fprintf(rt->err_stream, "Runtime Error: %s\n", msg);
+                                }
+                            } else {
+                                char* err_str = uf_val_to_string(caught_err);
+                                fprintf(rt->err_stream, "Runtime Error: %s\n", err_str ? err_str : "Error");
+                                free(err_str);
+                            }
+                            return exec_error();
+                        }
+                    }
+                }
+            }
+
+            return res;
         }
 
         case UF_STMT_IMPORT: {
@@ -936,13 +1662,39 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             return exec_ok();
         }
 
+        case UF_STMT_TRAIT: {
+            execute_trait_def(rt, env, stmt);
+            return exec_ok();
+        }
+
         case UF_STMT_STRUCT: {
-            UfValue sdef = uf_val_struct_def(rt,
-                                             stmt->as.struct_stmt.name,
-                                             stmt->as.struct_stmt.field_names,
-                                             stmt->as.struct_stmt.field_types,
-                                             stmt->as.struct_stmt.field_count);
-            uf_env_declare(env, stmt->as.struct_stmt.name, sdef);
+            execute_struct_def(rt, env, stmt);
+            return exec_ok();
+        }
+
+        case UF_STMT_IMPL: {
+            execute_impl_def(rt, env, stmt);
+            return exec_ok();
+        }
+
+        case UF_STMT_ENUM: {
+            size_t vcount = stmt->as.enum_stmt.variant_count;
+            const char** vnames = (const char**)malloc(vcount * sizeof(const char*));
+            size_t* vfcounts = (size_t*)malloc(vcount * sizeof(size_t));
+            const char*** vfnames = (const char***)malloc(vcount * sizeof(const char**));
+            const char*** vftypes = (const char***)malloc(vcount * sizeof(const char**));
+            for (size_t i = 0; i < vcount; ++i) {
+                vnames[i] = stmt->as.enum_stmt.variants[i].name;
+                vfcounts[i] = stmt->as.enum_stmt.variants[i].field_count;
+                vfnames[i] = stmt->as.enum_stmt.variants[i].field_names;
+                vftypes[i] = stmt->as.enum_stmt.variants[i].field_types;
+            }
+            UfValue edef = uf_val_enum_def(rt, stmt->as.enum_stmt.name, vcount, vnames, vfcounts, vfnames, vftypes);
+            uf_env_declare(env, stmt->as.enum_stmt.name, edef);
+            for (size_t i = 0; i < vcount; ++i) {
+                UfValue val_tmpl = uf_val_enum_val(rt, edef.as.enum_def, (int)i, vnames[i], NULL, 0);
+                uf_env_declare(env, vnames[i], val_tmpl);
+            }
             return exec_ok();
         }
 
@@ -997,23 +1749,55 @@ UfInterpretResult uf_interpret_program(UfRuntime* rt, const UfProgram* program) 
     UfEnv* exec_env = (rt->current_env != NULL) ? rt->current_env : rt->global_env;
     rt->current_env = exec_env;
 
-    /* Pass 1: Hoist top-level function declarations */
+    /* Pass 1: Hoist top-level function and struct declarations */
     for (size_t i = 0; i < program->count; ++i) {
         UfStmt* stmt = program->stmts[i];
         if (stmt->kind == UF_STMT_FUNCTION) {
             UfValue fn = uf_val_function(rt,
                                          stmt->as.function_stmt.name,
                                          stmt->as.function_stmt.params,
+                                         stmt->as.function_stmt.param_defaults,
                                          stmt->as.function_stmt.param_count,
+                                         stmt->as.function_stmt.min_param_count,
+                                         stmt->as.function_stmt.has_rest,
                                          stmt->as.function_stmt.body,
                                          exec_env);
+            fn.as.function->is_async = stmt->as.function_stmt.is_async;
             uf_env_declare(exec_env, stmt->as.function_stmt.name, fn);
+        } else if (stmt->kind == UF_STMT_TRAIT) {
+            execute_trait_def(rt, exec_env, stmt);
+        } else if (stmt->kind == UF_STMT_STRUCT) {
+            execute_struct_def(rt, exec_env, stmt);
+        } else if (stmt->kind == UF_STMT_IMPL) {
+            execute_impl_def(rt, exec_env, stmt);
+        } else if (stmt->kind == UF_STMT_ENUM) {
+            size_t vcount = stmt->as.enum_stmt.variant_count;
+            const char** vnames = (const char**)malloc(vcount * sizeof(const char*));
+            size_t* vfcounts = (size_t*)malloc(vcount * sizeof(size_t));
+            const char*** vfnames = (const char***)malloc(vcount * sizeof(const char**));
+            const char*** vftypes = (const char***)malloc(vcount * sizeof(const char**));
+            for (size_t v = 0; v < vcount; ++v) {
+                vnames[v] = stmt->as.enum_stmt.variants[v].name;
+                vfcounts[v] = stmt->as.enum_stmt.variants[v].field_count;
+                vfnames[v] = stmt->as.enum_stmt.variants[v].field_names;
+                vftypes[v] = stmt->as.enum_stmt.variants[v].field_types;
+            }
+            UfValue edef = uf_val_enum_def(rt, stmt->as.enum_stmt.name, vcount, vnames, vfcounts, vfnames, vftypes);
+            uf_env_declare(exec_env, stmt->as.enum_stmt.name, edef);
+            for (size_t v = 0; v < vcount; ++v) {
+                UfValue val_tmpl = uf_val_enum_val(rt, edef.as.enum_def, (int)v, vnames[v], NULL, 0);
+                uf_env_declare(exec_env, vnames[v], val_tmpl);
+            }
         }
     }
 
-    /* Pass 2: Execute statements in order (skipping hoisted functions) */
+    /* Pass 2: Execute statements in order (skipping hoisted functions, traits, structs, impls, and enums) */
     for (size_t i = 0; i < program->count; ++i) {
-        if (program->stmts[i]->kind == UF_STMT_FUNCTION) {
+        if (program->stmts[i]->kind == UF_STMT_FUNCTION ||
+            program->stmts[i]->kind == UF_STMT_TRAIT ||
+            program->stmts[i]->kind == UF_STMT_STRUCT ||
+            program->stmts[i]->kind == UF_STMT_IMPL ||
+            program->stmts[i]->kind == UF_STMT_ENUM) {
             continue;
         }
         ExecResult res = execute_statement(rt, exec_env, program->stmts[i]);

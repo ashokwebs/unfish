@@ -1,0 +1,9 @@
+# expect-exit: 2
+# expect-error: Method 'dist' on struct 'Point' must have at least one parameter ('self')
+
+struct Point:
+    x: Number
+    y: Number
+
+    fn dist():
+        return 0

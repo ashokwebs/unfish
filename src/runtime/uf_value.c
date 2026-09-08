@@ -5,6 +5,7 @@
 #include "uf_module.h"
 #include "../compiler/uf_chunk.h"
 #include "../vm/uf_vm.h"
+#include "../vm2/uf_regvm.h"
 #include <math.h>
 
 UfValue uf_val_null(void) {
@@ -62,7 +63,7 @@ UfValue uf_val_string_cstr(UfRuntime* rt, const char* cstr) {
     return uf_val_string(rt, cstr, strlen(cstr));
 }
 
-UfValue uf_val_function(UfRuntime* rt, const char* name, const char** params, size_t param_count, struct UfStmt* body, UfEnv* closure_env) {
+UfValue uf_val_function(UfRuntime* rt, const char* name, const char** params, struct UfExpr** param_defaults, size_t param_count, size_t min_param_count, bool has_rest, struct UfStmt* body, UfEnv* closure_env) {
     size_t size = sizeof(UfFunctionObject);
     UfFunctionObject* fn = (UfFunctionObject*)malloc(size);
     if (!fn) {
@@ -74,7 +75,10 @@ UfValue uf_val_function(UfRuntime* rt, const char* name, const char** params, si
     fn->obj.next = NULL;
     fn->name = name;
     fn->params = params;
+    fn->param_defaults = param_defaults;
     fn->param_count = param_count;
+    fn->min_param_count = min_param_count;
+    fn->has_rest = has_rest;
     fn->body = body;
     fn->closure_env = closure_env;
 
@@ -145,7 +149,9 @@ void uf_array_push(UfRuntime* rt, UfArrayObject* arr, UfValue val) {
 
 UfValue uf_array_pop(UfArrayObject* arr) {
     if (arr->count == 0) return uf_val_null();
-    return arr->elements[--arr->count];
+    UfValue val = arr->elements[--arr->count];
+    arr->elements[arr->count] = uf_val_null();
+    return val;
 }
 
 UfValue uf_array_get(UfArrayObject* arr, size_t index) {
@@ -203,6 +209,7 @@ UfValue uf_val_map(UfRuntime* rt, size_t initial_cap) {
     map->obj.marked = false;
     map->obj.next = NULL;
     map->count = 0;
+    map->tombstone_count = 0;
     map->capacity = cap;
     map->entries = (UfMapEntry*)calloc(cap, sizeof(UfMapEntry));
     if (!map->entries) {
@@ -256,11 +263,16 @@ static void map_resize(UfRuntime* rt, UfMapObject* map, size_t new_cap) {
     free(old_entries);
     map->entries = new_entries;
     map->capacity = new_cap;
+    map->tombstone_count = 0;
 }
 
 bool uf_map_set(UfRuntime* rt, UfMapObject* map, UfValue key, UfValue val) {
-    if ((map->count + 1) * 4 >= map->capacity * 3) {
-        map_resize(rt, map, map->capacity * 2);
+    if ((map->count + map->tombstone_count + 1) * 4 >= map->capacity * 3) {
+        size_t new_cap = map->capacity * 2;
+        if (map->count * 4 < map->capacity && map->capacity > 8) {
+            new_cap = map->capacity;
+        }
+        map_resize(rt, map, new_cap);
     }
 
     uint32_t h = hash_value(key);
@@ -280,6 +292,9 @@ bool uf_map_set(UfRuntime* rt, UfMapObject* map, UfValue key, UfValue val) {
     }
 
     size_t target_idx = (tombstone_idx != (size_t)-1) ? tombstone_idx : idx;
+    if (tombstone_idx != (size_t)-1) {
+        map->tombstone_count--;
+    }
     map->entries[target_idx].key = key;
     map->entries[target_idx].value = val;
     map->entries[target_idx].occupied = true;
@@ -343,6 +358,7 @@ bool uf_map_delete(UfMapObject* map, UfValue key) {
         if (!map->entries[idx].tombstone && uf_val_equal(map->entries[idx].key, key)) {
             map->entries[idx].tombstone = true;
             map->count--;
+            map->tombstone_count++;
             for (size_t i = 0; i < map->order_count; ++i) {
                 if (uf_val_equal(map->order_keys[i], key)) {
                     for (size_t j = i; j + 1 < map->order_count; ++j) {
@@ -397,7 +413,7 @@ UfValue uf_val_module(UfRuntime* rt, UfModuleObject* mod) {
     return v;
 }
 
-UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count) {
+UfValue uf_val_struct_def_with_traits(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count, const char** method_names, UfValue* method_values, size_t method_count, const char** impl_traits, size_t impl_trait_count) {
     size_t size = sizeof(UfStructDefObject);
     UfStructDefObject* sdef = (UfStructDefObject*)malloc(size);
     if (!sdef) {
@@ -411,6 +427,11 @@ UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_na
     sdef->field_names = field_names;
     sdef->field_types = field_types;
     sdef->field_count = field_count;
+    sdef->method_names = method_names;
+    sdef->method_values = method_values;
+    sdef->method_count = method_count;
+    sdef->impl_traits = impl_traits;
+    sdef->impl_trait_count = impl_trait_count;
 
     if (rt) {
         uf_runtime_register_obj(rt, (UfObj*)sdef, size);
@@ -419,6 +440,76 @@ UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_na
     UfValue v;
     v.kind = UF_VAL_STRUCT_DEF;
     v.as.struct_def = sdef;
+    return v;
+}
+
+UfValue uf_val_struct_def(UfRuntime* rt, const char* name, const char** field_names, const char** field_types, size_t field_count, const char** method_names, UfValue* method_values, size_t method_count) {
+    return uf_val_struct_def_with_traits(rt, name, field_names, field_types, field_count, method_names, method_values, method_count, NULL, 0);
+}
+
+UfValue uf_val_trait_def(UfRuntime* rt, const char* name, size_t method_count, const char** method_names, size_t* method_param_counts, const char*** method_param_names, const char*** method_param_types, const char** method_return_types) {
+    size_t size = sizeof(UfTraitDefObject);
+    UfTraitDefObject* tdef = (UfTraitDefObject*)malloc(size);
+    if (!tdef) {
+        fprintf(stderr, "Fatal error: Out of memory allocating trait definition\n");
+        abort();
+    }
+    tdef->obj.kind = UF_OBJ_TRAIT_DEF;
+    tdef->obj.marked = false;
+    tdef->obj.next = NULL;
+    tdef->name = name;
+    tdef->method_count = method_count;
+    tdef->method_names = method_names;
+    tdef->method_param_counts = method_param_counts;
+    tdef->method_param_names = method_param_names;
+    tdef->method_param_types = method_param_types;
+    tdef->method_return_types = method_return_types;
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)tdef, size);
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_TRAIT_DEF;
+    v.as.trait_def = tdef;
+    return v;
+}
+
+bool uf_struct_implements_trait(UfStructDefObject* sdef, const char* trait_name) {
+    if (!sdef || !trait_name) return false;
+    for (size_t i = 0; i < sdef->impl_trait_count; ++i) {
+        if (sdef->impl_traits[i] && strcmp(sdef->impl_traits[i], trait_name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool uf_instance_implements_trait(UfInstanceObject* inst, const char* trait_name) {
+    if (!inst || !inst->def) return false;
+    return uf_struct_implements_trait(inst->def, trait_name);
+}
+
+UfValue uf_val_bound_method(UfRuntime* rt, UfValue receiver, UfValue method) {
+    size_t size = sizeof(UfBoundMethodObject);
+    UfBoundMethodObject* bm = (UfBoundMethodObject*)malloc(size);
+    if (!bm) {
+        fprintf(stderr, "Fatal error: Out of memory allocating bound method\n");
+        abort();
+    }
+    bm->obj.kind = UF_OBJ_BOUND_METHOD;
+    bm->obj.marked = false;
+    bm->obj.next = NULL;
+    bm->receiver = receiver;
+    bm->method = method;
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)bm, size);
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_BOUND_METHOD;
+    v.as.bound_method = bm;
     return v;
 }
 
@@ -454,6 +545,67 @@ UfValue uf_val_instance(UfRuntime* rt, UfStructDefObject* def, UfValue* fields, 
     return v;
 }
 
+UfValue uf_val_enum_def(UfRuntime* rt, const char* name, size_t variant_count, const char** variant_names, size_t* variant_field_counts, const char*** variant_field_names, const char*** variant_field_types) {
+    size_t size = sizeof(UfEnumDefObject);
+    UfEnumDefObject* edef = (UfEnumDefObject*)malloc(size);
+    if (!edef) {
+        fprintf(stderr, "Fatal error: Out of memory allocating enum def\n");
+        abort();
+    }
+    edef->obj.kind = UF_OBJ_ENUM_DEF;
+    edef->obj.marked = false;
+    edef->obj.next = NULL;
+    edef->name = name;
+    edef->variant_count = variant_count;
+    edef->variant_names = variant_names;
+    edef->variant_field_counts = variant_field_counts;
+    edef->variant_field_names = variant_field_names;
+    edef->variant_field_types = variant_field_types;
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)edef, size);
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_ENUM_DEF;
+    v.as.enum_def = edef;
+    return v;
+}
+
+UfValue uf_val_enum_val(UfRuntime* rt, UfEnumDefObject* def, int tag, const char* variant_name, UfValue* fields, size_t count) {
+    size_t size = sizeof(UfEnumValObject);
+    UfEnumValObject* ev = (UfEnumValObject*)malloc(size);
+    if (!ev) {
+        fprintf(stderr, "Fatal error: Out of memory allocating enum val\n");
+        abort();
+    }
+    ev->obj.kind = UF_OBJ_ENUM_VAL;
+    ev->obj.marked = false;
+    ev->obj.next = NULL;
+    ev->def = def;
+    ev->tag = tag;
+    ev->variant_name = variant_name;
+    ev->field_count = count;
+    ev->fields = NULL;
+    if (count > 0) {
+        ev->fields = (UfValue*)malloc(count * sizeof(UfValue));
+        if (!ev->fields) {
+            fprintf(stderr, "Fatal error: Out of memory allocating enum val fields\n");
+            abort();
+        }
+        memcpy(ev->fields, fields, count * sizeof(UfValue));
+    }
+
+    if (rt) {
+        uf_runtime_register_obj(rt, (UfObj*)ev, size + count * sizeof(UfValue));
+    }
+
+    UfValue v;
+    v.kind = UF_VAL_ENUM_VAL;
+    v.as.enum_val = ev;
+    return v;
+}
+
 bool uf_val_is_truthy(UfValue val) {
     switch (val.kind) {
         case UF_VAL_NULL:
@@ -475,10 +627,17 @@ bool uf_val_is_truthy(UfValue val) {
         case UF_VAL_MODULE:
         case UF_VAL_STRUCT_DEF:
         case UF_VAL_INSTANCE:
+        case UF_VAL_ENUM_DEF:
+        case UF_VAL_ENUM_VAL:
+        case UF_VAL_TRAIT_DEF:
         case UF_VAL_BYTECODE_FN:
         case UF_VAL_CLOSURE:
+        case UF_VAL_REG_FN:
+        case UF_VAL_REG_CLOSURE:
         case UF_VAL_FIBER:
         case UF_VAL_CHANNEL:
+        case UF_VAL_BOUND_METHOD:
+        case UF_VAL_PROMISE:
             return true;
         case UF_VAL_BUFFER:
             return val.as.buffer != NULL && val.as.buffer->size > 0;
@@ -593,16 +752,42 @@ static bool uf_val_equal_impl(UfValue a, UfValue b, UfEqVisited* vis) {
             return a.as.bytecode_fn == b.as.bytecode_fn;
         case UF_VAL_CLOSURE:
             return a.as.closure == b.as.closure;
+        case UF_VAL_REG_FN:
+            return a.as.reg_fn == b.as.reg_fn;
+        case UF_VAL_REG_CLOSURE:
+            return a.as.reg_closure == b.as.reg_closure;
+        case UF_VAL_BOUND_METHOD:
+            return uf_val_equal_impl(a.as.bound_method->receiver, b.as.bound_method->receiver, vis) &&
+                   uf_val_equal_impl(a.as.bound_method->method, b.as.bound_method->method, vis);
         case UF_VAL_FIBER:
             return a.as.fiber == b.as.fiber;
         case UF_VAL_CHANNEL:
             return a.as.channel == b.as.channel;
+        case UF_VAL_PROMISE:
+            return a.as.promise == b.as.promise;
         case UF_VAL_BUFFER: {
             if (a.as.buffer == b.as.buffer) return true;
             if (!a.as.buffer || !b.as.buffer) return false;
             if (a.as.buffer->size != b.as.buffer->size) return false;
             if (a.as.buffer->size == 0) return true;
             return memcmp(a.as.buffer->data, b.as.buffer->data, a.as.buffer->size) == 0;
+        }
+        case UF_VAL_ENUM_DEF:
+            return a.as.enum_def == b.as.enum_def;
+        case UF_VAL_TRAIT_DEF:
+            return a.as.trait_def == b.as.trait_def;
+        case UF_VAL_ENUM_VAL: {
+            UfEnumValObject* ea = a.as.enum_val;
+            UfEnumValObject* eb = b.as.enum_val;
+            if (ea == eb) return true;
+            if (!ea || !eb) return false;
+            if (ea->def != eb->def) return false;
+            if (ea->tag != eb->tag) return false;
+            if (ea->field_count != eb->field_count) return false;
+            for (size_t i = 0; i < ea->field_count; ++i) {
+                if (!uf_val_equal_impl(ea->fields[i], eb->fields[i], vis)) return false;
+            }
+            return true;
         }
     }
     return false;
@@ -839,6 +1024,19 @@ static char* uf_val_to_string_impl(UfValue val, UfReprVisited* vis) {
             snprintf(fbuf, sizeof(fbuf), "<fn %s>", fname);
             return strdup(fbuf);
         }
+        case UF_VAL_REG_FN: {
+            char fbuf[128];
+            snprintf(fbuf, sizeof(fbuf), "<reg fn %s>",
+                     (val.as.reg_fn && val.as.reg_fn->name) ? val.as.reg_fn->name : "anonymous");
+            return strdup(fbuf);
+        }
+        case UF_VAL_REG_CLOSURE: {
+            char fbuf[128];
+            const char* fname = (val.as.reg_closure && val.as.reg_closure->function && val.as.reg_closure->function->name)
+                                    ? val.as.reg_closure->function->name : "anonymous";
+            snprintf(fbuf, sizeof(fbuf), "<fn %s>", fname);
+            return strdup(fbuf);
+        }
         case UF_VAL_FIBER: {
             char fbuf[128];
             snprintf(fbuf, sizeof(fbuf), "<fiber #%lu>",
@@ -857,6 +1055,64 @@ static char* uf_val_to_string_impl(UfValue val, UfReprVisited* vis) {
             snprintf(bbuf, sizeof(bbuf), "<buffer size=%zu>",
                      val.as.buffer ? val.as.buffer->size : 0);
             return strdup(bbuf);
+        }
+        case UF_VAL_BOUND_METHOD: {
+            char bbuf[128];
+            snprintf(bbuf, sizeof(bbuf), "<bound method>");
+            return strdup(bbuf);
+        }
+        case UF_VAL_PROMISE: {
+            char pbuf[128];
+            const char* st = "pending";
+            if (val.as.promise) {
+                if (val.as.promise->state == UF_PROMISE_RESOLVED) st = "resolved";
+                else if (val.as.promise->state == UF_PROMISE_REJECTED) st = "rejected";
+            }
+            snprintf(pbuf, sizeof(pbuf), "<promise (%s)>", st);
+            return strdup(pbuf);
+        }
+        case UF_VAL_ENUM_DEF: {
+            char ebuf[256];
+            snprintf(ebuf, sizeof(ebuf), "<enum %s>",
+                     (val.as.enum_def && val.as.enum_def->name) ? val.as.enum_def->name : "anonymous");
+            return strdup(ebuf);
+        }
+        case UF_VAL_TRAIT_DEF: {
+            char tbuf[256];
+            snprintf(tbuf, sizeof(tbuf), "<trait %s>",
+                     (val.as.trait_def && val.as.trait_def->name) ? val.as.trait_def->name : "anonymous");
+            return strdup(tbuf);
+        }
+        case UF_VAL_ENUM_VAL: {
+            UfEnumValObject* ev = val.as.enum_val;
+            if (!ev) return strdup("EnumVal");
+            if (ev->field_count == 0) {
+                char vbuf[256];
+                snprintf(vbuf, sizeof(vbuf), "%s.%s", (ev->def && ev->def->name) ? ev->def->name : "", ev->variant_name ? ev->variant_name : "");
+                return strdup(vbuf);
+            }
+            size_t cap = 64;
+            char* out = (char*)malloc(cap);
+            snprintf(out, cap, "%s(", ev->variant_name ? ev->variant_name : "");
+            size_t len = strlen(out);
+            for (size_t i = 0; i < ev->field_count; ++i) {
+                if (i > 0) {
+                    if (len + 3 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                    memcpy(out + len, ", ", 2);
+                    len += 2;
+                    out[len] = '\0';
+                }
+                char* s = uf_val_to_string_impl(ev->fields[i], vis);
+                size_t slen = strlen(s);
+                while (len + slen + 2 >= cap) { cap *= 2; out = (char*)realloc(out, cap); }
+                memcpy(out + len, s, slen);
+                len += slen;
+                out[len] = '\0';
+                free(s);
+            }
+            out[len++] = ')';
+            out[len] = '\0';
+            return out;
         }
     }
     return strdup("<unknown>");
@@ -1069,15 +1325,22 @@ const char* uf_val_type_name(UfValue val) {
         case UF_VAL_NATIVE_FN:   return "function";
         case UF_VAL_BYTECODE_FN: return "function";
         case UF_VAL_CLOSURE:     return "function";
+        case UF_VAL_REG_FN:      return "function";
+        case UF_VAL_REG_CLOSURE: return "function";
         case UF_VAL_ARRAY:       return "array";
         case UF_VAL_MAP:         return "map";
         case UF_VAL_ERROR:       return "error";
         case UF_VAL_MODULE:      return "module";
         case UF_VAL_STRUCT_DEF:  return "struct";
         case UF_VAL_INSTANCE:    return (val.as.instance && val.as.instance->def && val.as.instance->def->name) ? val.as.instance->def->name : "instance";
+        case UF_VAL_ENUM_DEF:    return "enum";
+        case UF_VAL_ENUM_VAL:    return (val.as.enum_val && val.as.enum_val->def && val.as.enum_val->def->name) ? val.as.enum_val->def->name : "enum_val";
+        case UF_VAL_TRAIT_DEF:   return "trait";
         case UF_VAL_FIBER:       return "fiber";
         case UF_VAL_CHANNEL:     return "channel";
         case UF_VAL_BUFFER:      return "buffer";
+        case UF_VAL_BOUND_METHOD: return "function";
+        case UF_VAL_PROMISE:      return "promise";
     }
     return "<unknown>";
 }
@@ -1087,6 +1350,22 @@ UfValue uf_val_bytecode_fn(UfRuntime* rt, UfBytecodeFunction* fn) {
     UfValue v;
     v.kind = UF_VAL_BYTECODE_FN;
     v.as.bytecode_fn = fn;
+    return v;
+}
+
+UfValue uf_val_reg_fn(UfRuntime* rt, UfRegFunction* fn) {
+    (void)rt;
+    UfValue v;
+    v.kind = UF_VAL_REG_FN;
+    v.as.reg_fn = fn;
+    return v;
+}
+
+UfValue uf_val_reg_closure(UfRuntime* rt, UfRegClosure* closure) {
+    (void)rt;
+    UfValue v;
+    v.kind = UF_VAL_REG_CLOSURE;
+    v.as.reg_closure = closure;
     return v;
 }
 
@@ -1142,6 +1421,14 @@ UfValue uf_val_buffer_from_bytes(UfRuntime* rt, const uint8_t* bytes, size_t siz
     if (v.kind == UF_VAL_BUFFER && v.as.buffer && bytes && size > 0) {
         memcpy(v.as.buffer->data, bytes, size);
     }
+    return v;
+}
+
+UfValue uf_val_promise(UfRuntime* rt, UfPromiseObject* promise) {
+    (void)rt;
+    UfValue v;
+    v.kind = UF_VAL_PROMISE;
+    v.as.promise = promise;
     return v;
 }
 

@@ -1,0 +1,131 @@
+# expect: All spread/rest tests passed successfully!
+# Test 52: Spread / Rest Operator
+# Tests rest parameters (function(...args)), call spread (fn(...args)),
+# array literal spread ([...a, ...b]), and map literal spread ({...a, ...b}).
+
+# 1. Rest parameters in top-level functions
+function sum_all(...args):
+    let total = 0
+    for x in args:
+        total = total + x
+    return total
+
+assert(sum_all() == 0, "sum_all() with 0 args should be 0")
+assert(sum_all(5) == 5, "sum_all(5) with 1 arg should be 5")
+assert(sum_all(1, 2, 3, 4, 5) == 15, "sum_all(1, 2, 3, 4, 5) should be 15")
+
+function format_list(prefix, ...items):
+    let res = prefix + ": "
+    let first = true
+    for item in items:
+        if not first:
+            res = res + ", "
+        res = res + item
+        first = false
+    return res
+
+assert(format_list("Empty") == "Empty: ", "format_list with no rest args")
+assert(format_list("Colors", "red") == "Colors: red", "format_list with 1 rest arg")
+assert(format_list("Colors", "red", "green", "blue") == "Colors: red, green, blue", "format_list with 3 rest args")
+
+# Rest parameters with default parameters
+function calc(op, base = 100, ...factors):
+    let acc = base
+    for f in factors:
+        if op == "+":
+            acc = acc + f
+        if op == "*":
+            acc = acc * f
+    return acc
+
+assert(calc("+") == 100, "calc with default base and empty rest")
+assert(calc("+", 10) == 10, "calc with custom base and empty rest")
+assert(calc("+", 10, 1, 2, 3) == 16, "calc with custom base and rest")
+assert(calc("*", 2, 3, 4) == 24, "calc with multiply and rest")
+
+# 2. Rest parameters in anonymous functions / lambdas
+let lambda_collect = function(...items):
+    return len(items)
+
+assert(lambda_collect() == 0, "lambda rest with 0 args")
+assert(lambda_collect(10, 20, 30) == 3, "lambda rest with 3 args")
+
+let lambda_combine = function(first, ...rest):
+    let count = 1
+    for r in rest:
+        count = count + 1
+    return count
+
+assert(lambda_combine("a") == 1, "lambda combine 1 arg")
+assert(lambda_combine("a", "b", "c") == 3, "lambda combine 3 args")
+
+# 3. Rest parameters in struct methods
+struct Formatter:
+    prefix: String
+
+    function format(self, ...args):
+        let res = self.prefix
+        for a in args:
+            res = res + " " + a
+        return res
+
+let fmt = Formatter("LOG:")
+assert(fmt.format() == "LOG:", "method rest with 0 args")
+assert(fmt.format("hello", "world") == "LOG: hello world", "method rest with 2 args")
+
+# 4. Call spread: foo(...args)
+let nums = [10, 20, 30]
+assert(sum_all(...nums) == 60, "call spread into rest function")
+
+function add_three(a, b, c):
+    return a + b + c
+
+assert(add_three(...[1, 2, 3]) == 6, "call spread into fixed param function")
+
+# Mixed arguments with spread
+assert(sum_all(1, ...[2, 3], 4, ...[5, 6]) == 21, "mixed regular and spread arguments")
+assert(sum_all(...[]) == 0, "spreading empty array")
+assert(sum_all(100, ...[]) == 100, "spreading empty array with fixed arg")
+
+# Spread with closures and methods
+let add_three_fn = function(x, y, z): return x + y + z
+assert(add_three_fn(...[10, 20, 30]) == 60, "spread call to closure")
+assert(fmt.format(...["spread", "test"]) == "LOG: spread test", "spread call to method")
+
+# 5. Array literal spread: [...a, ...b]
+let a = [1, 2]
+let b = [4, 5]
+let combined = [...a, 3, ...b, 6]
+assert(len(combined) == 6, "array spread length")
+assert(combined[0] == 1, "combined[0]")
+assert(combined[1] == 2, "combined[1]")
+assert(combined[2] == 3, "combined[2]")
+assert(combined[3] == 4, "combined[3]")
+assert(combined[4] == 5, "combined[4]")
+assert(combined[5] == 6, "combined[5]")
+
+let empty_spread = [...[], 99, ...[]]
+assert(len(empty_spread) == 1, "empty array spread length")
+assert(empty_spread[0] == 99, "empty array spread element")
+
+# 6. Map literal spread: {...a, ...b}
+let m1 = {"a": 1, "b": 2}
+let m2 = {"b": 20, "c": 30}
+let m3 = {...m1, ...m2}
+assert(m3["a"] == 1, "m3 a from m1")
+assert(m3["b"] == 20, "m3 b overwritten by m2")
+assert(m3["c"] == 30, "m3 c from m2")
+
+# Key precedence with spread
+let m_override1 = {...m1, "a": 100}
+assert(m_override1["a"] == 100, "literal key after spread overrides spread")
+assert(m_override1["b"] == 2, "literal key does not affect other spread keys")
+
+let m_override2 = {"a": 100, ...m1}
+assert(m_override2["a"] == 1, "spread after literal key overrides literal key")
+
+# Spread with empty map
+let m_empty = {...{}, "k": 42}
+assert(m_empty["k"] == 42, "spread empty map")
+
+print("All spread/rest tests passed successfully!")

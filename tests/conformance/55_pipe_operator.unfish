@@ -1,0 +1,56 @@
+# expect: 10
+# expect: 15
+# expect: 23
+# expect: [apple, banana, cherry]
+# expect: 3
+# expect: [2, 4]
+# expect: [4, 8]
+# expect: 100
+# expect: HELLO UNFISH
+
+function double(x):
+    return x * 2
+
+function add(x, y):
+    return x + y
+
+function mul_add(x, factor, offset):
+    return x * factor + offset
+
+function is_even(x):
+    return x % 2 == 0
+
+# 1. Simple pipe
+let a = 5 |> double
+say a
+
+# 2. Pipe into call with 1 extra arg
+let b = 5 |> add(10)
+say b
+
+# 3. Pipe into call with multiple extra args
+let c = 5 |> mul_add(4, 3)
+say c
+
+# 4. Standard library string splitting and len
+let words = "apple,banana,cherry" |> split(",")
+say words
+
+let word_count = "apple,banana,cherry" |> split(",") |> len
+say word_count
+
+# 5. Pipeline with filter and map
+let nums = [1, 2, 3, 4, 5]
+let evens = nums |> filter(is_even)
+say evens
+
+let doubled_evens = nums |> filter(is_even) |> map(double)
+say doubled_evens
+
+# 6. Pipeline into anonymous function
+let result = 10 |> (function(x): return x * 10)
+say result
+
+# 7. Pipeline string operations
+let text = "   hello unfish   " |> trim |> to_upper
+say text

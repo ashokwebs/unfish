@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -Isrc/common -Isrc/lexer -Isrc/ast -Isrc/parser -Isrc/semantic -Isrc/runtime -Isrc/interpreter -Isrc/stdlib -Isrc/formatter -Isrc/debugger -Isrc/blocks -Isrc/compiler -Isrc/vm
+CFLAGS = -Wall -Wextra -Werror -pedantic -std=c99 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -Isrc/common -Isrc/lexer -Isrc/ast -Isrc/parser -Isrc/semantic -Isrc/runtime -Isrc/interpreter -Isrc/stdlib -Isrc/formatter -Isrc/debugger -Isrc/blocks -Isrc/compiler -Isrc/vm -Isrc/vm2 -Isrc/tooling
 LDFLAGS = -lm
 
 ASAN_FLAGS = -fsanitize=address,undefined -g
@@ -34,7 +34,16 @@ SRCS = src/common/uf_arena.c \
        src/vm/uf_vm.c \
        src/vm/uf_disasm.c \
        src/codegen/uf_emit_c.c \
-       src/lsp/uf_lsp.c
+       src/lsp/uf_lsp.c \
+       src/tooling/uf_test_runner.c \
+       src/tooling/uf_doc.c \
+       src/tooling/uf_pkg.c \
+       src/tooling/uf_learn.c \
+       src/tooling/uf_playground.c \
+       src/tooling/uf_profiler.c \
+       src/vm2/uf_regvm.c \
+       src/compiler/uf_reg_compiler.c \
+       src/compiler/uf_cache.c
 
 CLI_SRC = src/cli/main.c
 
@@ -73,6 +82,10 @@ test: $(BIN_DIR)/unfish
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_lsp.c $(LDFLAGS) -o $(BIN_DIR)/test_lsp
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_fiber.c $(LDFLAGS) -o $(BIN_DIR)/test_fiber
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_systems.c $(LDFLAGS) -o $(BIN_DIR)/test_systems
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_tooling.c $(LDFLAGS) -o $(BIN_DIR)/test_tooling
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_regvm.c $(LDFLAGS) -o $(BIN_DIR)/test_regvm
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_cache.c $(LDFLAGS) -o $(BIN_DIR)/test_cache
+	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_wasm.c $(LDFLAGS) -o $(BIN_DIR)/test_wasm
 	$(CC) $(CFLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	@echo "=== Running Unit Tests ==="
 	@$(BIN_DIR)/test_lexer
@@ -91,6 +104,10 @@ test: $(BIN_DIR)/unfish
 	@$(BIN_DIR)/test_lsp
 	@$(BIN_DIR)/test_fiber
 	@$(BIN_DIR)/test_systems
+	@$(BIN_DIR)/test_tooling
+	@$(BIN_DIR)/test_regvm
+	@$(BIN_DIR)/test_cache
+	@$(BIN_DIR)/test_wasm
 	@echo "=== Running Stress Tests ==="
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests ==="
@@ -116,6 +133,10 @@ test-asan:
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_lsp.c $(LDFLAGS) -o $(BIN_DIR)/test_lsp
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_fiber.c $(LDFLAGS) -o $(BIN_DIR)/test_fiber
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_systems.c $(LDFLAGS) -o $(BIN_DIR)/test_systems
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_tooling.c $(LDFLAGS) -o $(BIN_DIR)/test_tooling
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_regvm.c $(LDFLAGS) -o $(BIN_DIR)/test_regvm
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_cache.c $(LDFLAGS) -o $(BIN_DIR)/test_cache
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_wasm.c $(LDFLAGS) -o $(BIN_DIR)/test_wasm
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) tests/unit/test_stress.c $(LDFLAGS) -o $(BIN_DIR)/test_stress
 	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) $(CLI_SRC) $(LDFLAGS) -o $(BIN_DIR)/unfish
 	@echo "=== Running Unit Tests with ASan/UBSan ==="
@@ -135,7 +156,12 @@ test-asan:
 	@$(BIN_DIR)/test_lsp
 	@$(BIN_DIR)/test_fiber
 	@$(BIN_DIR)/test_systems
+	@$(BIN_DIR)/test_tooling
+	@$(BIN_DIR)/test_regvm
+	@$(BIN_DIR)/test_cache
+	@$(BIN_DIR)/test_wasm
 	@echo "=== Running Stress Tests with ASan/UBSan ==="
+
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests with ASan/UBSan ==="
 	@./tools/run_conformance_tests.sh

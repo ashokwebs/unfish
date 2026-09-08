@@ -1,0 +1,56 @@
+# expect: Circle with radius 5
+# expect: 78.5
+# expect: Rectangle 4x6
+# expect: 24
+# expect: Circle with radius 5
+# expect: Rectangle 4x6
+# expect: 78.5
+# expect: 24
+
+trait Describable:
+    fn describe() -> String
+
+trait Area:
+    fn area() -> Number
+
+struct Circle:
+    radius: Number
+
+    impl Describable:
+        fn describe(self) -> String:
+            return "Circle with radius " + to_string(self.radius)
+
+    impl Area:
+        fn area(self) -> Number:
+            return 3.14 * self.radius * self.radius
+
+struct Rectangle:
+    width: Number
+    height: Number
+
+impl Describable for Rectangle:
+    fn describe(self) -> String:
+        return "Rectangle " + to_string(self.width) + "x" + to_string(self.height)
+
+impl Area for Rectangle:
+    fn area(self) -> Number:
+        return self.width * self.height
+
+fn print_desc(item: Describable):
+    say item.describe()
+
+fn print_area(item: Area):
+    say item.area()
+
+let c = Circle(5)
+let r = Rectangle(4, 6)
+
+say c.describe()
+say c.area()
+say r.describe()
+say r.area()
+
+print_desc(c)
+print_desc(r)
+print_area(c)
+print_area(r)

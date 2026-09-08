@@ -33,11 +33,14 @@ static UfValue sys_platform(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_string_cstr(rt, "windows");
 #elif defined(__APPLE__) || defined(__MACH__)
     return uf_val_string_cstr(rt, "darwin");
+#elif defined(__wasm__) || defined(__wasi__)
+    return uf_val_string_cstr(rt, "wasi");
 #elif defined(__linux__)
     return uf_val_string_cstr(rt, "linux");
 #else
     return uf_val_string_cstr(rt, "unknown");
 #endif
+
 }
 
 static UfValue sys_env(UfRuntime* rt, int argc, UfValue* args) {

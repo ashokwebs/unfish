@@ -22,6 +22,7 @@ static void emit_indent(FILE* out, int indent) {
  * checked once emission finishes. */
 static bool g_emit_limit_exceeded = false;
 static char g_emit_limit_reason[256];
+static bool g_emit_embedded = false;
 
 static void note_limit_exceeded(const char* what, size_t limit) {
     if (!g_emit_limit_exceeded) {
@@ -87,21 +88,57 @@ static const UfStmt* lambda_body(const UfLambdaInfo* l) {
     return NULL;
 }
 
+static struct UfExpr** lambda_param_defaults(const UfLambdaInfo* l) {
+    if (l->fn_expr) return l->fn_expr->as.fn_expr.param_defaults;
+    if (l->fn_stmt) return l->fn_stmt->as.function_stmt.param_defaults;
+    return NULL;
+}
+
+static bool lambda_has_rest(const UfLambdaInfo* l) {
+    if (l->fn_expr) return l->fn_expr->as.fn_expr.has_rest;
+    if (l->fn_stmt) return l->fn_stmt->as.function_stmt.has_rest;
+    return false;
+}
+
+typedef struct {
+    const char* name;
+    size_t param_count;
+    size_t min_param_count;
+    bool has_rest;
+    const char** params;
+    struct UfExpr** param_defaults;
+    const UfStmt* stmt;
+} DeclaredFunction;
+
 typedef struct {
     const char* name;
     const char** field_names;
     size_t field_count;
+    const UfStmt* methods[64];
+    size_t method_count;
 } DeclaredStruct;
+
+typedef struct {
+    const char* name;
+    size_t variant_count;
+    struct {
+        const char* name;
+        size_t field_count;
+        const char** field_names;
+    } variants[64];
+} DeclaredEnum;
 
 typedef struct UfEmitContext {
     const char* prefix;      /* "uf_" for main, "uf_m_<safe_name>_" for module */
     const char* mod_name;    /* NULL for main, module name string for module */
     UfLambdaInfo lambdas[256];
     size_t lambda_count;
-    const char* declared_fns[512];
+    DeclaredFunction declared_fns[512];
     size_t declared_fn_count;
     DeclaredStruct declared_structs[128];
     size_t declared_struct_count;
+    DeclaredEnum declared_enums[64];
+    size_t declared_enum_count;
     const char* declared_vars[256];
     size_t declared_var_count;
     const char* boxed_names[256];
@@ -124,12 +161,49 @@ static void collect_structs_stmt(const UfStmt* stmt) {
     switch (stmt->kind) {
         case UF_STMT_STRUCT:
             if (g_ctx->declared_struct_count < 128) {
-                g_ctx->declared_structs[g_ctx->declared_struct_count].name = stmt->as.struct_stmt.name;
-                g_ctx->declared_structs[g_ctx->declared_struct_count].field_names = stmt->as.struct_stmt.field_names;
-                g_ctx->declared_structs[g_ctx->declared_struct_count].field_count = stmt->as.struct_stmt.field_count;
-                g_ctx->declared_struct_count++;
+                DeclaredStruct* ds = &g_ctx->declared_structs[g_ctx->declared_struct_count++];
+                ds->name = stmt->as.struct_stmt.name;
+                ds->field_names = stmt->as.struct_stmt.field_names;
+                ds->field_count = stmt->as.struct_stmt.field_count;
+                ds->method_count = 0;
+                for (size_t m = 0; m < stmt->as.struct_stmt.method_count && ds->method_count < 64; ++m) {
+                    ds->methods[ds->method_count++] = stmt->as.struct_stmt.methods[m];
+                }
+                for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+                    const UfStmt* ib = stmt->as.struct_stmt.impl_blocks[b];
+                    for (size_t m = 0; m < ib->as.impl_stmt.method_count && ds->method_count < 64; ++m) {
+                        ds->methods[ds->method_count++] = ib->as.impl_stmt.methods[m];
+                    }
+                }
             } else {
                 note_limit_exceeded("more than 128 struct definitions", 128);
+            }
+            break;
+        case UF_STMT_IMPL:
+            if (stmt->as.impl_stmt.struct_name) {
+                for (size_t i = 0; i < g_ctx->declared_struct_count; ++i) {
+                    if (strcmp(g_ctx->declared_structs[i].name, stmt->as.impl_stmt.struct_name) == 0) {
+                        DeclaredStruct* ds = &g_ctx->declared_structs[i];
+                        for (size_t m = 0; m < stmt->as.impl_stmt.method_count && ds->method_count < 64; ++m) {
+                            ds->methods[ds->method_count++] = stmt->as.impl_stmt.methods[m];
+                        }
+                        break;
+                    }
+                }
+            }
+            break;
+        case UF_STMT_ENUM:
+            if (g_ctx->declared_enum_count < 64) {
+                DeclaredEnum* de = &g_ctx->declared_enums[g_ctx->declared_enum_count++];
+                de->name = stmt->as.enum_stmt.name;
+                de->variant_count = stmt->as.enum_stmt.variant_count;
+                for (size_t v = 0; v < de->variant_count && v < 64; ++v) {
+                    de->variants[v].name = stmt->as.enum_stmt.variants[v].name;
+                    de->variants[v].field_count = stmt->as.enum_stmt.variants[v].field_count;
+                    de->variants[v].field_names = stmt->as.enum_stmt.variants[v].field_names;
+                }
+            } else {
+                note_limit_exceeded("more than 64 enum definitions", 64);
             }
             break;
         case UF_STMT_IF:
@@ -169,15 +243,47 @@ static void collect_structs_stmt(const UfStmt* stmt) {
 static bool is_declared_function(const char* name) {
     if (!g_ctx) return false;
     for (size_t i = 0; i < g_ctx->declared_fn_count; ++i) {
-        if (strcmp(g_ctx->declared_fns[i], name) == 0) return true;
+        if (strcmp(g_ctx->declared_fns[i].name, name) == 0) return true;
     }
     return false;
+}
+
+static const DeclaredFunction* find_declared_function(const char* name) {
+    if (!g_ctx) return NULL;
+    for (size_t i = 0; i < g_ctx->declared_fn_count; ++i) {
+        if (strcmp(g_ctx->declared_fns[i].name, name) == 0) return &g_ctx->declared_fns[i];
+    }
+    return NULL;
 }
 
 static bool is_declared_var(const char* name) {
     if (!g_ctx) return false;
     for (size_t i = 0; i < g_ctx->declared_var_count; ++i) {
         if (strcmp(g_ctx->declared_vars[i], name) == 0) return true;
+    }
+    return false;
+}
+
+
+static bool is_declared_enum_variant(const char* name, const DeclaredEnum** out_enum, size_t* out_vidx) {
+    if (!g_ctx) return false;
+    for (size_t i = 0; i < g_ctx->declared_enum_count; ++i) {
+        for (size_t v = 0; v < g_ctx->declared_enums[i].variant_count; ++v) {
+            if (strcmp(g_ctx->declared_enums[i].variants[v].name, name) == 0) {
+                if (out_enum) *out_enum = &g_ctx->declared_enums[i];
+                if (out_vidx) *out_vidx = v;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool is_declared_unit_enum_variant(const char* name) {
+    const DeclaredEnum* de = NULL;
+    size_t vidx = 0;
+    if (is_declared_enum_variant(name, &de, &vidx)) {
+        return de->variants[vidx].field_count == 0;
     }
     return false;
 }
@@ -235,10 +341,32 @@ static bool is_builtin_name(const char* name) {
         "buffer_read_u32_le", "buffer_write_u32_le", "buffer_read_i32_le", "buffer_write_i32_le",
         "u8", "i8", "u16", "i16", "u32", "i32",
         "band", "bor", "bxor", "bnot", "shl", "shr", "sar", "to_hex", "from_hex", "buffer_to_hex", "buffer_from_hex",
+        "spawn", "yield", "channel", "send", "recv", "close_channel", "run_scheduler", "run_async",
         "PI", "E", "INFINITY"
     };
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); ++i) {
         if (strcmp(name, builtins[i]) == 0) return true;
+    }
+    return false;
+}
+
+static const char* g_scope_vars[512];
+static size_t g_scope_var_count = 0;
+static int g_loop_try_depth = 0;
+static int g_destruct_id = 0;
+static bool g_is_current_fn_async = false;
+
+static void scope_push(const char* name) {
+    if (name && g_scope_var_count < 512) {
+        g_scope_vars[g_scope_var_count++] = name;
+    }
+}
+
+static bool is_locally_shadowed(const char* name) {
+    if (!name) return false;
+    if (is_declared_var(name)) return true;
+    for (size_t i = 0; i < g_scope_var_count; ++i) {
+        if (strcmp(g_scope_vars[i], name) == 0) return true;
     }
     return false;
 }
@@ -261,6 +389,13 @@ static void collect_lambdas_expr(const UfExpr* expr, int parent_id) {
             g_ctx->lambda_count++;
         } else {
             note_limit_exceeded("more than 256 closures/lambdas in one program", 256);
+        }
+        if (expr->as.fn_expr.param_defaults) {
+            for (size_t p = 0; p < expr->as.fn_expr.param_count; ++p) {
+                if (expr->as.fn_expr.param_defaults[p]) {
+                    collect_lambdas_expr(expr->as.fn_expr.param_defaults[p], parent_id);
+                }
+            }
         }
         collect_lambdas_stmt(expr->as.fn_expr.body, false, this_id);
         return;
@@ -290,12 +425,25 @@ static void collect_lambdas_expr(const UfExpr* expr, int parent_id) {
         case UF_EXPR_MAP:
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
                 collect_lambdas_expr(expr->as.map_lit.keys[i], parent_id);
-                collect_lambdas_expr(expr->as.map_lit.values[i], parent_id);
+                if (expr->as.map_lit.values[i]) {
+                    collect_lambdas_expr(expr->as.map_lit.values[i], parent_id);
+                }
             }
+            break;
+        case UF_EXPR_SPREAD:
+            collect_lambdas_expr(expr->as.spread.operand, parent_id);
+            break;
+        case UF_EXPR_AWAIT:
+            collect_lambdas_expr(expr->as.await_expr.value, parent_id);
             break;
         case UF_EXPR_INDEX:
             collect_lambdas_expr(expr->as.index_expr.target, parent_id);
             collect_lambdas_expr(expr->as.index_expr.index, parent_id);
+            break;
+        case UF_EXPR_STRING_INTERP:
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                collect_lambdas_expr(expr->as.string_interp.parts[i], parent_id);
+            }
             break;
         default:
             break;
@@ -355,6 +503,13 @@ static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel, int paren
                     note_limit_exceeded("more than 256 closures/lambdas in one program", 256);
                 }
             }
+            if (stmt->as.function_stmt.param_defaults) {
+                for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
+                    if (stmt->as.function_stmt.param_defaults[p]) {
+                        collect_lambdas_expr(stmt->as.function_stmt.param_defaults[p], parent_id);
+                    }
+                }
+            }
             /* A top-level function is never itself a lambda (it has real C
              * parameters, not an env capture), so its body resets the
              * nearest-enclosing-lambda chain to none. */
@@ -383,7 +538,31 @@ static void collect_lambdas_stmt(const UfStmt* stmt, bool is_toplevel, int paren
             break;
         case UF_STMT_TRY_CATCH:
             collect_lambdas_stmt(stmt->as.try_catch.try_block, is_toplevel, parent_id);
-            collect_lambdas_stmt(stmt->as.try_catch.catch_block, is_toplevel, parent_id);
+            if (stmt->as.try_catch.catch_block) {
+                collect_lambdas_stmt(stmt->as.try_catch.catch_block, is_toplevel, parent_id);
+            }
+            if (stmt->as.try_catch.finally_block) {
+                collect_lambdas_stmt(stmt->as.try_catch.finally_block, is_toplevel, parent_id);
+            }
+            break;
+        case UF_STMT_STRUCT:
+            for (size_t m = 0; m < stmt->as.struct_stmt.method_count; ++m) {
+                collect_lambdas_stmt(stmt->as.struct_stmt.methods[m], is_toplevel, parent_id);
+            }
+            for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+                const UfStmt* ib = stmt->as.struct_stmt.impl_blocks[b];
+                for (size_t m = 0; m < ib->as.impl_stmt.method_count; ++m) {
+                    collect_lambdas_stmt(ib->as.impl_stmt.methods[m], is_toplevel, parent_id);
+                }
+            }
+            break;
+        case UF_STMT_IMPL:
+            for (size_t m = 0; m < stmt->as.impl_stmt.method_count; ++m) {
+                collect_lambdas_stmt(stmt->as.impl_stmt.methods[m], is_toplevel, parent_id);
+            }
+            break;
+        case UF_STMT_TRAIT:
+        case UF_STMT_ENUM:
             break;
         default:
             break;
@@ -404,6 +583,9 @@ static void collect_pattern_locals(const UfPattern* pat, const char** locals, si
         case UF_PAT_LITERAL:
             break;
         case UF_PAT_VARIABLE:
+            if (is_declared_unit_enum_variant(pat->as.var_name)) {
+                break;
+            }
             if (*p_local_count < 64) {
                 locals[(*p_local_count)++] = pat->as.var_name;
             } else {
@@ -415,7 +597,38 @@ static void collect_pattern_locals(const UfPattern* pat, const char** locals, si
                 collect_pattern_locals(pat->as.struct_pat.field_patterns[i], locals, p_local_count);
             }
             break;
+        case UF_PAT_ARRAY:
+            for (size_t i = 0; i < pat->as.array_pat.count; ++i) {
+                collect_pattern_locals(pat->as.array_pat.elements[i], locals, p_local_count);
+            }
+            break;
+        case UF_PAT_MAP:
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                collect_pattern_locals(pat->as.map_pat.values[i], locals, p_local_count);
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                collect_pattern_locals(pat->as.map_pat.rest_pattern, locals, p_local_count);
+            }
+            break;
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                collect_pattern_locals(pat->as.rest_pat.subpattern, locals, p_local_count);
+            }
+            break;
     }
+}
+
+static bool is_enclosing_var(const char* name, int parent_id) {
+    int pid = parent_id;
+    while (pid >= 0) {
+        UfLambdaInfo* p = &g_ctx->lambdas[(size_t)pid];
+        if (is_in_list(name, p->own_locals, p->own_local_count)) return true;
+        if (is_in_list(name, lambda_params(p), lambda_param_count(p))) return true;
+        const char* sname = lambda_name(p);
+        if (sname && strcmp(name, sname) == 0) return true;
+        pid = p->parent_id;
+    }
+    return false;
 }
 
 static void find_captures_expr(const UfExpr* expr, const char** locals, size_t local_count, const char** params, size_t param_count, UfLambdaInfo* info) {
@@ -449,6 +662,13 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
         return;
     }
     if (expr->kind == UF_EXPR_FUNCTION) {
+        if (expr->as.fn_expr.param_defaults) {
+            for (size_t p = 0; p < expr->as.fn_expr.param_count; ++p) {
+                if (expr->as.fn_expr.param_defaults[p]) {
+                    find_captures_expr(expr->as.fn_expr.param_defaults[p], locals, local_count, params, param_count, info);
+                }
+            }
+        }
         return;
     }
     switch (expr->kind) {
@@ -467,9 +687,17 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
              * analysis must skip the callee in that exact situation to
              * match, rather than needlessly (and, for a name with no
              * matching enclosing binding at all, invalidly) capturing it. */
-            if (!(expr->as.call.callee &&
+            bool is_shadowed_builtin = (expr->as.call.callee &&
                   expr->as.call.callee->kind == UF_EXPR_IDENTIFIER &&
-                  is_builtin_name(expr->as.call.callee->as.identifier_name))) {
+                  is_builtin_name(expr->as.call.callee->as.identifier_name) &&
+                  (is_in_list(expr->as.call.callee->as.identifier_name, locals, local_count) ||
+                   is_in_list(expr->as.call.callee->as.identifier_name, params, param_count) ||
+                   is_declared_var(expr->as.call.callee->as.identifier_name) ||
+                   is_enclosing_var(expr->as.call.callee->as.identifier_name, info->parent_id)));
+            if (!expr->as.call.callee ||
+                expr->as.call.callee->kind != UF_EXPR_IDENTIFIER ||
+                !is_builtin_name(expr->as.call.callee->as.identifier_name) ||
+                is_shadowed_builtin) {
                 find_captures_expr(expr->as.call.callee, locals, local_count, params, param_count, info);
             }
             for (size_t i = 0; i < expr->as.call.argc; ++i) {
@@ -487,12 +715,25 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
         case UF_EXPR_MAP:
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
                 find_captures_expr(expr->as.map_lit.keys[i], locals, local_count, params, param_count, info);
-                find_captures_expr(expr->as.map_lit.values[i], locals, local_count, params, param_count, info);
+                if (expr->as.map_lit.values[i]) {
+                    find_captures_expr(expr->as.map_lit.values[i], locals, local_count, params, param_count, info);
+                }
             }
+            break;
+        case UF_EXPR_SPREAD:
+            find_captures_expr(expr->as.spread.operand, locals, local_count, params, param_count, info);
+            break;
+        case UF_EXPR_AWAIT:
+            find_captures_expr(expr->as.await_expr.value, locals, local_count, params, param_count, info);
             break;
         case UF_EXPR_INDEX:
             find_captures_expr(expr->as.index_expr.target, locals, local_count, params, param_count, info);
             find_captures_expr(expr->as.index_expr.index, locals, local_count, params, param_count, info);
+            break;
+        case UF_EXPR_STRING_INTERP:
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                find_captures_expr(expr->as.string_interp.parts[i], locals, local_count, params, param_count, info);
+            }
             break;
         default:
             break;
@@ -504,10 +745,14 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
     switch (stmt->kind) {
         case UF_STMT_LET:
             find_captures_expr(stmt->as.let_stmt.init, locals, *p_local_count, params, param_count, info);
-            if (*p_local_count < 64) {
-                locals[(*p_local_count)++] = stmt->as.let_stmt.name;
-            } else {
-                note_limit_exceeded("more than 64 local bindings in one closure body", 64);
+            if (stmt->as.let_stmt.pattern) {
+                collect_pattern_locals(stmt->as.let_stmt.pattern, locals, p_local_count);
+            } else if (stmt->as.let_stmt.name) {
+                if (*p_local_count < 64) {
+                    locals[(*p_local_count)++] = stmt->as.let_stmt.name;
+                } else {
+                    note_limit_exceeded("more than 64 local bindings in one closure body", 64);
+                }
             }
             break;
         case UF_STMT_ASSIGN:
@@ -564,6 +809,13 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
             } else {
                 note_limit_exceeded("more than 64 local bindings in one closure body", 64);
             }
+            if (stmt->as.function_stmt.param_defaults) {
+                for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
+                    if (stmt->as.function_stmt.param_defaults[p]) {
+                        find_captures_expr(stmt->as.function_stmt.param_defaults[p], locals, *p_local_count, params, param_count, info);
+                    }
+                }
+            }
             break;
         case UF_STMT_MATCH:
             find_captures_expr(stmt->as.match_stmt.expr, locals, *p_local_count, params, param_count, info);
@@ -580,14 +832,19 @@ static void find_captures_stmt(const UfStmt* stmt, const char** locals, size_t* 
             break;
         case UF_STMT_TRY_CATCH:
             find_captures_stmt(stmt->as.try_catch.try_block, locals, p_local_count, params, param_count, info);
-            if (stmt->as.try_catch.catch_var) {
-                if (*p_local_count < 64) {
-                    locals[(*p_local_count)++] = stmt->as.try_catch.catch_var;
-                } else {
-                    note_limit_exceeded("more than 64 local bindings in one closure body", 64);
+            if (stmt->as.try_catch.catch_block) {
+                if (stmt->as.try_catch.catch_var) {
+                    if (*p_local_count < 64) {
+                        locals[(*p_local_count)++] = stmt->as.try_catch.catch_var;
+                    } else {
+                        note_limit_exceeded("more than 64 local bindings in one closure body", 64);
+                    }
                 }
+                find_captures_stmt(stmt->as.try_catch.catch_block, locals, p_local_count, params, param_count, info);
             }
-            find_captures_stmt(stmt->as.try_catch.catch_block, locals, p_local_count, params, param_count, info);
+            if (stmt->as.try_catch.finally_block) {
+                find_captures_stmt(stmt->as.try_catch.finally_block, locals, p_local_count, params, param_count, info);
+            }
             break;
         default:
             break;
@@ -753,10 +1010,41 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
             break;
         }
         case UF_EXPR_CALL: {
+            bool has_spread = false;
+            for (size_t i = 0; i < expr->as.call.argc; ++i) {
+                if (expr->as.call.args[i]->kind == UF_EXPR_SPREAD) {
+                    has_spread = true;
+                    break;
+                }
+            }
+            if (has_spread) {
+                fputs("uf_call_val_spread(", out);
+                if (expr->as.call.callee && expr->as.call.callee->kind == UF_EXPR_IDENTIFIER &&
+                    !is_locally_shadowed(expr->as.call.callee->as.identifier_name) &&
+                    is_declared_function(expr->as.call.callee->as.identifier_name)) {
+                    fprintf(out, "%swrap_fn_%s()", g_ctx->prefix, expr->as.call.callee->as.identifier_name);
+                } else {
+                    emit_expr(out, expr->as.call.callee);
+                }
+                fprintf(out, ", uf_make_array_spread(%zu", expr->as.call.argc);
+                for (size_t i = 0; i < expr->as.call.argc; ++i) {
+                    if (expr->as.call.args[i]->kind == UF_EXPR_SPREAD) {
+                        fputs(", 1, ", out);
+                        emit_expr(out, expr->as.call.args[i]->as.spread.operand);
+                    } else {
+                        fputs(", 0, ", out);
+                        emit_expr(out, expr->as.call.args[i]);
+                    }
+                }
+                fputs("))", out);
+                return;
+            }
+
             if (expr->as.call.callee && expr->as.call.callee->kind == UF_EXPR_IDENTIFIER) {
                 const char* fn_name = expr->as.call.callee->as.identifier_name;
-                size_t argc = expr->as.call.argc;
-                const UfExpr** args = (const UfExpr**)expr->as.call.args;
+                if (!is_locally_shadowed(fn_name)) {
+                    size_t argc = expr->as.call.argc;
+                    const UfExpr** args = (const UfExpr**)expr->as.call.args;
 
                 #define UF_ARG(i) emit_call_arg(out, argc, args, (i))
 
@@ -942,17 +1230,62 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
                 if (strcmp(fn_name, "buffer_to_hex") == 0) { fputs("uf_buffer_to_hex(", out); UF_ARG(0); fputc(')', out); return; }
                 if (strcmp(fn_name, "buffer_from_hex") == 0) { fputs("uf_buffer_from_hex(", out); UF_ARG(0); fputc(')', out); return; }
 
-                #undef UF_ARG
-
-                /* If top-level declared function, call statically */
-                if (is_declared_function(fn_name)) {
-                    fprintf(out, "%sfn_%s(", g_ctx->prefix, fn_name);
-                    for (size_t i = 0; i < expr->as.call.argc; ++i) {
-                        if (i > 0) fputs(", ", out);
+                /* Concurrency builtins */
+                if (strcmp(fn_name, "channel") == 0) { fputs("uf_channel(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "send") == 0) { fputs("uf_send(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out); return; }
+                if (strcmp(fn_name, "recv") == 0) { fputs("uf_recv(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "close_channel") == 0) { fputs("uf_close_channel(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "yield") == 0) { fputs("uf_yield(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "run_scheduler") == 0) { fputs("uf_run_scheduler()", out); return; }
+                if (strcmp(fn_name, "spawn") == 0) {
+                    fprintf(out, "uf_spawn(%zu", argc);
+                    for (size_t i = 0; i < argc; ++i) {
+                        fputs(", ", out);
                         emit_expr(out, expr->as.call.args[i]);
                     }
                     fputc(')', out);
                     return;
+                }
+                if (strcmp(fn_name, "run_async") == 0) {
+                    fprintf(out, "uf_run_async(%zu", argc);
+                    for (size_t i = 0; i < argc; ++i) {
+                        fputs(", ", out);
+                        emit_expr(out, expr->as.call.args[i]);
+                    }
+                    fputc(')', out);
+                    return;
+                }
+
+                #undef UF_ARG
+
+                /* If top-level declared function, call statically (or via wrap_fn if rest parameter present) */
+                if (is_declared_function(fn_name)) {
+                    const DeclaredFunction* df = find_declared_function(fn_name);
+                    if (df && df->has_rest) {
+                        fprintf(out, "uf_call_val(%swrap_fn_%s(), %zu", g_ctx->prefix, fn_name, expr->as.call.argc);
+                        for (size_t i = 0; i < expr->as.call.argc; ++i) {
+                            fputs(", ", out);
+                            emit_expr(out, expr->as.call.args[i]);
+                        }
+                        fputc(')', out);
+                        return;
+                    }
+                    fprintf(out, "%sfn_%s(", g_ctx->prefix, fn_name);
+                    size_t call_argc = expr->as.call.argc;
+                    size_t target_argc = (df && df->param_count > call_argc) ? df->param_count : call_argc;
+                    for (size_t i = 0; i < target_argc; ++i) {
+                        if (i > 0) fputs(", ", out);
+                        if (i < call_argc) {
+                            emit_expr(out, expr->as.call.args[i]);
+                        } else if (df && df->param_defaults && df->param_defaults[i]) {
+                            emit_expr(out, df->param_defaults[i]);
+                        } else {
+                            fputs("uf_null()", out);
+                        }
+                    }
+                    fputc(')', out);
+                    return;
+                }
                 }
             }
 
@@ -986,22 +1319,79 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
             emit_expr(out, expr->as.grouping.inner);
             fputc(')', out);
             break;
-        case UF_EXPR_ARRAY:
-            fprintf(out, "uf_make_array(%zu", expr->as.array_lit.count);
+        case UF_EXPR_ARRAY: {
+            bool has_spread = false;
             for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
-                fputs(", ", out);
-                emit_expr(out, expr->as.array_lit.elements[i]);
+                if (expr->as.array_lit.elements[i]->kind == UF_EXPR_SPREAD) {
+                    has_spread = true;
+                    break;
+                }
             }
-            fputc(')', out);
+            if (has_spread) {
+                fprintf(out, "uf_make_array_spread(%zu", expr->as.array_lit.count);
+                for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                    if (expr->as.array_lit.elements[i]->kind == UF_EXPR_SPREAD) {
+                        fputs(", 1, ", out);
+                        emit_expr(out, expr->as.array_lit.elements[i]->as.spread.operand);
+                    } else {
+                        fputs(", 0, ", out);
+                        emit_expr(out, expr->as.array_lit.elements[i]);
+                    }
+                }
+                fputc(')', out);
+            } else {
+                fprintf(out, "uf_make_array(%zu", expr->as.array_lit.count);
+                for (size_t i = 0; i < expr->as.array_lit.count; ++i) {
+                    fputs(", ", out);
+                    emit_expr(out, expr->as.array_lit.elements[i]);
+                }
+                fputc(')', out);
+            }
             break;
-        case UF_EXPR_MAP:
-            fprintf(out, "uf_make_map(%zu", expr->as.map_lit.count);
+        }
+        case UF_EXPR_MAP: {
+            bool has_spread = false;
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
-                fputs(", ", out);
-                emit_expr(out, expr->as.map_lit.keys[i]);
-                fputs(", ", out);
-                emit_expr(out, expr->as.map_lit.values[i]);
+                if (expr->as.map_lit.values[i] == NULL) {
+                    has_spread = true;
+                    break;
+                }
             }
+            if (has_spread) {
+                fprintf(out, "uf_make_map_spread(%zu", expr->as.map_lit.count);
+                for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                    if (expr->as.map_lit.values[i] == NULL) {
+                        const UfExpr* sp = expr->as.map_lit.keys[i];
+                        const UfExpr* op = (sp->kind == UF_EXPR_SPREAD) ? sp->as.spread.operand : sp;
+                        fputs(", 1, ", out);
+                        emit_expr(out, op);
+                        fputs(", uf_null()", out);
+                    } else {
+                        fputs(", 0, ", out);
+                        emit_expr(out, expr->as.map_lit.keys[i]);
+                        fputs(", ", out);
+                        emit_expr(out, expr->as.map_lit.values[i]);
+                    }
+                }
+                fputc(')', out);
+            } else {
+                fprintf(out, "uf_make_map(%zu", expr->as.map_lit.count);
+                for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
+                    fputs(", ", out);
+                    emit_expr(out, expr->as.map_lit.keys[i]);
+                    fputs(", ", out);
+                    emit_expr(out, expr->as.map_lit.values[i]);
+                }
+                fputc(')', out);
+            }
+            break;
+        }
+        case UF_EXPR_SPREAD:
+            emit_expr(out, expr->as.spread.operand);
+            break;
+        case UF_EXPR_AWAIT:
+            fputs("uf_await(", out);
+            emit_expr(out, expr->as.await_expr.value);
             fputc(')', out);
             break;
         case UF_EXPR_INDEX:
@@ -1011,6 +1401,22 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
             emit_expr(out, expr->as.index_expr.index);
             fputc(')', out);
             break;
+        case UF_EXPR_STRING_INTERP: {
+            if (expr->as.string_interp.count == 0) {
+                fputs("uf_str(\"\")", out);
+            } else {
+                for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                    fputs("uf_add(", out);
+                }
+                fputs("uf_str(\"\")", out);
+                for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                    fputs(", ", out);
+                    emit_expr(out, expr->as.string_interp.parts[i]);
+                    fputc(')', out);
+                }
+            }
+            break;
+        }
         default:
             fputs("uf_null()", out);
             break;
@@ -1021,12 +1427,20 @@ static bool pattern_has_condition(const UfPattern* pat) {
     if (!pat) return false;
     switch (pat->kind) {
         case UF_PAT_WILDCARD:
+            return false;
         case UF_PAT_VARIABLE:
+            if (is_declared_unit_enum_variant(pat->as.var_name)) return true;
             return false;
         case UF_PAT_LITERAL:
             return true;
         case UF_PAT_STRUCT:
             return true;
+        case UF_PAT_ARRAY:
+            return true;
+        case UF_PAT_MAP:
+            return true;
+        case UF_PAT_REST:
+            return false;
     }
     return false;
 }
@@ -1035,8 +1449,14 @@ static void emit_pattern_condition(FILE* out, const UfPattern* pat, const char* 
     if (!pat) return;
     switch (pat->kind) {
         case UF_PAT_WILDCARD:
-        case UF_PAT_VARIABLE:
             fputs("1", out);
+            break;
+        case UF_PAT_VARIABLE:
+            if (is_declared_unit_enum_variant(pat->as.var_name)) {
+                fprintf(out, "uf_pat_match_variant(%s, \"%s\", 0)", val_expr, pat->as.var_name);
+            } else {
+                fputs("1", out);
+            }
             break;
         case UF_PAT_LITERAL:
             fprintf(out, "uf_eq_bool(%s, ", val_expr);
@@ -1044,17 +1464,48 @@ static void emit_pattern_condition(FILE* out, const UfPattern* pat, const char* 
             fputc(')', out);
             break;
         case UF_PAT_STRUCT:
-            fprintf(out, "(%s.kind == UF_RT_INSTANCE && strcmp(%s.as.instance->name, \"%s\") == 0 && %s.as.instance->field_count == %zu",
-                    val_expr, val_expr, pat->as.struct_pat.struct_name, val_expr, pat->as.struct_pat.field_count);
+            fprintf(out, "(uf_pat_match_variant(%s, \"%s\", %zu)",
+                    val_expr, pat->as.struct_pat.struct_name, pat->as.struct_pat.field_count);
             for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
                 if (pattern_has_condition(pat->as.struct_pat.field_patterns[i])) {
                     char field_expr[256];
-                    snprintf(field_expr, sizeof(field_expr), "%s.as.instance->fields[%zu]", val_expr, i);
+                    snprintf(field_expr, sizeof(field_expr), "uf_pat_get_field(%s, %zu)", val_expr, i);
                     fputs(" && ", out);
                     emit_pattern_condition(out, pat->as.struct_pat.field_patterns[i], field_expr);
                 }
             }
             fputc(')', out);
+            break;
+        case UF_PAT_ARRAY: {
+            size_t normal_count = pat->as.array_pat.has_rest
+                ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0)
+                : pat->as.array_pat.count;
+            if (pat->as.array_pat.has_rest) {
+                fprintf(out, "(%s.kind == UF_RT_ARRAY && %s.as.array->count >= %zu",
+                        val_expr, val_expr, normal_count);
+            } else {
+                fprintf(out, "(%s.kind == UF_RT_ARRAY && %s.as.array->count == %zu",
+                        val_expr, val_expr, normal_count);
+            }
+            for (size_t i = 0; i < normal_count; ++i) {
+                const UfPattern* ep = pat->as.array_pat.elements[i];
+                if (ep && ep->kind == UF_PAT_LITERAL) {
+                    char elem_expr[256];
+                    snprintf(elem_expr, sizeof(elem_expr),
+                             "(%s.as.array->count > %zu ? %s.as.array->elements[%zu] : uf_null())",
+                             val_expr, i, val_expr, i);
+                    fputs(" && ", out);
+                    emit_pattern_condition(out, ep, elem_expr);
+                }
+            }
+            fputc(')', out);
+            break;
+        }
+        case UF_PAT_MAP:
+            fprintf(out, "(%s.kind == UF_RT_MAP || %s.kind == UF_RT_INSTANCE)", val_expr, val_expr);
+            break;
+        case UF_PAT_REST:
+            fputs("1", out);
             break;
     }
 }
@@ -1066,6 +1517,9 @@ static void emit_pattern_bindings(FILE* out, const UfPattern* pat, const char* v
         case UF_PAT_LITERAL:
             break;
         case UF_PAT_VARIABLE:
+            if (is_declared_unit_enum_variant(pat->as.var_name)) {
+                break;
+            }
             emit_indent(out, indent);
             if (is_boxed_name(pat->as.var_name)) {
                 fprintf(out, "UfVal* uf_var_%s = uf_box_new(%s);\n", pat->as.var_name, val_expr);
@@ -1076,9 +1530,275 @@ static void emit_pattern_bindings(FILE* out, const UfPattern* pat, const char* v
         case UF_PAT_STRUCT:
             for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
                 char field_expr[256];
-                snprintf(field_expr, sizeof(field_expr), "%s.as.instance->fields[%zu]", val_expr, i);
+                snprintf(field_expr, sizeof(field_expr), "uf_pat_get_field(%s, %zu)", val_expr, i);
                 emit_pattern_bindings(out, pat->as.struct_pat.field_patterns[i], field_expr, indent);
             }
+            break;
+        case UF_PAT_ARRAY: {
+            size_t normal_count = pat->as.array_pat.has_rest
+                ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0)
+                : pat->as.array_pat.count;
+            for (size_t i = 0; i < normal_count; ++i) {
+                const UfPattern* ep = pat->as.array_pat.elements[i];
+                if (!ep || ep->kind == UF_PAT_WILDCARD || ep->kind == UF_PAT_LITERAL) continue;
+                char elem_expr[256];
+                snprintf(elem_expr, sizeof(elem_expr),
+                         "(%s.as.array->count > %zu ? %s.as.array->elements[%zu] : uf_null())",
+                         val_expr, i, val_expr, i);
+                emit_pattern_bindings(out, ep, elem_expr, indent);
+            }
+            if (pat->as.array_pat.has_rest) {
+                const UfPattern* rp = pat->as.array_pat.elements[normal_count];
+                if (rp && rp->kind == UF_PAT_REST) rp = rp->as.rest_pat.subpattern;
+                if (rp && rp->kind == UF_PAT_VARIABLE) {
+                    char rest_expr[256];
+                    snprintf(rest_expr, sizeof(rest_expr), "uf_array_slice(%s, %zu)", val_expr, normal_count);
+                    emit_indent(out, indent);
+                    if (is_boxed_name(rp->as.var_name)) {
+                        fprintf(out, "UfVal* uf_var_%s = uf_box_new(%s);\n", rp->as.var_name, rest_expr);
+                    } else {
+                        fprintf(out, "UfVal uf_var_%s = %s;\n", rp->as.var_name, rest_expr);
+                    }
+                }
+            }
+            break;
+        }
+        case UF_PAT_MAP: {
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                const UfPattern* vp = pat->as.map_pat.values[i];
+                if (!vp || vp->kind == UF_PAT_WILDCARD || vp->kind == UF_PAT_LITERAL) continue;
+                char key_expr[256];
+                snprintf(key_expr, sizeof(key_expr),
+                         "uf_destructure_get_key(%s, \"%s\")", val_expr, pat->as.map_pat.keys[i]);
+                emit_pattern_bindings(out, vp, key_expr, indent);
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                const UfPattern* rp = pat->as.map_pat.rest_pattern;
+                if (rp->kind == UF_PAT_VARIABLE) {
+                    emit_indent(out, indent);
+                    /* Declare the variable BEFORE the exclude-keys block */
+                    if (is_boxed_name(rp->as.var_name)) {
+                        fprintf(out, "UfVal* uf_var_%s;\n", rp->as.var_name);
+                        emit_indent(out, indent);
+                        fprintf(out, "{ const char* _excl_keys_%s[] = {", rp->as.var_name);
+                        for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+                            if (j > 0) fputs(", ", out);
+                            fprintf(out, "\"%s\"", pat->as.map_pat.keys[j]);
+                        }
+                        fprintf(out, "}; uf_var_%s = uf_box_new(uf_map_rest(%s, %zu, _excl_keys_%s)); }\n",
+                                rp->as.var_name, val_expr, pat->as.map_pat.count, rp->as.var_name);
+                    } else {
+                        fprintf(out, "UfVal uf_var_%s;\n", rp->as.var_name);
+                        emit_indent(out, indent);
+                        fprintf(out, "{ const char* _excl_keys_%s[] = {", rp->as.var_name);
+                        for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+                            if (j > 0) fputs(", ", out);
+                            fprintf(out, "\"%s\"", pat->as.map_pat.keys[j]);
+                        }
+                        fprintf(out, "}; uf_var_%s = uf_map_rest(%s, %zu, _excl_keys_%s); }\n",
+                                rp->as.var_name, val_expr, pat->as.map_pat.count, rp->as.var_name);
+                    }
+                }
+            }
+            break;
+        }
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                emit_pattern_bindings(out, pat->as.rest_pat.subpattern, val_expr, indent);
+            }
+            break;
+    }
+}
+
+static void emit_destruct_let_pattern(FILE* out, const UfPattern* pat, const char* tmp_var, int indent, bool is_toplevel);
+
+static void emit_destruct_assign_pattern(FILE* out, const UfPattern* pat, const char* tmp_var, int indent);
+
+static void emit_destruct_let_pattern(FILE* out, const UfPattern* pat, const char* tmp_var, int indent, bool is_toplevel) {
+    if (!pat) return;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+        case UF_PAT_LITERAL:
+            break;
+        case UF_PAT_VARIABLE: {
+            if (!is_toplevel) scope_push(pat->as.var_name);
+            emit_indent(out, indent);
+            bool boxed = !is_toplevel && is_boxed_name(pat->as.var_name);
+            if (is_toplevel) {
+                fprintf(out, "%svar_%s = %s;\n", g_ctx->prefix, pat->as.var_name, tmp_var);
+            } else if (boxed) {
+                fprintf(out, "UfVal* uf_var_%s = uf_box_new(%s);\n", pat->as.var_name, tmp_var);
+            } else {
+                fprintf(out, "UfVal uf_var_%s = %s;\n", pat->as.var_name, tmp_var);
+            }
+            break;
+        }
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                emit_destruct_let_pattern(out, pat->as.rest_pat.subpattern, tmp_var, indent, is_toplevel);
+            }
+            break;
+        case UF_PAT_ARRAY: {
+            /* Assert array type on the tmp_var */
+            emit_indent(out, indent);
+            fprintf(out, "uf_assert_array_destructure(%s);\n", tmp_var);
+            size_t normal_count = pat->as.array_pat.has_rest
+                ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0)
+                : pat->as.array_pat.count;
+            for (size_t i = 0; i < normal_count; ++i) {
+                const UfPattern* ep = pat->as.array_pat.elements[i];
+                if (!ep || ep->kind == UF_PAT_WILDCARD) continue;
+                int sub_id = g_destruct_id++;
+                char sub_expr[256];
+                snprintf(sub_expr, sizeof(sub_expr), "_d%d_e%zu", sub_id, i);
+                emit_indent(out, indent);
+                fprintf(out, "UfVal _d%d_e%zu = uf_array_get_safe(%s, %zu);\n", sub_id, i, tmp_var, i);
+                emit_destruct_let_pattern(out, ep, sub_expr, indent, is_toplevel);
+            }
+            if (pat->as.array_pat.has_rest) {
+                const UfPattern* rp = pat->as.array_pat.elements[normal_count];
+                if (rp && rp->kind == UF_PAT_REST) rp = rp->as.rest_pat.subpattern;
+                if (rp && rp->kind != UF_PAT_WILDCARD) {
+                    int sub_id = g_destruct_id++;
+                    char sub_expr[256];
+                    snprintf(sub_expr, sizeof(sub_expr), "_d%d_rest", sub_id);
+                    emit_indent(out, indent);
+                    fprintf(out, "UfVal _d%d_rest = uf_array_slice(%s, %zu);\n", sub_id, tmp_var, normal_count);
+                    emit_destruct_let_pattern(out, rp, sub_expr, indent, is_toplevel);
+                }
+            }
+            break;
+        }
+        case UF_PAT_MAP: {
+            /* Assert map/instance type */
+            emit_indent(out, indent);
+            fprintf(out, "uf_assert_map_destructure(%s);\n", tmp_var);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                const UfPattern* vp = pat->as.map_pat.values[i];
+                if (!vp || vp->kind == UF_PAT_WILDCARD) continue;
+                int sub_id = g_destruct_id++;
+                char sub_expr[256];
+                snprintf(sub_expr, sizeof(sub_expr), "_d%d_k%zu", sub_id, i);
+                emit_indent(out, indent);
+                fprintf(out, "UfVal _d%d_k%zu = uf_destructure_get_key(%s, \"%s\");\n",
+                        sub_id, i, tmp_var, pat->as.map_pat.keys[i]);
+                emit_destruct_let_pattern(out, vp, sub_expr, indent, is_toplevel);
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                const UfPattern* rp = pat->as.map_pat.rest_pattern;
+                if (rp->kind != UF_PAT_WILDCARD) {
+                    int sub_id = g_destruct_id++;
+                    char sub_expr[256];
+                    snprintf(sub_expr, sizeof(sub_expr), "_d%d_rest", sub_id);
+                    /* Declare the rest variable OUTSIDE the exclude-key block */
+                    emit_indent(out, indent);
+                    fprintf(out, "UfVal _d%d_rest;\n", sub_id);
+                    emit_indent(out, indent);
+                    fprintf(out, "{ const char* _d%d_excl[] = {", sub_id);
+                    for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+                        if (j > 0) fputs(", ", out);
+                        fprintf(out, "\"%s\"", pat->as.map_pat.keys[j]);
+                    }
+                    fprintf(out, "}; _d%d_rest = uf_map_rest(%s, %zu, _d%d_excl); }\n",
+                            sub_id, tmp_var, pat->as.map_pat.count, sub_id);
+                    emit_destruct_let_pattern(out, rp, sub_expr, indent, is_toplevel);
+                }
+            }
+            break;
+        }
+        case UF_PAT_STRUCT:
+            break;
+    }
+}
+
+static void emit_destruct_assign_pattern(FILE* out, const UfPattern* pat, const char* tmp_var, int indent) {
+    if (!pat) return;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+        case UF_PAT_LITERAL:
+            break;
+        case UF_PAT_VARIABLE: {
+            emit_indent(out, indent);
+            if (is_declared_var(pat->as.var_name)) {
+                fprintf(out, "%svar_%s = %s;\n", g_ctx->prefix, pat->as.var_name, tmp_var);
+            } else if (is_boxed_name(pat->as.var_name)) {
+                fprintf(out, "*uf_var_%s = %s;\n", pat->as.var_name, tmp_var);
+            } else {
+                fprintf(out, "uf_var_%s = %s;\n", pat->as.var_name, tmp_var);
+            }
+            break;
+        }
+        case UF_PAT_REST:
+            if (pat->as.rest_pat.subpattern) {
+                emit_destruct_assign_pattern(out, pat->as.rest_pat.subpattern, tmp_var, indent);
+            }
+            break;
+        case UF_PAT_ARRAY: {
+            emit_indent(out, indent);
+            fprintf(out, "uf_assert_array_destructure(%s);\n", tmp_var);
+            size_t normal_count = pat->as.array_pat.has_rest
+                ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0)
+                : pat->as.array_pat.count;
+            for (size_t i = 0; i < normal_count; ++i) {
+                const UfPattern* ep = pat->as.array_pat.elements[i];
+                if (!ep || ep->kind == UF_PAT_WILDCARD) continue;
+                int sub_id = g_destruct_id++;
+                char sub_expr[256];
+                snprintf(sub_expr, sizeof(sub_expr), "_d%d_e%zu", sub_id, i);
+                emit_indent(out, indent);
+                fprintf(out, "UfVal _d%d_e%zu = uf_array_get_safe(%s, %zu);\n", sub_id, i, tmp_var, i);
+                emit_destruct_assign_pattern(out, ep, sub_expr, indent);
+            }
+            if (pat->as.array_pat.has_rest) {
+                const UfPattern* rp = pat->as.array_pat.elements[normal_count];
+                if (rp && rp->kind == UF_PAT_REST) rp = rp->as.rest_pat.subpattern;
+                if (rp && rp->kind != UF_PAT_WILDCARD) {
+                    int sub_id = g_destruct_id++;
+                    char sub_expr[256];
+                    snprintf(sub_expr, sizeof(sub_expr), "_d%d_rest", sub_id);
+                    emit_indent(out, indent);
+                    fprintf(out, "UfVal _d%d_rest = uf_array_slice(%s, %zu);\n", sub_id, tmp_var, normal_count);
+                    emit_destruct_assign_pattern(out, rp, sub_expr, indent);
+                }
+            }
+            break;
+        }
+        case UF_PAT_MAP: {
+            emit_indent(out, indent);
+            fprintf(out, "uf_assert_map_destructure(%s);\n", tmp_var);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                const UfPattern* vp = pat->as.map_pat.values[i];
+                if (!vp || vp->kind == UF_PAT_WILDCARD) continue;
+                int sub_id = g_destruct_id++;
+                char sub_expr[256];
+                snprintf(sub_expr, sizeof(sub_expr), "_d%d_k%zu", sub_id, i);
+                emit_indent(out, indent);
+                fprintf(out, "UfVal _d%d_k%zu = uf_destructure_get_key(%s, \"%s\");\n",
+                        sub_id, i, tmp_var, pat->as.map_pat.keys[i]);
+                emit_destruct_assign_pattern(out, vp, sub_expr, indent);
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                const UfPattern* rp = pat->as.map_pat.rest_pattern;
+                if (rp->kind != UF_PAT_WILDCARD) {
+                    int sub_id = g_destruct_id++;
+                    char sub_expr[256];
+                    snprintf(sub_expr, sizeof(sub_expr), "_d%d_rest", sub_id);
+                    emit_indent(out, indent);
+                    fprintf(out, "UfVal _d%d_rest;\n", sub_id);
+                    emit_indent(out, indent);
+                    fprintf(out, "{ const char* _d%d_excl[] = {", sub_id);
+                    for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+                        if (j > 0) fputs(", ", out);
+                        fprintf(out, "\"%s\"", pat->as.map_pat.keys[j]);
+                    }
+                    fprintf(out, "}; _d%d_rest = uf_map_rest(%s, %zu, _d%d_excl); }\n",
+                            sub_id, tmp_var, pat->as.map_pat.count, sub_id);
+                    emit_destruct_assign_pattern(out, rp, sub_expr, indent);
+                }
+            }
+            break;
+        }
+        case UF_PAT_STRUCT:
             break;
     }
 }
@@ -1088,6 +1808,23 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
 
     switch (stmt->kind) {
         case UF_STMT_LET: {
+            /* Pattern-based destructuring let */
+            if (stmt->as.let_stmt.pattern) {
+                int tmp_id = g_destruct_id++;
+                emit_indent(out, indent);
+                fprintf(out, "UfVal _destruct_tmp_%d = ", tmp_id);
+                if (stmt->as.let_stmt.init) {
+                    emit_expr(out, stmt->as.let_stmt.init);
+                } else {
+                    fputs("uf_null()", out);
+                }
+                fputs(";\n", out);
+                char tmp_var[64];
+                snprintf(tmp_var, sizeof(tmp_var), "_destruct_tmp_%d", tmp_id);
+                emit_destruct_let_pattern(out, stmt->as.let_stmt.pattern, tmp_var, indent, is_toplevel);
+                break;
+            }
+            if (!is_toplevel) scope_push(stmt->as.let_stmt.name);
             emit_indent(out, indent);
             bool let_boxed = !is_toplevel && is_boxed_name(stmt->as.let_stmt.name);
             if (is_toplevel) {
@@ -1107,6 +1844,18 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             break;
         }
         case UF_STMT_ASSIGN:
+            /* Pattern-based destructuring assign */
+            if (stmt->as.assign_stmt.pattern) {
+                int tmp_id = g_destruct_id++;
+                emit_indent(out, indent);
+                fprintf(out, "UfVal _destruct_tmp_%d = ", tmp_id);
+                emit_expr(out, stmt->as.assign_stmt.value);
+                fputs(";\n", out);
+                char tmp_var[64];
+                snprintf(tmp_var, sizeof(tmp_var), "_destruct_tmp_%d", tmp_id);
+                emit_destruct_assign_pattern(out, stmt->as.assign_stmt.pattern, tmp_var, indent);
+                break;
+            }
             emit_indent(out, indent);
             if (is_declared_var(stmt->as.assign_stmt.name)) {
                 fprintf(out, "%svar_%s = ", g_ctx->prefix, stmt->as.assign_stmt.name);
@@ -1153,16 +1902,20 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             emit_indent(out, indent);
             fputs("}\n", out);
             break;
-        case UF_STMT_WHILE:
+        case UF_STMT_WHILE: {
             emit_indent(out, indent);
             fputs("while (uf_truthy(", out);
             emit_expr(out, stmt->as.while_stmt.condition);
             fputs(")) {\n", out);
+            int prev_loop_try_depth = g_loop_try_depth;
+            g_loop_try_depth = 0;
             emit_stmt(out, stmt->as.while_stmt.body, indent + 1, false);
+            g_loop_try_depth = prev_loop_try_depth;
             emit_indent(out, indent);
             fputs("}\n", out);
             break;
-        case UF_STMT_REPEAT:
+        }
+        case UF_STMT_REPEAT: {
             emit_indent(out, indent);
             fputs("{\n", out);
             emit_indent(out, indent + 1);
@@ -1173,13 +1926,17 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             fputs("long _rep_limit = (_rep_cnt.kind == UF_RT_NUMBER) ? (long)_rep_cnt.as.number : 0;\n", out);
             emit_indent(out, indent + 1);
             fputs("for (long _rep = 0; _rep < _rep_limit; ++_rep) {\n", out);
+            int prev_loop_try_depth = g_loop_try_depth;
+            g_loop_try_depth = 0;
             emit_stmt(out, stmt->as.repeat_stmt.body, indent + 2, false);
+            g_loop_try_depth = prev_loop_try_depth;
             emit_indent(out, indent + 1);
             fputs("}\n", out);
             emit_indent(out, indent);
             fputs("}\n", out);
             break;
-        case UF_STMT_FOR:
+        }
+        case UF_STMT_FOR: {
             emit_indent(out, indent);
             fputs("{\n", out);
             emit_indent(out, indent + 1);
@@ -1196,18 +1953,31 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             } else {
                 fprintf(out, "UfVal uf_var_%s = uf_iter_get(_iter, _i);\n", stmt->as.for_stmt.var_name);
             }
+            size_t saved_scope = g_scope_var_count;
+            scope_push(stmt->as.for_stmt.var_name);
+            int prev_loop_try_depth = g_loop_try_depth;
+            g_loop_try_depth = 0;
             emit_stmt(out, stmt->as.for_stmt.body, indent + 2, false);
+            g_loop_try_depth = prev_loop_try_depth;
+            g_scope_var_count = saved_scope;
             emit_indent(out, indent + 1);
             fputs("}\n", out);
             emit_indent(out, indent);
             fputs("}\n", out);
             break;
+        }
         case UF_STMT_BREAK:
             emit_indent(out, indent);
+            for (int t = 0; t < g_loop_try_depth; ++t) {
+                fputs("uf_catch_pop(); ", out);
+            }
             fputs("break;\n", out);
             break;
         case UF_STMT_CONTINUE:
             emit_indent(out, indent);
+            for (int t = 0; t < g_loop_try_depth; ++t) {
+                fputs("uf_catch_pop(); ", out);
+            }
             fputs("continue;\n", out);
             break;
         case UF_STMT_RETURN:
@@ -1228,18 +1998,26 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
                 emit_indent(out, indent + 1);
                 fputs("g_catch_stack = _fn_catch_entry;\n", out);
                 emit_indent(out, indent + 1);
-                fputs("return _ret_val;\n", out);
+                if (g_is_current_fn_async) {
+                    fputs("return uf_promise_resolved(_ret_val);\n", out);
+                } else {
+                    fputs("return _ret_val;\n", out);
+                }
                 emit_indent(out, indent);
                 fputs("}\n", out);
             }
             break;
-        case UF_STMT_BLOCK:
+        case UF_STMT_BLOCK: {
+            size_t saved_scope = g_scope_var_count;
             for (size_t i = 0; i < stmt->as.block.count; ++i) {
                 emit_stmt(out, stmt->as.block.stmts[i], indent, false);
             }
+            g_scope_var_count = saved_scope;
             break;
+        }
         case UF_STMT_FUNCTION:
             if (!is_toplevel) {
+                scope_push(stmt->as.function_stmt.name);
                 int id = find_stmt_lambda_id(stmt);
                 if (id >= 0) {
                     emit_indent(out, indent);
@@ -1260,6 +2038,15 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             break;
         case UF_STMT_STRUCT:
             /* Struct constructors and metadata are emitted globally */
+            break;
+        case UF_STMT_TRAIT:
+            /* Traits are compile-time type definitions */
+            break;
+        case UF_STMT_IMPL:
+            /* Struct methods are emitted globally */
+            break;
+        case UF_STMT_ENUM:
+            /* Enum declarations and templates are emitted globally */
             break;
         case UF_STMT_MATCH: {
             size_t mid = g_match_id++;
@@ -1335,27 +2122,47 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             emit_indent(out, indent);
             fputs("{\n", out);
             emit_indent(out, indent + 1);
-            fputs("UfCatchFrame _frame;\n", out);
+            fputs("UfCatchFrame _frame; _frame.error = uf_null();\n", out);
             emit_indent(out, indent + 1);
             fputs("uf_catch_push(&_frame);\n", out);
             emit_indent(out, indent + 1);
             fputs("if (setjmp(_frame.buf) == 0) {\n", out);
+            g_loop_try_depth++;
             emit_stmt(out, stmt->as.try_catch.try_block, indent + 2, false);
+            g_loop_try_depth--;
             emit_indent(out, indent + 2);
             fputs("uf_catch_pop();\n", out);
             emit_indent(out, indent + 1);
             fputs("} else {\n", out);
-            if (stmt->as.try_catch.catch_var) {
-                emit_indent(out, indent + 2);
-                if (is_boxed_name(stmt->as.try_catch.catch_var)) {
-                    fprintf(out, "UfVal* uf_var_%s = uf_box_new(_frame.error);\n", stmt->as.try_catch.catch_var);
-                } else {
-                    fprintf(out, "UfVal uf_var_%s = _frame.error;\n", stmt->as.try_catch.catch_var);
+            if (stmt->as.try_catch.catch_block) {
+                size_t saved_scope = g_scope_var_count;
+                if (stmt->as.try_catch.catch_var) {
+                    scope_push(stmt->as.try_catch.catch_var);
+                    emit_indent(out, indent + 2);
+                    if (is_boxed_name(stmt->as.try_catch.catch_var)) {
+                        fprintf(out, "UfVal* uf_var_%s = uf_box_new(_frame.error);\n", stmt->as.try_catch.catch_var);
+                    } else {
+                        fprintf(out, "UfVal uf_var_%s = _frame.error;\n", stmt->as.try_catch.catch_var);
+                    }
                 }
+                emit_stmt(out, stmt->as.try_catch.catch_block, indent + 2, false);
+                g_scope_var_count = saved_scope;
             }
-            emit_stmt(out, stmt->as.try_catch.catch_block, indent + 2, false);
             emit_indent(out, indent + 1);
             fputs("}\n", out);
+            if (stmt->as.try_catch.finally_block) {
+                emit_stmt(out, stmt->as.try_catch.finally_block, indent + 1, false);
+                if (!stmt->as.try_catch.catch_block) {
+                    emit_indent(out, indent + 1);
+                    fputs("if (_frame.error.kind != UF_RT_NULL) {\n", out);
+                    emit_indent(out, indent + 2);
+                    fputs("if (g_catch_stack) { g_catch_stack->error = _frame.error; longjmp(g_catch_stack->buf, 1); }\n", out);
+                    emit_indent(out, indent + 2);
+                    fputs("else { fprintf(stderr, \"Runtime Error: Uncaught exception\\n\"); exit(3); }\n", out);
+                    emit_indent(out, indent + 1);
+                    fputs("}\n", out);
+                }
+            }
             emit_indent(out, indent);
             fputs("}\n", out);
             break;
@@ -1401,7 +2208,7 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
 
 static bool context_has_fn(const UfEmitContext* ctx, const char* name) {
     for (size_t i = 0; i < ctx->declared_fn_count; ++i) {
-        if (strcmp(ctx->declared_fns[i], name) == 0) return true;
+        if (strcmp(ctx->declared_fns[i].name, name) == 0) return true;
     }
     return false;
 }
@@ -1429,7 +2236,14 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
         UfStmt* stmt = program->stmts[i];
         if (stmt->kind == UF_STMT_FUNCTION && !context_has_fn(ctx, stmt->as.function_stmt.name)) {
             if (ctx->declared_fn_count < 512) {
-                ctx->declared_fns[ctx->declared_fn_count++] = stmt->as.function_stmt.name;
+                DeclaredFunction* df = &ctx->declared_fns[ctx->declared_fn_count++];
+                df->name = stmt->as.function_stmt.name;
+                df->param_count = stmt->as.function_stmt.param_count;
+                df->min_param_count = stmt->as.function_stmt.min_param_count;
+                df->has_rest = stmt->as.function_stmt.has_rest;
+                df->params = stmt->as.function_stmt.params;
+                df->param_defaults = stmt->as.function_stmt.param_defaults;
+                df->stmt = stmt;
             } else {
                 note_limit_exceeded("more than 512 top-level functions/structs in one module", 512);
             }
@@ -1438,9 +2252,49 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
     for (size_t i = 0; i < ctx->declared_struct_count; ++i) {
         if (!context_has_fn(ctx, ctx->declared_structs[i].name)) {
             if (ctx->declared_fn_count < 512) {
-                ctx->declared_fns[ctx->declared_fn_count++] = ctx->declared_structs[i].name;
+                DeclaredFunction* df = &ctx->declared_fns[ctx->declared_fn_count++];
+                df->name = ctx->declared_structs[i].name;
+                df->param_count = ctx->declared_structs[i].field_count;
+                df->min_param_count = ctx->declared_structs[i].field_count;
+                df->has_rest = false;
+                df->params = ctx->declared_structs[i].field_names;
+                df->param_defaults = NULL;
+                df->stmt = NULL;
             } else {
                 note_limit_exceeded("more than 512 top-level functions/structs in one module", 512);
+            }
+        }
+    }
+    for (size_t i = 0; i < ctx->declared_enum_count; ++i) {
+        const DeclaredEnum* de = &ctx->declared_enums[i];
+        if (!context_has_var(ctx, de->name)) {
+            if (ctx->declared_var_count < 256) {
+                ctx->declared_vars[ctx->declared_var_count++] = de->name;
+            } else {
+                note_limit_exceeded("more than 256 top-level variables in one module", 256);
+            }
+        }
+        for (size_t v = 0; v < de->variant_count; ++v) {
+            if (!context_has_var(ctx, de->variants[v].name)) {
+                if (ctx->declared_var_count < 256) {
+                    ctx->declared_vars[ctx->declared_var_count++] = de->variants[v].name;
+                } else {
+                    note_limit_exceeded("more than 256 top-level variables in one module", 256);
+                }
+            }
+            if (de->variants[v].field_count > 0 && !context_has_fn(ctx, de->variants[v].name)) {
+                if (ctx->declared_fn_count < 512) {
+                    DeclaredFunction* df = &ctx->declared_fns[ctx->declared_fn_count++];
+                    df->name = de->variants[v].name;
+                    df->param_count = de->variants[v].field_count;
+                    df->min_param_count = de->variants[v].field_count;
+                    df->has_rest = false;
+                    df->params = de->variants[v].field_names;
+                    df->param_defaults = NULL;
+                    df->stmt = NULL;
+                } else {
+                    note_limit_exceeded("more than 512 top-level functions/structs in one module", 512);
+                }
             }
         }
     }
@@ -1449,7 +2303,21 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
     for (size_t i = 0; i < program->count; ++i) {
         UfStmt* stmt = program->stmts[i];
         if (stmt->kind == UF_STMT_LET) {
-            if (!context_has_var(ctx, stmt->as.let_stmt.name)) {
+            if (stmt->as.let_stmt.pattern) {
+                /* Pattern-destructuring let: collect all variable names bound by the pattern */
+                const char* plocs[64];
+                size_t ploc_count = 0;
+                collect_pattern_locals(stmt->as.let_stmt.pattern, plocs, &ploc_count);
+                for (size_t p = 0; p < ploc_count; ++p) {
+                    if (!context_has_var(ctx, plocs[p])) {
+                        if (ctx->declared_var_count < 256) {
+                            ctx->declared_vars[ctx->declared_var_count++] = plocs[p];
+                        } else {
+                            note_limit_exceeded("more than 256 top-level variables in one module", 256);
+                        }
+                    }
+                }
+            } else if (!context_has_var(ctx, stmt->as.let_stmt.name)) {
                 if (ctx->declared_var_count < 256) {
                     ctx->declared_vars[ctx->declared_var_count++] = stmt->as.let_stmt.name;
                 } else {
@@ -1492,6 +2360,18 @@ static void init_emit_context(UfEmitContext* ctx, const UfProgram* program, cons
                            lambda_params(&ctx->lambdas[i]),
                            lambda_param_count(&ctx->lambdas[i]),
                            &ctx->lambdas[i]);
+        struct UfExpr** pdefaults = lambda_param_defaults(&ctx->lambdas[i]);
+        if (pdefaults) {
+            size_t pcount = lambda_param_count(&ctx->lambdas[i]);
+            for (size_t p = 0; p < pcount; ++p) {
+                if (pdefaults[p]) {
+                    find_captures_expr(pdefaults[p], locals, local_count,
+                                       lambda_params(&ctx->lambdas[i]),
+                                       lambda_param_count(&ctx->lambdas[i]),
+                                       &ctx->lambdas[i]);
+                }
+            }
+        }
         for (size_t j = 0; j < local_count && j < 64; ++j) {
             ctx->lambdas[i].own_locals[j] = locals[j];
         }
@@ -1609,6 +2489,67 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
         fprintf(out, "/* Structs for %s */\n", ctx->mod_name ? ctx->mod_name : "main");
         for (size_t i = 0; i < ctx->declared_struct_count; ++i) {
             const DeclaredStruct* s = &ctx->declared_structs[i];
+            if (s->method_count > 0) {
+                /* Method forward declarations */
+                for (size_t m = 0; m < s->method_count; ++m) {
+                    const UfStmt* mstmt = s->methods[m];
+                    const char* mname = mstmt->as.function_stmt.name;
+                    size_t pcount = mstmt->as.function_stmt.param_count;
+                    fprintf(out, "static UfVal %sfn_%s_%s(", ctx->prefix, s->name, mname);
+                    for (size_t p = 0; p < pcount; ++p) {
+                        if (p > 0) fputs(", ", out);
+                        fprintf(out, "UfVal uf_var_%s", mstmt->as.function_stmt.params[p]);
+                    }
+                    if (pcount == 0) fputs("void", out);
+                    fputs(");\n", out);
+                }
+
+                /* Method wrappers */
+                for (size_t m = 0; m < s->method_count; ++m) {
+                    const UfStmt* mstmt = s->methods[m];
+                    const char* mname = mstmt->as.function_stmt.name;
+                    size_t pcount = mstmt->as.function_stmt.param_count;
+                    fprintf(out, "static UfVal %swrapper_%s_%s(void* env, size_t argc, UfVal* args) {\n", ctx->prefix, s->name, mname);
+                    fprintf(out, "    (void)env;\n");
+                    fprintf(out, "    return %sfn_%s_%s(", ctx->prefix, s->name, mname);
+                    for (size_t p = 0; p < pcount; ++p) {
+                        if (p > 0) fputs(", ", out);
+                        if (p == pcount - 1 && mstmt->as.function_stmt.has_rest) {
+                            fprintf(out, "uf_make_rest_array(argc, args, %zu)", p);
+                        } else {
+                            fprintf(out, "(argc > %zu ? args[%zu] : (", p, p);
+                            if (mstmt->as.function_stmt.param_defaults && mstmt->as.function_stmt.param_defaults[p]) {
+                                emit_expr(out, mstmt->as.function_stmt.param_defaults[p]);
+                            } else {
+                                fputs("uf_null()", out);
+                            }
+                            fputs("))", out);
+                        }
+                    }
+                    fputs(");\n}\n", out);
+                }
+
+                /* Method table and static closures */
+                fprintf(out, "static const char* %sstruct_methods_%s[] = { ", ctx->prefix, s->name);
+                for (size_t m = 0; m < s->method_count; ++m) {
+                    if (m > 0) fputs(", ", out);
+                    fprintf(out, "\"%s\"", s->methods[m]->as.function_stmt.name);
+                }
+                fputs(" };\n", out);
+
+                fprintf(out, "static struct UfRtClosure* %sstruct_closures_%s_arr[%zu];\n", ctx->prefix, s->name, s->method_count);
+                fprintf(out, "static struct UfRtClosure** %sstruct_closures_%s(void) {\n", ctx->prefix, s->name);
+                fprintf(out, "    if (!%sstruct_closures_%s_arr[0]) {\n", ctx->prefix, s->name);
+                for (size_t m = 0; m < s->method_count; ++m) {
+                    const char* mname = s->methods[m]->as.function_stmt.name;
+                    fprintf(out, "        %sstruct_closures_%s_arr[%zu] = uf_closure_new(%swrapper_%s_%s, NULL, 0).as.closure;\n",
+                            ctx->prefix, s->name, m, ctx->prefix, s->name, mname);
+                }
+                fputs("    }\n", out);
+                fprintf(out, "    return %sstruct_closures_%s_arr;\n", ctx->prefix, s->name);
+                fputs("}\n", out);
+            }
+
             if (s->field_count > 0) {
                 fprintf(out, "static const char* %sstruct_fields_%s[] = { ", ctx->prefix, s->name);
                 for (size_t f = 0; f < s->field_count; ++f) {
@@ -1629,22 +2570,42 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
                     fprintf(out, "_f%zu", f);
                 }
                 fputs(" };\n", out);
-                fprintf(out, "    return uf_instance_new(\"%s\", %sstruct_fields_%s, %zu, %zu, _args);\n",
-                        s->name, ctx->prefix, s->name, s->field_count, s->field_count);
+                if (s->method_count > 0) {
+                    fprintf(out, "    return uf_instance_new(\"%s\", %sstruct_fields_%s, %zu, %sstruct_methods_%s, %sstruct_closures_%s(), %zu, %zu, _args);\n",
+                            s->name, ctx->prefix, s->name, s->field_count, ctx->prefix, s->name, ctx->prefix, s->name, s->method_count, s->field_count);
+                } else {
+                    fprintf(out, "    return uf_instance_new(\"%s\", %sstruct_fields_%s, %zu, NULL, NULL, 0, %zu, _args);\n",
+                            s->name, ctx->prefix, s->name, s->field_count, s->field_count);
+                }
                 fputs("}\n", out);
             } else {
                 fprintf(out, "static UfVal %sfn_%s(void) {\n", ctx->prefix, s->name);
-                fprintf(out, "    return uf_instance_new(\"%s\", NULL, 0, 0, NULL);\n", s->name);
+                if (s->method_count > 0) {
+                    fprintf(out, "    return uf_instance_new(\"%s\", NULL, 0, %sstruct_methods_%s, %sstruct_closures_%s(), %zu, 0, NULL);\n",
+                            s->name, ctx->prefix, s->name, ctx->prefix, s->name, s->method_count);
+                } else {
+                    fprintf(out, "    return uf_instance_new(\"%s\", NULL, 0, NULL, NULL, 0, 0, NULL);\n", s->name);
+                }
                 fputs("}\n", out);
             }
 
             fprintf(out, "static UfVal %swrapper_%s(void* env, size_t argc, UfVal* args) {\n", ctx->prefix, s->name);
             fprintf(out, "    (void)env;\n");
             if (s->field_count > 0) {
-                fprintf(out, "    return uf_instance_new(\"%s\", %sstruct_fields_%s, %zu, argc, args);\n",
-                        s->name, ctx->prefix, s->name, s->field_count);
+                if (s->method_count > 0) {
+                    fprintf(out, "    return uf_instance_new(\"%s\", %sstruct_fields_%s, %zu, %sstruct_methods_%s, %sstruct_closures_%s(), %zu, argc, args);\n",
+                            s->name, ctx->prefix, s->name, s->field_count, ctx->prefix, s->name, ctx->prefix, s->name, s->method_count);
+                } else {
+                    fprintf(out, "    return uf_instance_new(\"%s\", %sstruct_fields_%s, %zu, NULL, NULL, 0, argc, args);\n",
+                            s->name, ctx->prefix, s->name, s->field_count);
+                }
             } else {
-                fprintf(out, "    return uf_instance_new(\"%s\", NULL, 0, argc, args);\n", s->name);
+                if (s->method_count > 0) {
+                    fprintf(out, "    return uf_instance_new(\"%s\", NULL, 0, %sstruct_methods_%s, %sstruct_closures_%s(), %zu, argc, args);\n",
+                            s->name, ctx->prefix, s->name, ctx->prefix, s->name, s->method_count);
+                } else {
+                    fprintf(out, "    return uf_instance_new(\"%s\", NULL, 0, NULL, NULL, 0, argc, args);\n", s->name);
+                }
             }
             fputs("}\n", out);
 
@@ -1652,6 +2613,93 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
             fprintf(out, "    return uf_closure_new(%swrapper_%s, NULL, 0);\n", ctx->prefix, s->name);
             fputs("}\n\n", out);
         }
+    }
+
+    /* 3b. Enum constructor declarations and templates */
+    if (ctx->declared_enum_count > 0) {
+        fprintf(out, "/* Enums for %s */\n", ctx->mod_name ? ctx->mod_name : "main");
+        for (size_t i = 0; i < ctx->declared_enum_count; ++i) {
+            const DeclaredEnum* de = &ctx->declared_enums[i];
+            for (size_t v = 0; v < de->variant_count; ++v) {
+                if (de->variants[v].field_count > 0) {
+                    fprintf(out, "static const char* %senum_fields_%s_%s[] = { ", ctx->prefix, de->name, de->variants[v].name);
+                    for (size_t f = 0; f < de->variants[v].field_count; ++f) {
+                        if (f > 0) fputs(", ", out);
+                        fprintf(out, "\"%s\"", de->variants[v].field_names[f]);
+                    }
+                    fputs(" };\n", out);
+                }
+            }
+
+            fprintf(out, "static const char* %senum_variants_%s[] = { ", ctx->prefix, de->name);
+            for (size_t v = 0; v < de->variant_count; ++v) {
+                if (v > 0) fputs(", ", out);
+                fprintf(out, "\"%s\"", de->variants[v].name);
+            }
+            fputs(" };\n", out);
+
+            fprintf(out, "static size_t %senum_field_counts_%s[] = { ", ctx->prefix, de->name);
+            for (size_t v = 0; v < de->variant_count; ++v) {
+                if (v > 0) fputs(", ", out);
+                fprintf(out, "%zu", de->variants[v].field_count);
+            }
+            fputs(" };\n", out);
+
+            fprintf(out, "static const char** %senum_field_names_%s[] = { ", ctx->prefix, de->name);
+            for (size_t v = 0; v < de->variant_count; ++v) {
+                if (v > 0) fputs(", ", out);
+                if (de->variants[v].field_count > 0) {
+                    fprintf(out, "%senum_fields_%s_%s", ctx->prefix, de->name, de->variants[v].name);
+                } else {
+                    fputs("NULL", out);
+                }
+            }
+            fputs(" };\n", out);
+
+            for (size_t v = 0; v < de->variant_count; ++v) {
+                if (de->variants[v].field_count > 0) {
+                    fprintf(out, "static UfVal %sfn_%s(", ctx->prefix, de->variants[v].name);
+                    for (size_t f = 0; f < de->variants[v].field_count; ++f) {
+                        if (f > 0) fputs(", ", out);
+                        fprintf(out, "UfVal _f%zu", f);
+                    }
+                    fputs(") {\n", out);
+                    fprintf(out, "    UfVal _args[%zu] = { ", de->variants[v].field_count);
+                    for (size_t f = 0; f < de->variants[v].field_count; ++f) {
+                        if (f > 0) fputs(", ", out);
+                        fprintf(out, "_f%zu", f);
+                    }
+                    fputs(" };\n", out);
+                    fprintf(out, "    return uf_enum_val_new(%svar_%s.as.enum_def, %d, \"%s\", %zu, _args);\n",
+                            ctx->prefix, de->name, (int)v, de->variants[v].name, de->variants[v].field_count);
+                    fputs("}\n", out);
+
+                    fprintf(out, "static UfVal %swrapper_%s(void* env, size_t argc, UfVal* args) {\n", ctx->prefix, de->variants[v].name);
+                    fputs("    (void)env;\n", out);
+                    fprintf(out, "    return uf_enum_val_new(%svar_%s.as.enum_def, %d, \"%s\", argc, args);\n",
+                            ctx->prefix, de->name, (int)v, de->variants[v].name);
+                    fputs("}\n", out);
+
+                    fprintf(out, "static inline UfVal %swrap_fn_%s(void) {\n", ctx->prefix, de->variants[v].name);
+                    fprintf(out, "    return uf_closure_new(%swrapper_%s, NULL, 0);\n", ctx->prefix, de->variants[v].name);
+                    fputs("}\n\n", out);
+                }
+            }
+        }
+
+        fprintf(out, "static void %sinit_enums(void) {\n", ctx->prefix);
+        for (size_t i = 0; i < ctx->declared_enum_count; ++i) {
+            const DeclaredEnum* de = &ctx->declared_enums[i];
+            fprintf(out, "    %svar_%s = uf_enum_def_new(\"%s\", %zu, %senum_variants_%s, %senum_field_counts_%s, %senum_field_names_%s);\n",
+                    ctx->prefix, de->name, de->name, de->variant_count, ctx->prefix, de->name, ctx->prefix, de->name, ctx->prefix, de->name);
+            for (size_t v = 0; v < de->variant_count; ++v) {
+                fprintf(out, "    %svar_%s = uf_enum_val_new(%svar_%s.as.enum_def, %d, \"%s\", 0, NULL);\n",
+                        ctx->prefix, de->variants[v].name, ctx->prefix, de->name, (int)v, de->variants[v].name);
+                fprintf(out, "    %svar_%s.as.enum_def->variant_templates[%zu] = %svar_%s;\n",
+                        ctx->prefix, de->name, v, ctx->prefix, de->variants[v].name);
+            }
+        }
+        fputs("}\n\n", out);
     }
 
     /* 4. Function declarations and first-class wrappers */
@@ -1668,13 +2716,30 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
             }
             if (pcount == 0) fputs("void", out);
             fputs(");\n", out);
-
+        }
+    }
+    fputs("\n", out);
+    for (size_t i = 0; i < program->count; ++i) {
+        UfStmt* stmt = program->stmts[i];
+        if (stmt->kind == UF_STMT_FUNCTION) {
+            const char* fname = stmt->as.function_stmt.name;
+            size_t pcount = stmt->as.function_stmt.param_count;
             fprintf(out, "static UfVal %swrapper_%s(void* env, size_t argc, UfVal* args) {\n", ctx->prefix, fname);
             fprintf(out, "    (void)env;\n");
             fprintf(out, "    return %sfn_%s(", ctx->prefix, fname);
             for (size_t p = 0; p < pcount; ++p) {
                 if (p > 0) fputs(", ", out);
-                fprintf(out, "(argc > %zu ? args[%zu] : uf_null())", p, p);
+                if (p == pcount - 1 && stmt->as.function_stmt.has_rest) {
+                    fprintf(out, "uf_make_rest_array(argc, args, %zu)", p);
+                } else {
+                    fprintf(out, "(argc > %zu ? args[%zu] : (", p, p);
+                    if (stmt->as.function_stmt.param_defaults && stmt->as.function_stmt.param_defaults[p]) {
+                        emit_expr(out, stmt->as.function_stmt.param_defaults[p]);
+                    } else {
+                        fputs("uf_null()", out);
+                    }
+                    fputs("))", out);
+                }
             }
             fputs(");\n}\n", out);
 
@@ -1707,18 +2772,62 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
             }
             size_t pcount = lambda_param_count(&ctx->lambdas[i]);
             const char** params = lambda_params(&ctx->lambdas[i]);
+            struct UfExpr** pdefaults = lambda_param_defaults(&ctx->lambdas[i]);
+            bool l_has_rest = lambda_has_rest(&ctx->lambdas[i]);
             for (size_t p = 0; p < pcount; ++p) {
-                if (is_boxed_name(params[p])) {
-                    fprintf(out, "    UfVal* uf_var_%s = uf_box_new((_argc > %zu) ? _args[%zu] : uf_null());\n",
-                            params[p], p, p);
+                bool is_rest = (p == pcount - 1 && l_has_rest);
+                if (is_rest) {
+                    if (is_boxed_name(params[p])) {
+                        fprintf(out, "    UfVal* uf_var_%s = uf_box_new(uf_make_rest_array(_argc, _args, %zu));\n", params[p], p);
+                    } else {
+                        fprintf(out, "    UfVal uf_var_%s = uf_make_rest_array(_argc, _args, %zu);\n", params[p], p);
+                    }
                 } else {
-                    fprintf(out, "    UfVal uf_var_%s = (_argc > %zu) ? _args[%zu] : uf_null();\n",
-                            params[p], p, p);
+                    if (is_boxed_name(params[p])) {
+                        fprintf(out, "    UfVal* uf_var_%s = uf_box_new((_argc > %zu) ? _args[%zu] : (",
+                                params[p], p, p);
+                        if (pdefaults && pdefaults[p]) {
+                            emit_expr(out, pdefaults[p]);
+                        } else {
+                            fputs("uf_null()", out);
+                        }
+                        fputs("));\n", out);
+                    } else {
+                        fprintf(out, "    UfVal uf_var_%s = (_argc > %zu) ? _args[%zu] : (",
+                                params[p], p, p);
+                        if (pdefaults && pdefaults[p]) {
+                            emit_expr(out, pdefaults[p]);
+                        } else {
+                            fputs("uf_null()", out);
+                        }
+                        fputs(");\n", out);
+                    }
                 }
             }
+            size_t saved_scope = g_scope_var_count;
+            for (size_t c = 0; c < ctx->lambdas[i].capture_count; ++c) {
+                scope_push(ctx->lambdas[i].captures[c]);
+            }
+            if (lname) scope_push(lname);
+            for (size_t p = 0; p < pcount; ++p) {
+                scope_push(params[p]);
+            }
+            for (size_t o = 0; o < ctx->lambdas[i].own_local_count; ++o) {
+                scope_push(ctx->lambdas[i].own_locals[o]);
+            }
+            bool prev_async = g_is_current_fn_async;
+            if (ctx->lambdas[i].fn_expr) g_is_current_fn_async = ctx->lambdas[i].fn_expr->as.fn_expr.is_async;
+            else if (ctx->lambdas[i].fn_stmt) g_is_current_fn_async = ctx->lambdas[i].fn_stmt->as.function_stmt.is_async;
+            else g_is_current_fn_async = false;
             emit_stmt(out, lambda_body(&ctx->lambdas[i]), 1, false);
+            g_scope_var_count = saved_scope;
             fprintf(out, "    g_catch_stack = _fn_catch_entry;\n");
-            fprintf(out, "    return uf_null();\n");
+            if (g_is_current_fn_async) {
+                fprintf(out, "    return uf_promise_resolved(uf_null());\n");
+            } else {
+                fprintf(out, "    return uf_null();\n");
+            }
+            g_is_current_fn_async = prev_async;
             fprintf(out, "}\n\n");
         }
     }
@@ -1747,9 +2856,66 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
                     fprintf(out, "    UfVal* uf_var_%s = uf_box_new(uf_param_%s);\n", pname, pname);
                 }
             }
+            size_t saved_scope = g_scope_var_count;
+            for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
+                scope_push(stmt->as.function_stmt.params[p]);
+            }
+            bool prev_async = g_is_current_fn_async;
+            g_is_current_fn_async = stmt->as.function_stmt.is_async;
             emit_stmt(out, stmt->as.function_stmt.body, 1, false);
+            g_scope_var_count = saved_scope;
             fputs("    g_catch_stack = _fn_catch_entry;\n", out);
-            fputs("    return uf_null();\n", out);
+            if (g_is_current_fn_async) {
+                fputs("    return uf_promise_resolved(uf_null());\n", out);
+            } else {
+                fputs("    return uf_null();\n", out);
+            }
+            g_is_current_fn_async = prev_async;
+            fputs("}\n\n", out);
+        }
+    }
+
+    /* 6b. Struct method definitions */
+    for (size_t i = 0; i < ctx->declared_struct_count; ++i) {
+        const DeclaredStruct* s = &ctx->declared_structs[i];
+        for (size_t m = 0; m < s->method_count; ++m) {
+            const UfStmt* stmt = s->methods[m];
+            const char* mname = stmt->as.function_stmt.name;
+            fprintf(out, "static UfVal %sfn_%s_%s(", ctx->prefix, s->name, mname);
+            for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
+                if (p > 0) fputs(", ", out);
+                const char* pname = stmt->as.function_stmt.params[p];
+                if (is_boxed_name(pname)) {
+                    fprintf(out, "UfVal uf_param_%s", pname);
+                } else {
+                    fprintf(out, "UfVal uf_var_%s", pname);
+                }
+            }
+            if (stmt->as.function_stmt.param_count == 0) fputs("void", out);
+            fputs(") {\n", out);
+            fputs("    UfCatchFrame* _fn_catch_entry = g_catch_stack;\n", out);
+            fputs("    (void)_fn_catch_entry;\n", out);
+            for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
+                const char* pname = stmt->as.function_stmt.params[p];
+                if (is_boxed_name(pname)) {
+                    fprintf(out, "    UfVal* uf_var_%s = uf_box_new(uf_param_%s);\n", pname, pname);
+                }
+            }
+            size_t saved_scope = g_scope_var_count;
+            for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
+                scope_push(stmt->as.function_stmt.params[p]);
+            }
+            bool prev_async_m = g_is_current_fn_async;
+            g_is_current_fn_async = stmt->as.function_stmt.is_async;
+            emit_stmt(out, stmt->as.function_stmt.body, 1, false);
+            g_scope_var_count = saved_scope;
+            fputs("    g_catch_stack = _fn_catch_entry;\n", out);
+            if (g_is_current_fn_async) {
+                fputs("    return uf_promise_resolved(uf_null());\n", out);
+            } else {
+                fputs("    return uf_null();\n", out);
+            }
+            g_is_current_fn_async = prev_async_m;
             fputs("}\n\n", out);
         }
     }
@@ -1763,9 +2929,13 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
         fputs("    (void)_fn_catch_entry;\n", out);
         fputs("    UfVal _exports = uf_map_new(16);\n\n", out);
 
+        if (ctx->declared_enum_count > 0) {
+            fprintf(out, "    %sinit_enums();\n", ctx->prefix);
+        }
+
         for (size_t i = 0; i < program->count; ++i) {
             UfStmt* stmt = program->stmts[i];
-            if (stmt->kind != UF_STMT_FUNCTION && stmt->kind != UF_STMT_STRUCT) {
+            if (stmt->kind != UF_STMT_FUNCTION && stmt->kind != UF_STMT_STRUCT && stmt->kind != UF_STMT_ENUM && stmt->kind != UF_STMT_TRAIT && stmt->kind != UF_STMT_IMPL) {
                 emit_stmt(out, stmt, 1, true);
             }
         }
@@ -1999,8 +3169,23 @@ static bool collect_modules_from_stmt(UfModuleCollection* col, const UfStmt* stm
             if (!collect_modules_from_stmt(col, stmt->as.block.stmts[i], caller_path)) return false;
         }
     } else if (stmt->kind == UF_STMT_TRY_CATCH) {
-        if (!collect_modules_from_stmt(col, stmt->as.try_catch.try_block, caller_path)) return false;
-        if (!collect_modules_from_stmt(col, stmt->as.try_catch.catch_block, caller_path)) return false;
+        if (stmt->as.try_catch.try_block && !collect_modules_from_stmt(col, stmt->as.try_catch.try_block, caller_path)) return false;
+        if (stmt->as.try_catch.catch_block && !collect_modules_from_stmt(col, stmt->as.try_catch.catch_block, caller_path)) return false;
+        if (stmt->as.try_catch.finally_block && !collect_modules_from_stmt(col, stmt->as.try_catch.finally_block, caller_path)) return false;
+    } else if (stmt->kind == UF_STMT_STRUCT) {
+        for (size_t m = 0; m < stmt->as.struct_stmt.method_count; ++m) {
+            if (!collect_modules_from_stmt(col, stmt->as.struct_stmt.methods[m]->as.function_stmt.body, caller_path)) return false;
+        }
+        for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
+            const UfStmt* ib = stmt->as.struct_stmt.impl_blocks[b];
+            for (size_t m = 0; m < ib->as.impl_stmt.method_count; ++m) {
+                if (!collect_modules_from_stmt(col, ib->as.impl_stmt.methods[m]->as.function_stmt.body, caller_path)) return false;
+            }
+        }
+    } else if (stmt->kind == UF_STMT_IMPL) {
+        for (size_t m = 0; m < stmt->as.impl_stmt.method_count; ++m) {
+            if (!collect_modules_from_stmt(col, stmt->as.impl_stmt.methods[m]->as.function_stmt.body, caller_path)) return false;
+        }
     }
     return true;
 }
@@ -2035,6 +3220,9 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
 
     g_match_id = 0;
     g_emit_limit_exceeded = false;
+    g_scope_var_count = 0;
+    g_loop_try_depth = 0;
+    g_ctx = NULL;
 
     /* UfModuleCollection and UfEmitContext are large fixed-capacity
      * structures (each UfEmitContext alone holds up to 256 UfLambdaInfo
@@ -2084,7 +3272,9 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     /* 4. Emit file header */
     fputs("/* ========================================================================= */\n", out);
     fputs("/* Generated automatically by Unfish Native C99 Compiler                   */\n", out);
-    fputs("/* ========================================================================= */\n\n", out);
+    if (g_emit_embedded) {
+        fputs("#define UF_EMBEDDED 1\n", out);
+    }
     fputs("#include \"unfish_runtime.h\"\n\n", out);
 
     /* 5. Forward declare all module initializers */
@@ -2118,9 +3308,13 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
                 col->modules[m].name, col->modules[m].safe_name);
     }
 
+    if (main_ctx->declared_enum_count > 0) {
+        fprintf(out, "    %sinit_enums();\n", main_ctx->prefix);
+    }
+
     for (size_t i = 0; i < program->count; ++i) {
         UfStmt* stmt = program->stmts[i];
-        if (stmt->kind != UF_STMT_FUNCTION && stmt->kind != UF_STMT_STRUCT) {
+        if (stmt->kind != UF_STMT_FUNCTION && stmt->kind != UF_STMT_STRUCT && stmt->kind != UF_STMT_ENUM && stmt->kind != UF_STMT_TRAIT && stmt->kind != UF_STMT_IMPL) {
             emit_stmt(out, stmt, 1, true);
         }
     }
@@ -2133,6 +3327,9 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     free(col);
     free(main_ctx);
     free(prefixes);
+    g_scope_var_count = 0;
+    g_loop_try_depth = 0;
+    g_ctx = NULL;
     return true;
 }
 
@@ -2156,6 +3353,60 @@ bool uf_emit_c_to_file(const UfProgram* program, const char* out_c_path) {
     return uf_emit_c_to_file_with_path(program, NULL, out_c_path);
 }
 
+static void get_runtime_include_dir(char* buf, size_t size) {
+    if (access("src/codegen/unfish_runtime.h", R_OK) == 0) {
+        if (size > 12) snprintf(buf, size, "src/codegen");
+        return;
+    }
+    const char* env_dir = getenv("UNFISH_RUNTIME_DIR");
+    if (env_dir && access(env_dir, R_OK) == 0) {
+        snprintf(buf, size, "%.1000s", env_dir);
+        return;
+    }
+    char exe_path[1024];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len > 0) {
+        exe_path[len] = '\0';
+        char* last_slash = strrchr(exe_path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            char* parent_slash = strrchr(exe_path, '/');
+            if (parent_slash) {
+                *parent_slash = '\0';
+                snprintf(buf, size, "%.900s/src/codegen", exe_path);
+                if (access(buf, R_OK) == 0) return;
+            }
+        }
+    }
+    if (size > 12) snprintf(buf, size, "src/codegen");
+}
+
+static const char* find_wasi_sysroot(char* buf, size_t size) {
+    const char* env_sysroot = getenv("WASI_SYSROOT");
+    if (env_sysroot && access(env_sysroot, R_OK) == 0) {
+        snprintf(buf, size, "%.1000s", env_sysroot);
+        return buf;
+    }
+    const char* home = getenv("HOME");
+    if (home) {
+        snprintf(buf, size, "%.900s/.wasi-sysroot", home);
+        if (access(buf, R_OK) == 0) return buf;
+    }
+    snprintf(buf, size, "scratch/wasi-sysroot/usr");
+    if (access(buf, R_OK) == 0) return buf;
+
+    snprintf(buf, size, "vendor/wasi-sysroot/usr");
+    if (access(buf, R_OK) == 0) return buf;
+
+    snprintf(buf, size, "/usr/share/wasi-sysroot");
+    if (access(buf, R_OK) == 0) return buf;
+
+    snprintf(buf, size, "/opt/wasi-sdk/share/wasi-sysroot");
+    if (access(buf, R_OK) == 0) return buf;
+
+    return NULL;
+}
+
 bool uf_build_native_with_path(const UfProgram* program, const char* source_path, const char* out_bin_path) {
     if (!program || !out_bin_path) return false;
 
@@ -2166,8 +3417,11 @@ bool uf_build_native_with_path(const UfProgram* program, const char* source_path
         return false;
     }
 
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "gcc -O2 -std=c99 %s -Isrc/codegen -lm -o %s", temp_c, out_bin_path);
+    char inc_dir[1024];
+    get_runtime_include_dir(inc_dir, sizeof(inc_dir));
+
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "gcc -O2 -std=c99 \"%s\" -I\"%.1000s\" -lm -o \"%s\"", temp_c, inc_dir, out_bin_path);
     int res = system(cmd);
     remove(temp_c);
 
@@ -2177,3 +3431,95 @@ bool uf_build_native_with_path(const UfProgram* program, const char* source_path
 bool uf_build_native(const UfProgram* program, const char* out_bin_path) {
     return uf_build_native_with_path(program, NULL, out_bin_path);
 }
+
+bool uf_build_wasm_with_path(const UfProgram* program, const char* source_path, const char* out_wasm_path) {
+    if (!program || !out_wasm_path) return false;
+
+    char sysroot_buf[1024];
+    const char* sysroot = find_wasi_sysroot(sysroot_buf, sizeof(sysroot_buf));
+    if (!sysroot) {
+        fprintf(stderr, "Error: WASI sysroot not found. Please install wasi-libc or set WASI_SYSROOT environment variable.\n");
+        return false;
+    }
+
+    char inc_dir[1024];
+    get_runtime_include_dir(inc_dir, sizeof(inc_dir));
+
+    char temp_c[256];
+    snprintf(temp_c, sizeof(temp_c), "/tmp/unfish_emit_wasm_%d.c", (int)getpid());
+
+    if (!uf_emit_c_to_file_with_path(program, source_path, temp_c)) {
+        return false;
+    }
+
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd),
+             "clang --target=wasm32-wasi --sysroot=\"%.1000s\" -nodefaultlibs -lc -lm -lsetjmp -mllvm -wasm-enable-sjlj -I\"%.1000s\" -O2 \"%s\" -o \"%s\"",
+             sysroot, inc_dir, temp_c, out_wasm_path);
+    int res = system(cmd);
+    remove(temp_c);
+
+    return res == 0;
+}
+
+
+bool uf_build_wasm(const UfProgram* program, const char* out_wasm_path) {
+    return uf_build_wasm_with_path(program, NULL, out_wasm_path);
+}
+
+bool uf_emit_c_program_embedded(const UfProgram* program, const char* source_path, FILE* out) {
+    g_emit_embedded = true;
+    bool res = uf_emit_c_program_with_path(program, source_path, out);
+    g_emit_embedded = false;
+    return res;
+}
+
+bool uf_emit_c_to_file_embedded(const UfProgram* program, const char* source_path, const char* out_c_path) {
+    g_emit_embedded = true;
+    bool res = uf_emit_c_to_file_with_path(program, source_path, out_c_path);
+    g_emit_embedded = false;
+    return res;
+}
+
+bool uf_build_embedded(const UfProgram* program, const char* source_path, const char* out_bin_path) {
+    if (!program || !out_bin_path) return false;
+
+    char inc_dir[1024];
+    get_runtime_include_dir(inc_dir, sizeof(inc_dir));
+
+    char temp_c[256];
+    snprintf(temp_c, sizeof(temp_c), "/tmp/unfish_emit_emb_%d.c", (int)getpid());
+
+    if (!uf_emit_c_to_file_embedded(program, source_path, temp_c)) {
+        return false;
+    }
+
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "gcc -O2 -std=c99 -DUF_EMBEDDED \"%s\" -I\"%.1000s\" -lm -o \"%s\"", temp_c, inc_dir, out_bin_path);
+    int res = system(cmd);
+    remove(temp_c);
+
+    return res == 0;
+}
+
+bool uf_build_embedded_arm(const UfProgram* program, const char* source_path, const char* out_elf_path) {
+    if (!program || !out_elf_path) return false;
+
+    char inc_dir[1024];
+    get_runtime_include_dir(inc_dir, sizeof(inc_dir));
+
+    char temp_c[256];
+    snprintf(temp_c, sizeof(temp_c), "/tmp/unfish_emit_arm_%d.c", (int)getpid());
+
+    if (!uf_emit_c_to_file_embedded(program, source_path, temp_c)) {
+        return false;
+    }
+
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -O2 -DUF_EMBEDDED --specs=nosys.specs \"%s\" -I\"%.1000s\" -lm -o \"%s\"", temp_c, inc_dir, out_elf_path);
+    int res = system(cmd);
+    remove(temp_c);
+
+    return res == 0;
+}
+

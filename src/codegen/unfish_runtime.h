@@ -13,11 +13,132 @@
 #include <stdarg.h>
 #include <time.h>
 #include <ctype.h>
+#if !defined(UF_EMBEDDED)
 #include <unistd.h>
+#endif
 
 #ifndef HUGE_VAL
 #define HUGE_VAL (__builtin_huge_val())
 #endif
+
+#if defined(__wasm__) || defined(__wasi__)
+/* Builtin compiler-rt helpers needed by WASI libc (intscan.o, clock_nanosleep.o) when linking with -nodefaultlibs */
+typedef unsigned __int128 __uf_u128;
+typedef __int128 __uf_i128;
+
+__uf_i128 __multi3(__uf_i128 a, __uf_i128 b) {
+    __uf_u128 ua = (__uf_u128)a;
+    __uf_u128 ub = (__uf_u128)b;
+    unsigned long long a_lo = (unsigned long long)ua;
+    unsigned long long a_hi = (unsigned long long)(ua >> 64);
+    unsigned long long b_lo = (unsigned long long)ub;
+    unsigned long long b_hi = (unsigned long long)(ub >> 64);
+
+    unsigned int a0 = (unsigned int)a_lo;
+    unsigned int a1 = (unsigned int)(a_lo >> 32);
+    unsigned int b0 = (unsigned int)b_lo;
+    unsigned int b1 = (unsigned int)(b_lo >> 32);
+
+    unsigned long long p0 = (unsigned long long)a0 * b0;
+    unsigned long long p1 = (unsigned long long)a0 * b1;
+    unsigned long long p2 = (unsigned long long)a1 * b0;
+    unsigned long long p3 = (unsigned long long)a1 * b1;
+
+    unsigned long long mid = p1 + (p0 >> 32);
+    mid += p2;
+    unsigned long long lo = (p0 & 0xFFFFFFFFULL) | (mid << 32);
+    unsigned long long hi = p3 + (mid >> 32) + (a_lo * b_hi) + (a_hi * b_lo);
+
+    return (__uf_i128)(((__uf_u128)hi << 64) | lo);
+}
+
+__uf_i128 __muloti4(__uf_i128 a, __uf_i128 b, int* overflow) {
+    *overflow = 0;
+    return __multi3(a, b);
+}
+#endif
+
+#if defined(UF_EMBEDDED)
+#ifndef UF_EMBEDDED_HEAP_SIZE
+#define UF_EMBEDDED_HEAP_SIZE (256 * 1024)
+#endif
+
+static uint8_t g_uf_embedded_heap[UF_EMBEDDED_HEAP_SIZE];
+static size_t g_uf_embedded_heap_offset = 0;
+
+static inline void* uf_embedded_malloc(size_t sz) {
+    size_t aligned = (sz + 7) & ~((size_t)7);
+    if (g_uf_embedded_heap_offset + aligned > UF_EMBEDDED_HEAP_SIZE) {
+        return NULL;
+    }
+    void* ptr = &g_uf_embedded_heap[g_uf_embedded_heap_offset];
+    g_uf_embedded_heap_offset += aligned;
+    return ptr;
+}
+
+static inline void* uf_embedded_realloc(void* ptr, size_t new_sz) {
+    if (!ptr) return uf_embedded_malloc(new_sz);
+    void* new_ptr = uf_embedded_malloc(new_sz);
+    if (new_ptr) {
+        memcpy(new_ptr, ptr, new_sz);
+    }
+    return new_ptr;
+}
+
+static inline void uf_embedded_free(void* ptr) {
+    (void)ptr;
+}
+
+static inline void uf_embedded_reset_heap(void) {
+    g_uf_embedded_heap_offset = 0;
+}
+
+static inline size_t uf_embedded_heap_used(void) {
+    return g_uf_embedded_heap_offset;
+}
+
+#define malloc(sz) uf_embedded_malloc(sz)
+#define realloc(ptr, sz) uf_embedded_realloc(ptr, sz)
+#define free(ptr) uf_embedded_free(ptr)
+
+typedef void (*UfPutCharFn)(char c);
+static UfPutCharFn g_uf_putchar = NULL;
+
+static inline void uf_set_putchar(UfPutCharFn fn) {
+    g_uf_putchar = fn;
+}
+
+static inline void uf_embedded_putchar(char c) {
+    if (g_uf_putchar) {
+        g_uf_putchar(c);
+    } else {
+#if !defined(__arm__) || defined(__linux__)
+        fputc(c, stdout);
+#endif
+    }
+}
+
+#if defined(__arm__) && !defined(__linux__)
+int _write(int file, char *ptr, int len) {
+    (void)file;
+    for (int i = 0; i < len; i++) {
+        uf_embedded_putchar(ptr[i]);
+    }
+    return len;
+}
+int _read(int file, char *ptr, int len) { (void)file; (void)ptr; (void)len; return 0; }
+int _close(int file) { (void)file; return -1; }
+int _lseek(int file, int ptr, int dir) { (void)file; (void)ptr; (void)dir; return 0; }
+int _fstat(int file, void *st) { (void)file; (void)st; return 0; }
+int _isatty(int file) { (void)file; return 1; }
+int _getpid(void) { return 1; }
+int _kill(int pid, int sig) { (void)pid; (void)sig; return -1; }
+void* _sbrk(int incr) { (void)incr; return (void*)-1; }
+#endif
+
+#endif
+
+
 
 typedef enum {
     UF_RT_NULL,
@@ -29,7 +150,13 @@ typedef enum {
     UF_RT_BUFFER,
     UF_RT_CLOSURE,
     UF_RT_INSTANCE,
-    UF_RT_ERROR
+    UF_RT_ERROR,
+    UF_RT_CHANNEL,
+    UF_RT_FIBER,
+    UF_RT_BOUND_METHOD,
+    UF_RT_ENUM_DEF,
+    UF_RT_ENUM_VAL,
+    UF_RT_PROMISE
 } UfRtKind;
 
 typedef struct UfRtHeader {
@@ -47,6 +174,31 @@ typedef struct UfRtArray UfRtArray;
 typedef struct UfRtMap UfRtMap;
 typedef struct UfRtVal UfVal;
 typedef struct UfRtError UfRtError;
+typedef struct UfRtChannel UfRtChannel;
+typedef struct UfRtFiber UfRtFiber;
+typedef struct UfRtBoundMethod UfRtBoundMethod;
+typedef struct UfRtEnumDef UfRtEnumDef;
+typedef struct UfRtEnumVal UfRtEnumVal;
+typedef struct UfRtPromise UfRtPromise;
+
+struct UfRtEnumDef {
+    UfRtHeader header;
+    const char* name;
+    size_t variant_count;
+    const char** variant_names;
+    size_t* variant_field_counts;
+    const char*** variant_field_names;
+    UfVal* variant_templates;
+};
+
+struct UfRtEnumVal {
+    UfRtHeader header;
+    UfRtEnumDef* def;
+    int tag;
+    const char* variant_name;
+    size_t field_count;
+    UfVal* fields;
+};
 
 typedef struct {
     UfRtHeader header;
@@ -54,6 +206,9 @@ typedef struct {
     const char** field_names;
     size_t field_count;
     UfVal* fields;
+    const char** method_names;
+    struct UfRtClosure** method_closures;
+    size_t method_count;
 } UfRtInstance;
 
 typedef struct {
@@ -64,7 +219,7 @@ typedef struct {
 
 typedef UfVal (*UfRtNativeFn)(void* env, size_t argc, UfVal* args);
 
-typedef struct {
+typedef struct UfRtClosure {
     UfRtHeader header;
     UfRtNativeFn fn;
     void* env;
@@ -83,14 +238,36 @@ typedef struct UfRtVal {
         UfRtClosure* closure;
         UfRtInstance* instance;
         UfRtError* error;
+        UfRtChannel* channel;
+        UfRtFiber* fiber;
+        UfRtBoundMethod* bound_method;
+        UfRtEnumDef* enum_def;
+        UfRtEnumVal* enum_val;
+        UfRtPromise* promise;
         void* ptr;
     } as;
 } UfVal;
+
+struct UfRtBoundMethod {
+    UfRtHeader header;
+    UfVal receiver;
+    UfRtClosure* closure;
+};
 
 struct UfRtError {
     UfRtHeader header;
     UfVal message;
     UfVal kind;
+};
+
+struct UfRtPromise {
+    UfRtHeader header;
+    int state; /* 0: pending, 1: resolved, 2: rejected */
+    UfVal result;
+    UfVal error;
+    UfRtFiber** waiters;
+    size_t waiter_count;
+    size_t waiter_capacity;
 };
 
 struct UfRtArray {
@@ -114,6 +291,39 @@ struct UfRtMap {
     UfVal* order_keys;
     size_t order_count;
 };
+
+struct UfRtFiber {
+    UfRtHeader header;
+    uint32_t id;
+    UfVal callable;
+    size_t argc;
+    UfVal* args;
+    UfVal result;
+    UfRtFiber* next;
+    UfRtFiber* prev;
+};
+
+struct UfRtChannel {
+    UfRtHeader header;
+    size_t capacity;
+    size_t count;
+    size_t head;
+    size_t tail;
+    UfVal* buffer;
+    bool closed;
+    UfRtFiber* wait_recv_head;
+    UfRtFiber* wait_recv_tail;
+};
+
+typedef struct {
+    UfRtFiber* run_head;
+    UfRtFiber* run_tail;
+    UfRtFiber* current;
+    int fiber_count;
+    uint32_t next_id;
+} UfRtScheduler;
+
+static UfRtScheduler g_scheduler;
 
 /* A heap cell for a captured mutable variable, tracked separately from
  * UfRtHeader objects (it is not a first-class UfVal itself, just backing
@@ -171,6 +381,11 @@ static inline void uf_init(int argc, char** argv) {
     g_uf_rt.argv = argv;
     g_uf_rt.all_boxes = NULL;
     g_catch_stack = NULL;
+    g_scheduler.run_head = NULL;
+    g_scheduler.run_tail = NULL;
+    g_scheduler.current = NULL;
+    g_scheduler.fiber_count = 0;
+    g_scheduler.next_id = 1;
 }
 
 static inline void uf_cleanup(void) {
@@ -193,6 +408,21 @@ static inline void uf_cleanup(void) {
         } else if (curr->kind == UF_RT_INSTANCE) {
             UfRtInstance* inst = (UfRtInstance*)curr;
             free(inst->fields);
+        } else if (curr->kind == UF_RT_CHANNEL) {
+            UfRtChannel* ch = (UfRtChannel*)curr;
+            free(ch->buffer);
+        } else if (curr->kind == UF_RT_FIBER) {
+            UfRtFiber* fib = (UfRtFiber*)curr;
+            free(fib->args);
+        } else if (curr->kind == UF_RT_ENUM_DEF) {
+            UfRtEnumDef* ed = (UfRtEnumDef*)curr;
+            free(ed->variant_templates);
+        } else if (curr->kind == UF_RT_ENUM_VAL) {
+            UfRtEnumVal* ev = (UfRtEnumVal*)curr;
+            free(ev->fields);
+        } else if (curr->kind == UF_RT_PROMISE) {
+            UfRtPromise* p = (UfRtPromise*)curr;
+            if (p->waiters) free(p->waiters);
         }
         free(curr);
         curr = next;
@@ -227,7 +457,7 @@ static inline UfVal* uf_box_new(UfVal v) {
     return &node->value;
 }
 
-static inline UfVal uf_instance_new(const char* name, const char** field_names, size_t field_count, size_t argc, UfVal* args) {
+static inline UfVal uf_instance_new(const char* name, const char** field_names, size_t field_count, const char** method_names, struct UfRtClosure** method_closures, size_t method_count, size_t argc, UfVal* args) {
     if (argc != field_count) {
         fprintf(stderr, "Runtime Error: Struct '%s' expects %zu fields, but %zu provided\n", name, field_count, argc);
         exit(3);
@@ -236,6 +466,9 @@ static inline UfVal uf_instance_new(const char* name, const char** field_names, 
     inst->name = name;
     inst->field_names = field_names;
     inst->field_count = field_count;
+    inst->method_names = method_names;
+    inst->method_closures = method_closures;
+    inst->method_count = method_count;
     if (field_count > 0) {
         inst->fields = (UfVal*)malloc(sizeof(UfVal) * field_count);
         for (size_t i = 0; i < field_count; ++i) {
@@ -245,6 +478,43 @@ static inline UfVal uf_instance_new(const char* name, const char** field_names, 
         inst->fields = NULL;
     }
     UfVal v; v.kind = UF_RT_INSTANCE; v.as.instance = inst; return v;
+}
+
+static inline UfVal uf_enum_def_new(const char* name, size_t variant_count, const char** variant_names, size_t* variant_field_counts, const char*** variant_field_names) {
+    UfRtEnumDef* def = (UfRtEnumDef*)uf_rt_alloc(UF_RT_ENUM_DEF, sizeof(UfRtEnumDef));
+    def->name = name;
+    def->variant_count = variant_count;
+    def->variant_names = variant_names;
+    def->variant_field_counts = variant_field_counts;
+    def->variant_field_names = variant_field_names;
+    def->variant_templates = (UfVal*)malloc(sizeof(UfVal) * variant_count);
+    UfVal v; v.kind = UF_RT_ENUM_DEF; v.as.enum_def = def;
+    return v;
+}
+
+static inline UfVal uf_enum_val_new(UfRtEnumDef* def, int tag, const char* variant_name, size_t field_count, UfVal* fields) {
+    UfRtEnumVal* ev = (UfRtEnumVal*)uf_rt_alloc(UF_RT_ENUM_VAL, sizeof(UfRtEnumVal));
+    ev->def = def;
+    ev->tag = tag;
+    ev->variant_name = variant_name;
+    ev->field_count = field_count;
+    if (field_count > 0 && fields != NULL) {
+        ev->fields = (UfVal*)malloc(sizeof(UfVal) * field_count);
+        for (size_t i = 0; i < field_count; ++i) {
+            ev->fields[i] = fields[i];
+        }
+    } else {
+        ev->fields = NULL;
+    }
+    UfVal v; v.kind = UF_RT_ENUM_VAL; v.as.enum_val = ev;
+    return v;
+}
+
+static inline UfVal uf_bound_method_new(UfVal receiver, struct UfRtClosure* closure) {
+    UfRtBoundMethod* bm = (UfRtBoundMethod*)uf_rt_alloc(UF_RT_BOUND_METHOD, sizeof(UfRtBoundMethod));
+    bm->receiver = receiver;
+    bm->closure = closure;
+    UfVal v; v.kind = UF_RT_BOUND_METHOD; v.as.bound_method = bm; return v;
 }
 
 static inline UfVal uf_closure_new(UfRtNativeFn fn, const void* env, size_t env_size) {
@@ -276,6 +546,35 @@ static inline UfVal uf_call_val(UfVal callee, size_t argc, ...) {
         UfVal result = callee.as.closure->fn(callee.as.closure->env, argc, args);
         if (args != stack_args) free(args);
         return result;
+    }
+    if (callee.kind == UF_RT_BOUND_METHOD && callee.as.bound_method != NULL) {
+        UfRtBoundMethod* bm = callee.as.bound_method;
+        size_t new_argc = argc + 1;
+        UfVal method_stack_args[17];
+        UfVal* new_args = (new_argc <= 17) ? method_stack_args : (UfVal*)malloc(sizeof(UfVal) * new_argc);
+        new_args[0] = bm->receiver;
+        for (size_t i = 0; i < argc; ++i) {
+            new_args[i + 1] = args[i];
+        }
+        UfVal result = bm->closure->fn(bm->closure->env, new_argc, new_args);
+        if (new_args != method_stack_args) free(new_args);
+        if (args != stack_args) free(args);
+        return result;
+    }
+    if (callee.kind == UF_RT_ENUM_VAL && callee.as.enum_val != NULL) {
+        UfRtEnumVal* ev = callee.as.enum_val;
+        if (ev->def && (size_t)ev->tag < ev->def->variant_count) {
+            size_t expected = ev->def->variant_field_counts[ev->tag];
+            if (argc != expected) {
+                if (args != stack_args) free(args);
+                fprintf(stderr, "TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided\n",
+                        ev->variant_name, expected, expected == 1 ? "" : "s", argc);
+                exit(3);
+            }
+            UfVal result = uf_enum_val_new(ev->def, ev->tag, ev->variant_name, argc, args);
+            if (args != stack_args) free(args);
+            return result;
+        }
     }
     if (args != stack_args) free(args);
     fprintf(stderr, "Runtime Error: Attempted to call non-callable value\n");
@@ -404,6 +703,12 @@ static inline bool uf_truthy(UfVal v) {
         case UF_RT_BUFFER: return v.as.buffer->size > 0;
         case UF_RT_CLOSURE: return true;
         case UF_RT_INSTANCE: return true;
+        case UF_RT_CHANNEL: return v.as.channel && (!v.as.channel->closed || v.as.channel->count > 0);
+        case UF_RT_FIBER: return true;
+        case UF_RT_BOUND_METHOD: return true;
+        case UF_RT_ENUM_DEF: return true;
+        case UF_RT_ENUM_VAL: return true;
+        case UF_RT_PROMISE: return true;
         default: return false;
     }
 }
@@ -458,6 +763,30 @@ static inline char* uf_to_str_impl(UfVal v, UfToStrVisited* vis) {
             char b_buf[64];
             snprintf(b_buf, sizeof(b_buf), "<buffer size=%zu>", v.as.buffer->size);
             return strdup(b_buf);
+        }
+        case UF_RT_CHANNEL: {
+            char cbuf[128];
+            snprintf(cbuf, sizeof(cbuf), "<channel cap=%zu len=%zu>",
+                     v.as.channel ? v.as.channel->capacity : 0,
+                     v.as.channel ? v.as.channel->count : 0);
+            return strdup(cbuf);
+        }
+        case UF_RT_FIBER: {
+            char fbuf[128];
+            snprintf(fbuf, sizeof(fbuf), "<fiber #%lu>",
+                     (unsigned long)(v.as.fiber ? v.as.fiber->id : 0));
+            return strdup(fbuf);
+        }
+        case UF_RT_BOUND_METHOD: return strdup("<bound method>");
+        case UF_RT_PROMISE: {
+            const char* st = "pending";
+            if (v.as.promise) {
+                if (v.as.promise->state == 1) st = "resolved";
+                else if (v.as.promise->state == 2) st = "rejected";
+            }
+            char pbuf[128];
+            snprintf(pbuf, sizeof(pbuf), "<promise (%s)>", st);
+            return strdup(pbuf);
         }
         case UF_RT_INSTANCE: {
             UfRtInstance* inst = v.as.instance;
@@ -566,6 +895,43 @@ static inline char* uf_to_str_impl(UfVal v, UfToStrVisited* vis) {
             snprintf(e_buf, sizeof(e_buf), "<error: %s>", msg);
             return strdup(e_buf);
         }
+        case UF_RT_ENUM_DEF: {
+            char ebuf[256];
+            snprintf(ebuf, sizeof(ebuf), "<enum %s>",
+                     (v.as.enum_def && v.as.enum_def->name) ? v.as.enum_def->name : "anonymous");
+            return strdup(ebuf);
+        }
+        case UF_RT_ENUM_VAL: {
+            UfRtEnumVal* ev = v.as.enum_val;
+            if (!ev) return strdup("EnumVal");
+            if (ev->field_count == 0) {
+                char vbuf[256];
+                snprintf(vbuf, sizeof(vbuf), "%s.%s", (ev->def && ev->def->name) ? ev->def->name : "", ev->variant_name ? ev->variant_name : "");
+                return strdup(vbuf);
+            }
+            size_t cap = 64;
+            char* res = (char*)malloc(cap);
+            snprintf(res, cap, "%s(", ev->variant_name ? ev->variant_name : "");
+            size_t len = strlen(res);
+            for (size_t i = 0; i < ev->field_count; ++i) {
+                if (i > 0) {
+                    if (len + 3 >= cap) { cap *= 2; res = (char*)realloc(res, cap); }
+                    memcpy(res + len, ", ", 2);
+                    len += 2;
+                    res[len] = '\0';
+                }
+                char* s = uf_to_str_impl(ev->fields[i], vis);
+                size_t slen = strlen(s);
+                while (len + slen + 2 >= cap) { cap *= 2; res = (char*)realloc(res, cap); }
+                memcpy(res + len, s, slen);
+                len += slen;
+                res[len] = '\0';
+                free(s);
+            }
+            res[len++] = ')';
+            res[len] = '\0';
+            return res;
+        }
         default: return strdup("<object>");
     }
 }
@@ -579,13 +945,24 @@ static inline char* uf_to_str(UfVal v) {
 
 static inline void uf_say(UfVal v) {
     char* s = uf_to_str(v);
+#if defined(UF_EMBEDDED)
+    const char* p = s ? s : "null";
+    while (*p) uf_embedded_putchar(*p++);
+    uf_embedded_putchar('\n');
+#else
     printf("%s\n", s ? s : "null");
+#endif
     free(s);
 }
 
 static inline void uf_print(UfVal v) {
     char* s = uf_to_str(v);
+#if defined(UF_EMBEDDED)
+    const char* p = s ? s : "null";
+    while (*p) uf_embedded_putchar(*p++);
+#else
     printf("%s", s ? s : "null");
+#endif
     free(s);
 }
 
@@ -677,6 +1054,27 @@ static inline bool uf_eq_bool_impl(UfVal a, UfVal b, UfEqVisited* vis) {
                 }
             }
             uf_eq_visit_leave(vis);
+            return true;
+        }
+        case UF_RT_BOUND_METHOD: {
+            if (a.as.bound_method == b.as.bound_method) return true;
+            if (!a.as.bound_method || !b.as.bound_method) return false;
+            return uf_eq_bool_impl(a.as.bound_method->receiver, b.as.bound_method->receiver, vis) &&
+                   a.as.bound_method->closure == b.as.bound_method->closure;
+        }
+        case UF_RT_ENUM_DEF:
+            return a.as.enum_def == b.as.enum_def;
+        case UF_RT_ENUM_VAL: {
+            UfRtEnumVal* ea = a.as.enum_val;
+            UfRtEnumVal* eb = b.as.enum_val;
+            if (ea == eb) return true;
+            if (!ea || !eb) return false;
+            if (ea->def != eb->def) return false;
+            if (ea->tag != eb->tag) return false;
+            if (ea->field_count != eb->field_count) return false;
+            for (size_t i = 0; i < ea->field_count; ++i) {
+                if (!uf_eq_bool_impl(ea->fields[i], eb->fields[i], vis)) return false;
+            }
             return true;
         }
         default: return a.as.ptr == b.as.ptr;
@@ -801,13 +1199,63 @@ static inline UfVal uf_type_of(UfVal v) {
         case UF_RT_MAP: return uf_str("map");
         case UF_RT_BUFFER: return uf_str("buffer");
         case UF_RT_CLOSURE: return uf_str("function");
+        case UF_RT_BOUND_METHOD: return uf_str("function");
         case UF_RT_INSTANCE: return uf_str(v.as.instance->name);
+        case UF_RT_ENUM_DEF: return uf_str("enum");
+        case UF_RT_ENUM_VAL: return uf_str((v.as.enum_val && v.as.enum_val->def && v.as.enum_val->def->name) ? v.as.enum_val->def->name : "enum_val");
         case UF_RT_ERROR: return uf_str("error");
+        case UF_RT_CHANNEL: return uf_str("channel");
+        case UF_RT_FIBER: return uf_str("fiber");
+        case UF_RT_PROMISE: return uf_str("promise");
         default: return uf_str("object");
     }
 }
 
 static inline UfVal uf_get(UfVal target, UfVal index) {
+    if (target.kind == UF_RT_ENUM_DEF) {
+        if (index.kind == UF_RT_STRING) {
+            const char* prop = index.as.string->chars;
+            UfRtEnumDef* ed = target.as.enum_def;
+            for (size_t i = 0; i < ed->variant_count; ++i) {
+                if (strcmp(ed->variant_names[i], prop) == 0) {
+                    return ed->variant_templates[i];
+                }
+            }
+            char buf[128];
+            snprintf(buf, sizeof(buf), "Enum '%s' has no variant '%s'", ed->name ? ed->name : "", prop);
+            uf_raise(buf, "AttributeError");
+            return uf_null();
+        }
+    }
+    if (target.kind == UF_RT_ENUM_VAL) {
+        UfRtEnumVal* ev = target.as.enum_val;
+        if (index.kind == UF_RT_NUMBER) {
+            long idx = (long)index.as.number;
+            if (idx >= 0 && (size_t)idx < ev->field_count) {
+                return ev->fields[idx];
+            }
+            return uf_null();
+        }
+        if (index.kind == UF_RT_STRING) {
+            const char* prop = index.as.string->chars;
+            if (strcmp(prop, "tag") == 0) return uf_num((double)ev->tag);
+            if (strcmp(prop, "name") == 0) return uf_str(ev->variant_name ? ev->variant_name : "");
+            if (ev->def && (size_t)ev->tag < ev->def->variant_count && ev->def->variant_field_names) {
+                const char** fnames = ev->def->variant_field_names[ev->tag];
+                if (fnames) {
+                    for (size_t f = 0; f < ev->field_count; ++f) {
+                        if (strcmp(fnames[f], prop) == 0) {
+                            return ev->fields[f];
+                        }
+                    }
+                }
+            }
+            char buf[128];
+            snprintf(buf, sizeof(buf), "Enum variant '%s' has no field '%s'", ev->variant_name ? ev->variant_name : "", prop);
+            uf_raise(buf, "AttributeError");
+            return uf_null();
+        }
+    }
     if (target.kind == UF_RT_ERROR) {
         if (index.kind == UF_RT_STRING) {
             const char* fname = index.as.string->chars;
@@ -828,7 +1276,12 @@ static inline UfVal uf_get(UfVal target, UfVal index) {
                 return inst->fields[i];
             }
         }
-        fprintf(stderr, "Runtime Error: Struct '%s' has no field '%s'\n", inst->name, fname);
+        for (size_t i = 0; i < inst->method_count; ++i) {
+            if (strcmp(inst->method_names[i], fname) == 0) {
+                return uf_bound_method_new(target, inst->method_closures[i]);
+            }
+        }
+        fprintf(stderr, "Runtime Error: Struct '%s' has no field or method '%s'\n", inst->name, fname);
         exit(3);
     }
     if (target.kind == UF_RT_ARRAY) {
@@ -978,6 +1431,256 @@ static inline void uf_set(UfVal target, UfVal index, UfVal value) {
     fprintf(stderr, "Runtime Error: Cannot assign to index of this type\n"); exit(3);
 }
 
+/* Spread and Rest Helpers */
+static inline const char* uf_type_name_cstr(UfVal v) {
+    switch (v.kind) {
+        case UF_RT_NULL: return "null";
+        case UF_RT_BOOL: return "boolean";
+        case UF_RT_NUMBER: return "number";
+        case UF_RT_STRING: return "string";
+        case UF_RT_ARRAY: return "array";
+        case UF_RT_MAP: return "map";
+        case UF_RT_BUFFER: return "buffer";
+        case UF_RT_CLOSURE: return "function";
+        case UF_RT_BOUND_METHOD: return "function";
+        case UF_RT_INSTANCE: return (v.as.instance && v.as.instance->name) ? v.as.instance->name : "instance";
+        case UF_RT_ENUM_DEF: return "enum";
+        case UF_RT_ENUM_VAL: return (v.as.enum_val && v.as.enum_val->def && v.as.enum_val->def->name) ? v.as.enum_val->def->name : "enum_val";
+        case UF_RT_ERROR: return "error";
+        case UF_RT_CHANNEL: return "channel";
+        case UF_RT_FIBER: return "fiber";
+        case UF_RT_PROMISE: return "promise";
+        default: return "<unknown>";
+    }
+}
+
+static inline void uf_array_extend(UfVal target, UfVal src) {
+    if (target.kind != UF_RT_ARRAY) return;
+    if (src.kind != UF_RT_ARRAY) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Spread operand in array literal must be an array, got '%s'", uf_type_name_cstr(src));
+        uf_raise(buf, "TypeError");
+        return;
+    }
+    UfRtArray* s = src.as.array;
+    for (size_t i = 0; i < s->count; ++i) {
+        uf_array_push(target, s->elements[i]);
+    }
+}
+
+static inline void uf_map_extend(UfVal target, UfVal src) {
+    if (target.kind != UF_RT_MAP) return;
+    if (src.kind != UF_RT_MAP) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Spread operand in map literal must be a map, got '%s'", uf_type_name_cstr(src));
+        uf_raise(buf, "TypeError");
+        return;
+    }
+    UfRtMap* s = src.as.map;
+    for (size_t i = 0; i < s->order_count; ++i) {
+        UfVal k = s->order_keys[i];
+        UfVal v = uf_get(src, k);
+        uf_set(target, k, v);
+    }
+}
+
+static inline UfVal uf_make_rest_array(size_t argc, const UfVal* args, size_t fixed_count) {
+    size_t rest_count = (argc > fixed_count) ? (argc - fixed_count) : 0;
+    UfVal arr = uf_array_new(rest_count);
+    for (size_t i = 0; i < rest_count; ++i) {
+        uf_array_push(arr, args[fixed_count + i]);
+    }
+    return arr;
+}
+
+static inline UfVal uf_make_array_spread(size_t count, ...) {
+    va_list va;
+    va_start(va, count);
+    UfVal res = uf_array_new(count);
+    for (size_t i = 0; i < count; ++i) {
+        int is_spread = va_arg(va, int);
+        UfVal item = va_arg(va, UfVal);
+        if (is_spread) {
+            uf_array_extend(res, item);
+        } else {
+            uf_array_push(res, item);
+        }
+    }
+    va_end(va);
+    return res;
+}
+
+static inline UfVal uf_make_map_spread(size_t count, ...) {
+    va_list va;
+    va_start(va, count);
+    UfVal res = uf_map_new(count);
+    for (size_t i = 0; i < count; ++i) {
+        int is_spread = va_arg(va, int);
+        UfVal k = va_arg(va, UfVal);
+        UfVal v = va_arg(va, UfVal);
+        if (is_spread) {
+            uf_map_extend(res, k);
+        } else {
+            uf_set(res, k, v);
+        }
+    }
+    va_end(va);
+    return res;
+}
+
+/* ---- Destructuring Helpers ---- */
+
+static inline void uf_assert_array_destructure(UfVal val) {
+    if (val.kind != UF_RT_ARRAY) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "TypeError: Cannot destructure non-array value of type '%s'", uf_type_name_cstr(val));
+        uf_raise(buf, "TypeError");
+    }
+}
+
+static inline void uf_assert_map_destructure(UfVal val) {
+    if (val.kind != UF_RT_MAP && val.kind != UF_RT_INSTANCE) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "TypeError: Cannot destructure non-map value of type '%s'", uf_type_name_cstr(val));
+        uf_raise(buf, "TypeError");
+    }
+}
+
+static inline UfVal uf_array_get_safe(UfVal arr, size_t idx) {
+    if (arr.kind != UF_RT_ARRAY) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "TypeError: Cannot destructure non-array value of type '%s'", uf_type_name_cstr(arr));
+        uf_raise(buf, "TypeError");
+        return uf_null();
+    }
+    if (idx < arr.as.array->count) {
+        return arr.as.array->elements[idx];
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_array_slice(UfVal arr, size_t start_idx) {
+    if (arr.kind != UF_RT_ARRAY) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "TypeError: Cannot destructure non-array value of type '%s'", uf_type_name_cstr(arr));
+        uf_raise(buf, "TypeError");
+        return uf_null();
+    }
+    size_t n = arr.as.array->count;
+    size_t rest_len = (n > start_idx) ? (n - start_idx) : 0;
+    UfVal res = uf_array_new(rest_len);
+    for (size_t i = 0; i < rest_len; ++i) {
+        uf_array_push(res, arr.as.array->elements[start_idx + i]);
+    }
+    return res;
+}
+
+static inline UfVal uf_destructure_get_key(UfVal target, const char* key) {
+    if (target.kind == UF_RT_MAP) {
+        for (size_t i = 0; i < target.as.map->capacity; ++i) {
+            if (target.as.map->entries[i].occupied &&
+                target.as.map->entries[i].key.kind == UF_RT_STRING &&
+                strcmp(target.as.map->entries[i].key.as.string->chars, key) == 0) {
+                return target.as.map->entries[i].value;
+            }
+        }
+        return uf_null();
+    } else if (target.kind == UF_RT_INSTANCE) {
+        UfRtInstance* inst = target.as.instance;
+        for (size_t i = 0; i < inst->field_count; ++i) {
+            if (strcmp(inst->field_names[i], key) == 0) {
+                return inst->fields[i];
+            }
+        }
+        return uf_null();
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_map_rest(UfVal target, size_t exclude_count, const char** exclude_keys) {
+    UfVal res = uf_map_new(4);
+    if (target.kind != UF_RT_MAP) return res;
+    UfRtMap* m = target.as.map;
+    for (size_t i = 0; i < m->order_count; ++i) {
+        UfVal k = m->order_keys[i];
+        if (k.kind != UF_RT_STRING) continue;
+        bool excluded = false;
+        for (size_t j = 0; j < exclude_count; ++j) {
+            if (strcmp(k.as.string->chars, exclude_keys[j]) == 0) {
+                excluded = true;
+                break;
+            }
+        }
+        if (!excluded) {
+            UfVal v = uf_get(target, k);
+            uf_set(res, k, v);
+        }
+    }
+    return res;
+}
+
+/* ---- End Destructuring Helpers ---- */
+
+static inline bool uf_pat_match_variant(UfVal val, const char* name, size_t field_count) {
+    if (val.kind == UF_RT_INSTANCE && val.as.instance != NULL) {
+        return strcmp(val.as.instance->name, name) == 0 && val.as.instance->field_count == field_count;
+    }
+    if (val.kind == UF_RT_ENUM_VAL && val.as.enum_val != NULL) {
+        return strcmp(val.as.enum_val->variant_name, name) == 0 && val.as.enum_val->field_count == field_count;
+    }
+    return false;
+}
+
+static inline UfVal uf_pat_get_field(UfVal val, size_t idx) {
+    if (val.kind == UF_RT_INSTANCE && val.as.instance != NULL) {
+        if (idx < val.as.instance->field_count) return val.as.instance->fields[idx];
+    }
+    if (val.kind == UF_RT_ENUM_VAL && val.as.enum_val != NULL) {
+        if (idx < val.as.enum_val->field_count) return val.as.enum_val->fields[idx];
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_call_val_spread(UfVal callee, UfVal args_arr) {
+    if (args_arr.kind != UF_RT_ARRAY) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Spread operand in function call must be an array, got '%s'", uf_type_name_cstr(args_arr));
+        uf_raise(buf, "TypeError");
+        return uf_null();
+    }
+    UfRtArray* a = args_arr.as.array;
+    if (callee.kind == UF_RT_CLOSURE && callee.as.closure != NULL) {
+        return callee.as.closure->fn(callee.as.closure->env, a->count, a->elements);
+    }
+    if (callee.kind == UF_RT_BOUND_METHOD && callee.as.bound_method != NULL) {
+        UfRtBoundMethod* bm = callee.as.bound_method;
+        size_t new_argc = a->count + 1;
+        UfVal method_stack_args[17];
+        UfVal* new_args = (new_argc <= 17) ? method_stack_args : (UfVal*)malloc(sizeof(UfVal) * new_argc);
+        new_args[0] = bm->receiver;
+        for (size_t i = 0; i < a->count; ++i) {
+            new_args[i + 1] = a->elements[i];
+        }
+        UfVal result = bm->closure->fn(bm->closure->env, new_argc, new_args);
+        if (new_args != method_stack_args) free(new_args);
+        return result;
+    }
+    if (callee.kind == UF_RT_ENUM_VAL && callee.as.enum_val != NULL) {
+        UfRtEnumVal* ev = callee.as.enum_val;
+        if (ev->def && (size_t)ev->tag < ev->def->variant_count) {
+            size_t expected = ev->def->variant_field_counts[ev->tag];
+            if (a->count != expected) {
+                fprintf(stderr, "TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided\n",
+                        ev->variant_name, expected, expected == 1 ? "" : "s", a->count);
+                exit(3);
+            }
+            return uf_enum_val_new(ev->def, ev->tag, ev->variant_name, a->count, a->elements);
+        }
+    }
+    fprintf(stderr, "Runtime Error: Attempted to call non-callable value\n");
+    exit(3);
+}
+
 /* Buffer Primitives */
 static inline UfVal uf_buffer_new(UfVal size_val) {
     double sz = (size_val.kind == UF_RT_NUMBER) ? size_val.as.number : 0;
@@ -1027,17 +1730,21 @@ static inline UfVal uf_buffer_fill(UfVal b, UfVal val) {
     return b;
 }
 
-static inline UfVal uf_buffer_slice(UfVal b, UfVal start_v, UfVal end_v) {
+static inline UfVal uf_buffer_slice(UfVal b, UfVal start_v, UfVal len_v) {
     if (b.kind != UF_RT_BUFFER) return uf_null();
     UfRtBuffer* buf = b.as.buffer;
     long start = (start_v.kind == UF_RT_NUMBER) ? (long)start_v.as.number : 0;
-    long end = (end_v.kind == UF_RT_NUMBER) ? (long)end_v.as.number : (long)buf->size;
     if (start < 0) start = 0;
-    if (end > (long)buf->size) end = (long)buf->size;
-    if (start > end) start = end;
-    size_t count = (size_t)(end - start);
-    UfVal res = uf_buffer_new(uf_num((double)count));
-    if (count > 0) memcpy(res.as.buffer->data, buf->data + start, count);
+    if ((size_t)start > buf->size) start = (long)buf->size;
+
+    size_t length = buf->size - (size_t)start;
+    if (len_v.kind == UF_RT_NUMBER) {
+        long user_len = (long)len_v.as.number;
+        if (user_len < 0) user_len = 0;
+        if ((size_t)user_len < length) length = (size_t)user_len;
+    }
+    UfVal res = uf_buffer_new(uf_num((double)length));
+    if (length > 0 && buf->data) memcpy(res.as.buffer->data, buf->data + start, length);
     return res;
 }
 
@@ -1091,24 +1798,31 @@ static inline UfVal uf_buffer_write_i32_le(UfVal b, UfVal off, UfVal val) {
     return uf_buffer_write_u32_le(b, off, val);
 }
 
-static inline UfVal uf_u8(UfVal n) { return uf_num((double)((uint8_t)(int64_t)n.as.number)); }
-static inline UfVal uf_i8(UfVal n) { return uf_num((double)((int8_t)(int64_t)n.as.number)); }
-static inline UfVal uf_u16(UfVal n) { return uf_num((double)((uint16_t)(int64_t)n.as.number)); }
-static inline UfVal uf_i16(UfVal n) { return uf_num((double)((int16_t)(int64_t)n.as.number)); }
-static inline UfVal uf_u32(UfVal n) { return uf_num((double)((uint32_t)(int64_t)n.as.number)); }
-static inline UfVal uf_i32(UfVal n) { return uf_num((double)((int32_t)(int64_t)n.as.number)); }
+static inline int64_t _uf_safe_to_i64(double d) {
+    if (isnan(d) || isinf(d)) return 0;
+    if (d > 9223372036854775807.0) return 9223372036854775807LL;
+    if (d < -9223372036854775808.0) return (-9223372036854775807LL - 1);
+    return (int64_t)d;
+}
 
-static inline UfVal uf_band(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)(int64_t)a.as.number) & ((uint32_t)(int64_t)b.as.number))); }
-static inline UfVal uf_bor(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)(int64_t)a.as.number) | ((uint32_t)(int64_t)b.as.number))); }
-static inline UfVal uf_bxor(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)(int64_t)a.as.number) ^ ((uint32_t)(int64_t)b.as.number))); }
-static inline UfVal uf_bnot(UfVal a) { return uf_num((double)(~((uint32_t)(int64_t)a.as.number))); }
-static inline UfVal uf_shl(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)(int64_t)a.as.number) << (((uint32_t)(int64_t)b.as.number) & 31))); }
-static inline UfVal uf_shr(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)(int64_t)a.as.number) >> (((uint32_t)(int64_t)b.as.number) & 31))); }
-static inline UfVal uf_sar(UfVal a, UfVal b) { return uf_num((double)(((int32_t)(int64_t)a.as.number) >> (((uint32_t)(int64_t)b.as.number) & 31))); }
+static inline UfVal uf_u8(UfVal n) { return uf_num((double)((uint8_t)_uf_safe_to_i64(n.as.number))); }
+static inline UfVal uf_i8(UfVal n) { return uf_num((double)((int8_t)_uf_safe_to_i64(n.as.number))); }
+static inline UfVal uf_u16(UfVal n) { return uf_num((double)((uint16_t)_uf_safe_to_i64(n.as.number))); }
+static inline UfVal uf_i16(UfVal n) { return uf_num((double)((int16_t)_uf_safe_to_i64(n.as.number))); }
+static inline UfVal uf_u32(UfVal n) { return uf_num((double)((uint32_t)_uf_safe_to_i64(n.as.number))); }
+static inline UfVal uf_i32(UfVal n) { return uf_num((double)((int32_t)_uf_safe_to_i64(n.as.number))); }
+
+static inline UfVal uf_band(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)_uf_safe_to_i64(a.as.number)) & ((uint32_t)_uf_safe_to_i64(b.as.number)))); }
+static inline UfVal uf_bor(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)_uf_safe_to_i64(a.as.number)) | ((uint32_t)_uf_safe_to_i64(b.as.number)))); }
+static inline UfVal uf_bxor(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)_uf_safe_to_i64(a.as.number)) ^ ((uint32_t)_uf_safe_to_i64(b.as.number)))); }
+static inline UfVal uf_bnot(UfVal a) { return uf_num((double)(~((uint32_t)_uf_safe_to_i64(a.as.number)))); }
+static inline UfVal uf_shl(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)_uf_safe_to_i64(a.as.number)) << (((uint32_t)_uf_safe_to_i64(b.as.number)) & 31))); }
+static inline UfVal uf_shr(UfVal a, UfVal b) { return uf_num((double)(((uint32_t)_uf_safe_to_i64(a.as.number)) >> (((uint32_t)_uf_safe_to_i64(b.as.number)) & 31))); }
+static inline UfVal uf_sar(UfVal a, UfVal b) { return uf_num((double)(((int32_t)_uf_safe_to_i64(a.as.number)) >> (((uint32_t)_uf_safe_to_i64(b.as.number)) & 31))); }
 
 static inline UfVal uf_to_hex(UfVal n) {
     char hbuf[32];
-    snprintf(hbuf, sizeof(hbuf), "%lx", (unsigned long)(uint64_t)(int64_t)n.as.number);
+    snprintf(hbuf, sizeof(hbuf), "%lx", (unsigned long)(uint64_t)_uf_safe_to_i64(n.as.number));
     return uf_str(hbuf);
 }
 
@@ -1157,6 +1871,242 @@ static inline UfVal uf_buffer_from_hex(UfVal s) {
     return b;
 }
 
+/* Concurrency Primitives */
+static inline UfVal uf_val_fiber(UfRtFiber* f) {
+    UfVal v; v.kind = UF_RT_FIBER; v.as.fiber = f; return v;
+}
+
+static inline UfVal uf_val_channel(UfRtChannel* ch) {
+    UfVal v; v.kind = UF_RT_CHANNEL; v.as.channel = ch; return v;
+}
+
+static inline void uf_scheduler_enqueue(UfRtFiber* f) {
+    f->next = NULL;
+    f->prev = g_scheduler.run_tail;
+    if (g_scheduler.run_tail) {
+        g_scheduler.run_tail->next = f;
+        g_scheduler.run_tail = f;
+    } else {
+        g_scheduler.run_head = f;
+        g_scheduler.run_tail = f;
+    }
+    g_scheduler.fiber_count++;
+}
+
+static inline UfVal uf_channel(UfVal cap_val) {
+    size_t cap = 0;
+    if (cap_val.kind == UF_RT_NUMBER && cap_val.as.number > 0) {
+        cap = (size_t)cap_val.as.number;
+    }
+    UfRtChannel* ch = (UfRtChannel*)uf_rt_alloc(UF_RT_CHANNEL, sizeof(UfRtChannel));
+    ch->capacity = cap;
+    ch->count = 0;
+    ch->head = 0;
+    ch->tail = 0;
+    ch->closed = false;
+    ch->wait_recv_head = NULL;
+    ch->wait_recv_tail = NULL;
+    ch->buffer = (cap > 0) ? (UfVal*)malloc(sizeof(UfVal) * cap) : NULL;
+    return uf_val_channel(ch);
+}
+
+static inline UfVal uf_close_channel(UfVal ch_val) {
+    if (ch_val.kind == UF_RT_CHANNEL && ch_val.as.channel) {
+        ch_val.as.channel->closed = true;
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_send(UfVal ch_val, UfVal val) {
+    if (ch_val.kind != UF_RT_CHANNEL || !ch_val.as.channel) return uf_bool(false);
+    UfRtChannel* ch = ch_val.as.channel;
+    if (ch->closed) {
+        fprintf(stderr, "Runtime Error: Cannot send on closed channel\n");
+        exit(3);
+    }
+    if (ch->capacity > 0 && ch->count < ch->capacity) {
+        ch->buffer[ch->tail] = val;
+        ch->tail = (ch->tail + 1) % ch->capacity;
+        ch->count++;
+        return uf_bool(true);
+    }
+    if (ch->wait_recv_head) {
+        UfRtFiber* receiver = ch->wait_recv_head;
+        ch->wait_recv_head = receiver->next;
+        if (!ch->wait_recv_head) ch->wait_recv_tail = NULL;
+        receiver->result = val;
+        uf_scheduler_enqueue(receiver);
+        return uf_bool(true);
+    }
+    size_t new_cap = ch->capacity == 0 ? 4 : ch->capacity * 2;
+    UfVal* new_buf = (UfVal*)malloc(sizeof(UfVal) * new_cap);
+    if (ch->capacity > 0) {
+        for (size_t i = 0; i < ch->count; ++i) {
+            new_buf[i] = ch->buffer[(ch->head + i) % ch->capacity];
+        }
+    }
+    new_buf[ch->count] = val;
+    free(ch->buffer);
+    ch->buffer = new_buf;
+    ch->head = 0;
+    ch->count++;
+    ch->tail = ch->count % new_cap;
+    ch->capacity = new_cap;
+    return uf_bool(true);
+}
+
+static inline UfVal uf_recv(UfVal ch_val) {
+    if (ch_val.kind != UF_RT_CHANNEL || !ch_val.as.channel) return uf_null();
+    UfRtChannel* ch = ch_val.as.channel;
+    if (ch->count > 0 && ch->capacity > 0) {
+        UfVal res = ch->buffer[ch->head];
+        ch->head = (ch->head + 1) % ch->capacity;
+        ch->count--;
+        return res;
+    }
+    if (ch->closed) {
+        return uf_null();
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_yield(UfVal val) {
+    if (g_scheduler.current) {
+        g_scheduler.current->result = val;
+    }
+    return val;
+}
+
+static inline UfVal uf_spawn(size_t total_args, ...) {
+    if (total_args < 1) return uf_null();
+    va_list va;
+    va_start(va, total_args);
+    UfVal callable = va_arg(va, UfVal);
+    size_t argc = total_args - 1;
+    UfVal* args = NULL;
+    if (argc > 0) {
+        args = (UfVal*)malloc(sizeof(UfVal) * argc);
+        for (size_t i = 0; i < argc; ++i) {
+            args[i] = va_arg(va, UfVal);
+        }
+    }
+    va_end(va);
+    UfRtFiber* fib = (UfRtFiber*)uf_rt_alloc(UF_RT_FIBER, sizeof(UfRtFiber));
+    fib->id = g_scheduler.next_id++;
+    fib->callable = callable;
+    fib->argc = argc;
+    fib->args = args;
+    fib->result = uf_null();
+    fib->next = NULL;
+    fib->prev = NULL;
+    uf_scheduler_enqueue(fib);
+    return uf_val_fiber(fib);
+}
+
+static inline UfVal uf_run_scheduler(void) {
+    int completed = 0;
+    while (g_scheduler.run_head) {
+        UfRtFiber* fib = g_scheduler.run_head;
+        g_scheduler.run_head = fib->next;
+        if (g_scheduler.run_head) {
+            g_scheduler.run_head->prev = NULL;
+        } else {
+            g_scheduler.run_tail = NULL;
+        }
+        fib->next = NULL;
+        fib->prev = NULL;
+        g_scheduler.current = fib;
+        UfVal res = uf_null();
+        if (fib->callable.kind == UF_RT_CLOSURE && fib->callable.as.closure) {
+            res = fib->callable.as.closure->fn(fib->callable.as.closure->env, fib->argc, fib->args);
+        }
+        fib->result = res;
+        completed++;
+        if (g_scheduler.fiber_count > 0) g_scheduler.fiber_count--;
+        g_scheduler.current = NULL;
+    }
+    return uf_num((double)completed);
+}
+
+static inline UfVal uf_val_promise(UfRtPromise* p) {
+    UfVal v; v.kind = UF_RT_PROMISE; v.as.promise = p; return v;
+}
+
+static inline UfRtPromise* uf_promise_create_c(void) {
+    UfRtPromise* p = (UfRtPromise*)uf_rt_alloc(UF_RT_PROMISE, sizeof(UfRtPromise));
+    p->state = 0; /* pending */
+    p->result = uf_null();
+    p->error = uf_null();
+    p->waiters = NULL;
+    p->waiter_count = 0;
+    p->waiter_capacity = 0;
+    return p;
+}
+
+static inline UfVal uf_promise_resolved(UfVal val) {
+    UfRtPromise* p = uf_promise_create_c();
+    p->state = 1; /* resolved */
+    p->result = val;
+    return uf_val_promise(p);
+}
+
+static inline UfVal uf_promise_await_c(UfRtPromise* p) {
+    if (!p) return uf_null();
+    if (p->state == 1) return p->result;
+    if (p->state == 2) {
+        char* err = uf_to_str(p->error);
+        fprintf(stderr, "Runtime Error: Unhandled promise rejection: %s\n", err ? err : "error");
+        if (err) free(err);
+        exit(3);
+    }
+    while (p->state == 0 && g_scheduler.run_head) {
+        uf_run_scheduler();
+    }
+    if (p->state == 1) return p->result;
+    if (p->state == 2) {
+        char* err = uf_to_str(p->error);
+        fprintf(stderr, "Runtime Error: Unhandled promise rejection: %s\n", err ? err : "error");
+        if (err) free(err);
+        exit(3);
+    }
+    return uf_null();
+}
+
+static inline UfVal uf_await(UfVal val) {
+    if (val.kind == UF_RT_PROMISE && val.as.promise) {
+        return uf_promise_await_c(val.as.promise);
+    }
+    return val;
+}
+
+static inline UfVal uf_run_async(size_t total_args, ...) {
+    if (total_args < 1) return uf_null();
+    va_list va;
+    va_start(va, total_args);
+    UfVal callable = va_arg(va, UfVal);
+    size_t argc = total_args - 1;
+    UfVal* args = NULL;
+    if (argc > 0) {
+        args = (UfVal*)malloc(sizeof(UfVal) * argc);
+        for (size_t i = 0; i < argc; ++i) {
+            args[i] = va_arg(va, UfVal);
+        }
+    }
+    va_end(va);
+    UfVal res = uf_null();
+    if (callable.kind == UF_RT_PROMISE && callable.as.promise) {
+        res = uf_promise_await_c(callable.as.promise);
+    } else if (callable.kind == UF_RT_CLOSURE && callable.as.closure) {
+        res = callable.as.closure->fn(callable.as.closure->env, argc, args);
+        if (res.kind == UF_RT_PROMISE && res.as.promise) {
+            res = uf_promise_await_c(res.as.promise);
+        }
+    }
+    if (args) free(args);
+    uf_run_scheduler();
+    return res;
+}
+
 /* Math Primitives */
 static inline UfVal uf_math_abs(UfVal a) { return uf_num(fabs(a.as.number)); }
 static inline UfVal uf_math_floor(UfVal a) { return uf_num(floor(a.as.number)); }
@@ -1175,6 +2125,7 @@ static inline UfVal uf_math_random_int(UfVal min_v, UfVal max_v) {
     long mn = (long)min_v.as.number, mx = (long)max_v.as.number;
     if (mx < mn) { long t = mn; mn = mx; mx = t; }
     long span = mx - mn + 1;
+    if (span <= 0) return uf_num((double)mn);
     return uf_num((double)(mn + (rand() % span)));
 }
 
@@ -1722,9 +2673,15 @@ static inline UfVal uf_array_some(UfVal arr, UfVal fn) {
 }
 
 static inline UfVal uf_sys_clock(void) {
+#if defined(UF_EMBEDDED)
+    static double g_embedded_tick = 0.0;
+    g_embedded_tick += 0.001;
+    return uf_num(g_embedded_tick);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return uf_num((double)ts.tv_sec + (double)ts.tv_nsec * 1e-9);
+#endif
 }
 
 static inline UfVal uf_sys_assert(size_t argc, ...) {
@@ -1831,11 +2788,14 @@ static inline UfVal _wrap_sys_platform(void* e, size_t n, UfVal* a) {
     return uf_str("windows");
     #elif defined(__APPLE__)
     return uf_str("macos");
+    #elif defined(__wasm__) || defined(__wasi__)
+    return uf_str("wasi");
     #elif defined(__linux__)
     return uf_str("linux");
     #else
     return uf_str("unknown");
     #endif
+
 }
 
 static inline UfVal _wrap_sys_args(void* e, size_t n, UfVal* a) {
@@ -1907,7 +2867,13 @@ static inline UfVal _wrap_fs_read_text(void* e, size_t n, UfVal* a) {
 static inline UfVal _wrap_fs_exists(void* e, size_t n, UfVal* a) {
     (void)e;
     if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+#if defined(UF_EMBEDDED)
+    FILE* f = fopen(a[0].as.string->chars, "rb");
+    if (f) { fclose(f); return uf_bool(true); }
+    return uf_bool(false);
+#else
     return uf_bool(access(a[0].as.string->chars, F_OK) == 0);
+#endif
 }
 
 static inline UfVal _wrap_fs_delete_file(void* e, size_t n, UfVal* a) {
@@ -1964,15 +2930,31 @@ static inline UfVal _wrap_time_clock(void* e, size_t n, UfVal* a) { (void)e; (vo
 static inline UfVal _wrap_time_sleep(void* e, size_t n, UfVal* a) {
     (void)e;
     if (n > 0 && a[0].kind == UF_RT_NUMBER && a[0].as.number > 0) {
-        struct timespec req;
         double s = a[0].as.number;
+#if defined(UF_EMBEDDED)
+        volatile uint32_t count = (uint32_t)(s * 1000000.0);
+        while (count--) {
+#if defined(__arm__)
+            __asm__ volatile("nop");
+#endif
+        }
+#else
+        struct timespec req;
         req.tv_sec = (time_t)s;
         req.tv_nsec = (long)((s - (time_t)s) * 1e9);
         nanosleep(&req, NULL);
+#endif
     }
     return uf_null();
 }
-static inline UfVal _wrap_time_timestamp(void* e, size_t n, UfVal* a) { (void)e; (void)n; (void)a; return uf_num((double)time(NULL)); }
+static inline UfVal _wrap_time_timestamp(void* e, size_t n, UfVal* a) {
+    (void)e; (void)n; (void)a;
+#if defined(UF_EMBEDDED)
+    return uf_sys_clock();
+#else
+    return uf_num((double)time(NULL));
+#endif
+}
 
 static inline UfVal uf_mod_time(void) {
     UfVal m = uf_map_new(8);
@@ -2030,6 +3012,54 @@ static UfVal uf_json_parse_str(UfJsonParser* p) {
                 case 'n':  c = '\n'; break;
                 case 'r':  c = '\r'; break;
                 case 't':  c = '\t'; break;
+                case 'u': {
+                    if (p->pos + 4 <= p->len) {
+                        int d0 = uf_hex_char(p->src[p->pos]);
+                        int d1 = uf_hex_char(p->src[p->pos + 1]);
+                        int d2 = uf_hex_char(p->src[p->pos + 2]);
+                        int d3 = uf_hex_char(p->src[p->pos + 3]);
+                        if (d0 >= 0 && d1 >= 0 && d2 >= 0 && d3 >= 0) {
+                            p->pos += 4;
+                            uint32_t cp = (uint32_t)((d0 << 12) | (d1 << 8) | (d2 << 4) | d3);
+                            if (cp >= 0xD800 && cp <= 0xDBFF && p->pos + 6 <= p->len &&
+                                p->src[p->pos] == '\\' && p->src[p->pos + 1] == 'u') {
+                                int s0 = uf_hex_char(p->src[p->pos + 2]);
+                                int s1 = uf_hex_char(p->src[p->pos + 3]);
+                                int s2 = uf_hex_char(p->src[p->pos + 4]);
+                                int s3 = uf_hex_char(p->src[p->pos + 5]);
+                                if (s0 >= 0 && s1 >= 0 && s2 >= 0 && s3 >= 0) {
+                                    uint32_t low = (uint32_t)((s0 << 12) | (s1 << 8) | (s2 << 4) | s3);
+                                    if (low >= 0xDC00 && low <= 0xDFFF) {
+                                        p->pos += 6;
+                                        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                                    }
+                                }
+                            }
+                            if (len + 4 >= cap) {
+                                cap = (cap * 2) + 8;
+                                buf = (char*)realloc(buf, cap);
+                            }
+                            if (cp <= 0x7F) {
+                                buf[len++] = (char)cp;
+                            } else if (cp <= 0x7FF) {
+                                buf[len++] = (char)(0xC0 | ((cp >> 6) & 0x1F));
+                                buf[len++] = (char)(0x80 | (cp & 0x3F));
+                            } else if (cp <= 0xFFFF) {
+                                buf[len++] = (char)(0xE0 | ((cp >> 12) & 0x0F));
+                                buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                buf[len++] = (char)(0x80 | (cp & 0x3F));
+                            } else {
+                                buf[len++] = (char)(0xF0 | ((cp >> 18) & 0x07));
+                                buf[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                                buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                buf[len++] = (char)(0x80 | (cp & 0x3F));
+                            }
+                            continue;
+                        }
+                    }
+                    c = esc;
+                    break;
+                }
                 default:   c = esc; break;
             }
         }
@@ -2153,6 +3183,24 @@ static void _json_sb_append(UfJsonSb* sb, const char* str, size_t len) {
     sb->data[sb->len] = '\0';
 }
 
+static void _json_stringify_string(UfJsonSb* sb, const char* s, size_t slen) {
+    _json_sb_append(sb, "\"", 1);
+    for (size_t i = 0; i < slen; ++i) {
+        char c = s[i];
+        switch (c) {
+            case '"':  _json_sb_append(sb, "\\\"", 2); break;
+            case '\\': _json_sb_append(sb, "\\\\", 2); break;
+            case '\b': _json_sb_append(sb, "\\b", 2); break;
+            case '\f': _json_sb_append(sb, "\\f", 2); break;
+            case '\n': _json_sb_append(sb, "\\n", 2); break;
+            case '\r': _json_sb_append(sb, "\\r", 2); break;
+            case '\t': _json_sb_append(sb, "\\t", 2); break;
+            default:   _json_sb_append(sb, &c, 1); break;
+        }
+    }
+    _json_sb_append(sb, "\"", 1);
+}
+
 /* Returns false (without raising anything itself) on a detected cycle, so
  * the caller can free its StringBuilder/visited-set before raising the
  * catchable error — uf_raise/uf_throw may longjmp out past this function
@@ -2172,7 +3220,7 @@ static bool _json_stringify_val(UfJsonSb* sb, UfVal val, UfToStrVisited* vis) {
              * behavior in C, so the magnitude has to be known-safe first. */
             if (!isnan(val.as.number) && !isinf(val.as.number) &&
                 fabs(val.as.number) < 1e15 && val.as.number == floor(val.as.number)) {
-                snprintf(num_buf, sizeof(num_buf), "%ld", (long)(int64_t)val.as.number);
+                snprintf(num_buf, sizeof(num_buf), "%lld", (long long)val.as.number);
             } else {
                 snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);
             }
@@ -2180,23 +3228,7 @@ static bool _json_stringify_val(UfJsonSb* sb, UfVal val, UfToStrVisited* vis) {
             return true;
         }
         case UF_RT_STRING: {
-            _json_sb_append(sb, "\"", 1);
-            const char* s = val.as.string->chars;
-            size_t slen = val.as.string->length;
-            for (size_t i = 0; i < slen; ++i) {
-                char c = s[i];
-                switch (c) {
-                    case '"':  _json_sb_append(sb, "\\\"", 2); break;
-                    case '\\': _json_sb_append(sb, "\\\\", 2); break;
-                    case '\b': _json_sb_append(sb, "\\b", 2); break;
-                    case '\f': _json_sb_append(sb, "\\f", 2); break;
-                    case '\n': _json_sb_append(sb, "\\n", 2); break;
-                    case '\r': _json_sb_append(sb, "\\r", 2); break;
-                    case '\t': _json_sb_append(sb, "\\t", 2); break;
-                    default:   _json_sb_append(sb, &c, 1); break;
-                }
-            }
-            _json_sb_append(sb, "\"", 1);
+            _json_stringify_string(sb, val.as.string->chars, val.as.string->length);
             return true;
         }
         case UF_RT_ARRAY: {
@@ -2221,10 +3253,10 @@ static bool _json_stringify_val(UfJsonSb* sb, UfVal val, UfToStrVisited* vis) {
             for (size_t i = 0; i < map->order_count; ++i) {
                 if (i > 0) _json_sb_append(sb, ", ", 2);
                 UfVal k = map->order_keys[i];
-                _json_sb_append(sb, "\"", 1);
                 const char* ks = (k.kind == UF_RT_STRING) ? k.as.string->chars : "";
-                _json_sb_append(sb, ks, strlen(ks));
-                _json_sb_append(sb, "\": ", 3);
+                size_t klen = (k.kind == UF_RT_STRING) ? k.as.string->length : 0;
+                _json_stringify_string(sb, ks, klen);
+                _json_sb_append(sb, ": ", 2);
                 UfVal v = uf_get(val, k);
                 if (!_json_stringify_val(sb, v, vis)) {
                     uf_to_str_visit_leave(vis);

@@ -35,6 +35,7 @@ static UfValue rnd_random_int(UfRuntime* rt, int argc, UfValue* args) {
         max_val = tmp;
     }
     int range = max_val - min_val + 1;
+    if (range <= 0) return uf_val_number((double)min_val);
     int r = min_val + (rand() % range);
     return uf_val_number((double)r);
 }

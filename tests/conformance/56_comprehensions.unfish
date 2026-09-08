@@ -1,0 +1,42 @@
+# expect: [2, 4, 6]
+# expect: [2, 4, 6]
+# expect: [13, 14, 23, 24]
+# expect: [HELLO, WORLD]
+# expect: {"1": 1, "2": 4, "3": 9}
+# expect: {"1": 1, "3": 3}
+# expect: outer_val
+# expect: 42
+
+# 1. Simple list comprehension
+let doubled = [x * 2 for x in [1, 2, 3]]
+say doubled
+
+# 2. List comprehension with filter
+let evens = [x for x in [1, 2, 3, 4, 5, 6] if x % 2 == 0]
+say evens
+
+# 3. Nested list comprehension
+let pairs = [x * 10 + y for x in [1, 2] for y in [3, 4]]
+say pairs
+
+# 4. List comprehension with function call
+let upper_words = [to_upper(s) for s in ["hello", "world"]]
+say upper_words
+
+# 5. Map comprehension
+let square_map = {to_string(x): x * x for x in [1, 2, 3]}
+say square_map
+
+# 6. Map comprehension with filter
+let odd_map = {to_string(x): x for x in [1, 2, 3, 4] if x % 2 == 1}
+say odd_map
+
+# 7. Scope isolation verification
+let x = "outer_val"
+let unused = [x * 2 for x in [1, 2, 3]]
+say x
+
+# 8. Comprehension combined with pipe operator
+let count = [n for n in [10, 20, 30] if n > 15] |> len
+let final_num = 40 |> (function(v): return v + count)
+say final_num

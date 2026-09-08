@@ -150,12 +150,34 @@ static void fold_expr(UfExpr* expr, UfRuntime* rt) {
         case UF_EXPR_MAP:
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
                 fold_expr(expr->as.map_lit.keys[i], rt);
-                fold_expr(expr->as.map_lit.values[i], rt);
+                if (expr->as.map_lit.values[i]) {
+                    fold_expr(expr->as.map_lit.values[i], rt);
+                }
             }
+            break;
+        case UF_EXPR_SPREAD:
+            fold_expr(expr->as.spread.operand, rt);
             break;
         case UF_EXPR_INDEX:
             fold_expr(expr->as.index_expr.target, rt);
             fold_expr(expr->as.index_expr.index, rt);
+            break;
+        case UF_EXPR_STRING_INTERP:
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                fold_expr(expr->as.string_interp.parts[i], rt);
+            }
+            break;
+        case UF_EXPR_FUNCTION:
+            if (expr->as.fn_expr.param_defaults) {
+                for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
+                    if (expr->as.fn_expr.param_defaults[i]) {
+                        fold_expr(expr->as.fn_expr.param_defaults[i], rt);
+                    }
+                }
+            }
+            if (expr->as.fn_expr.body) {
+                fold_stmt(expr->as.fn_expr.body, rt);
+            }
             break;
         default:
             break;
@@ -223,6 +245,13 @@ static void fold_stmt(UfStmt* stmt, UfRuntime* rt) {
             fold_stmt(stmt->as.for_stmt.body, rt);
             break;
         case UF_STMT_FUNCTION:
+            if (stmt->as.function_stmt.param_defaults) {
+                for (size_t i = 0; i < stmt->as.function_stmt.param_count; ++i) {
+                    if (stmt->as.function_stmt.param_defaults[i]) {
+                        fold_expr(stmt->as.function_stmt.param_defaults[i], rt);
+                    }
+                }
+            }
             fold_stmt(stmt->as.function_stmt.body, rt);
             break;
         case UF_STMT_RETURN:
@@ -241,6 +270,13 @@ static void fold_stmt(UfStmt* stmt, UfRuntime* rt) {
             stmt->as.block.count = valid_count;
             break;
         }
+        case UF_STMT_STRUCT:
+            for (size_t i = 0; i < stmt->as.struct_stmt.method_count; ++i) {
+                fold_stmt(stmt->as.struct_stmt.methods[i], rt);
+            }
+            break;
+        case UF_STMT_ENUM:
+            break;
         default:
             break;
     }

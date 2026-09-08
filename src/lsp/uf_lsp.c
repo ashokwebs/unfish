@@ -309,6 +309,87 @@ static bool find_ast_symbol_pos(const UfProgram* program, const char* word, Sour
     return false;
 }
 
+static char* lsp_extract_json_string(const char* json, const char* key) {
+    if (!json || !key) return NULL;
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char* p = strstr(json, pattern);
+    if (!p) return NULL;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ':')) p++;
+    if (*p != '"') return NULL;
+    p++; /* skip opening quote */
+
+    const char* start = p;
+    size_t out_len = 0;
+    while (*p && *p != '"') {
+        if (*p == '\\') {
+            p++;
+            if (!*p) break;
+            if (*p == 'u' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2]) &&
+                isxdigit((unsigned char)p[3]) && isxdigit((unsigned char)p[4])) {
+                out_len += 4;
+                p += 4;
+            } else {
+                out_len++;
+            }
+        } else {
+            out_len++;
+        }
+        p++;
+    }
+    if (*p != '"') return NULL;
+
+    char* result = (char*)malloc(out_len + 1);
+    if (!result) return NULL;
+    size_t ri = 0;
+    p = start;
+    while (*p && *p != '"') {
+        if (*p == '\\') {
+            p++;
+            if (!*p) break;
+            char esc = *p;
+            switch (esc) {
+                case '"':  result[ri++] = '"'; break;
+                case '\\': result[ri++] = '\\'; break;
+                case '/':  result[ri++] = '/'; break;
+                case 'b':  result[ri++] = '\b'; break;
+                case 'f':  result[ri++] = '\f'; break;
+                case 'n':  result[ri++] = '\n'; break;
+                case 'r':  result[ri++] = '\r'; break;
+                case 't':  result[ri++] = '\t'; break;
+                case 'u': {
+                    if (isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2]) &&
+                        isxdigit((unsigned char)p[3]) && isxdigit((unsigned char)p[4])) {
+                        char hex[5] = { p[1], p[2], p[3], p[4], '\0' };
+                        uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
+                        p += 4;
+                        if (cp <= 0x7F) {
+                            result[ri++] = (char)cp;
+                        } else if (cp <= 0x7FF) {
+                            result[ri++] = (char)(0xC0 | ((cp >> 6) & 0x1F));
+                            result[ri++] = (char)(0x80 | (cp & 0x3F));
+                        } else {
+                            result[ri++] = (char)(0xE0 | ((cp >> 12) & 0x0F));
+                            result[ri++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                            result[ri++] = (char)(0x80 | (cp & 0x3F));
+                        }
+                    } else {
+                        result[ri++] = esc;
+                    }
+                    break;
+                }
+                default: result[ri++] = esc; break;
+            }
+        } else {
+            result[ri++] = *p;
+        }
+        p++;
+    }
+    result[ri] = '\0';
+    return result;
+}
+
 int uf_lsp_run(FILE* in, FILE* out) {
     while (true) {
         char* msg = lsp_read_message(in);
@@ -341,88 +422,23 @@ int uf_lsp_run(FILE* in, FILE* out) {
             free(msg);
             break;
         } else if (strstr(msg, "\"method\":\"textDocument/didOpen\"")) {
-            char* uri_start = strstr(msg, "\"uri\":\"");
-            if (uri_start) {
-                uri_start += 7;
-                char* uri_end = strchr(uri_start, '"');
-                if (uri_end) {
-                    size_t uri_len = uri_end - uri_start;
-                    char uri[256];
-                    if (uri_len < sizeof(uri)) {
-                        memcpy(uri, uri_start, uri_len);
-                        uri[uri_len] = '\0';
-                        char* text_start = strstr(msg, "\"text\":\"");
-                        if (text_start) {
-                            text_start += 8;
-                            /* Unescape text roughly or find ending */
-                            char* text_end = strrchr(text_start, '"');
-                            if (text_end && text_end > text_start) {
-                                size_t tlen = text_end - text_start;
-                                char* text = (char*)malloc(tlen + 1);
-                                size_t ti = 0;
-                                for (size_t si = 0; si < tlen; ++si) {
-                                    if (text_start[si] == '\\' && si + 1 < tlen) {
-                                        char next = text_start[++si];
-                                        if (next == 'n') text[ti++] = '\n';
-                                        else if (next == 't') text[ti++] = '\t';
-                                        else if (next == 'r') text[ti++] = '\r';
-                                        else if (next == '"') text[ti++] = '"';
-                                        else if (next == '\\') text[ti++] = '\\';
-                                        else text[ti++] = next;
-                                    } else {
-                                        text[ti++] = text_start[si];
-                                    }
-                                }
-                                text[ti] = '\0';
-                                upsert_doc(uri, text, 1);
-                                publish_diagnostics(out, uri, text);
-                                free(text);
-                            }
-                        }
-                    }
-                }
+            char* uri = lsp_extract_json_string(msg, "uri");
+            char* text = lsp_extract_json_string(msg, "text");
+            if (uri && text) {
+                upsert_doc(uri, text, 1);
+                publish_diagnostics(out, uri, text);
             }
+            free(uri);
+            free(text);
         } else if (strstr(msg, "\"method\":\"textDocument/didChange\"")) {
-            char* uri_start = strstr(msg, "\"uri\":\"");
-            if (uri_start) {
-                uri_start += 7;
-                char* uri_end = strchr(uri_start, '"');
-                if (uri_end) {
-                    size_t uri_len = uri_end - uri_start;
-                    char uri[256];
-                    if (uri_len < sizeof(uri)) {
-                        memcpy(uri, uri_start, uri_len);
-                        uri[uri_len] = '\0';
-                        char* text_start = strstr(msg, "\"text\":\"");
-                        if (text_start) {
-                            text_start += 8;
-                            char* text_end = strrchr(text_start, '"');
-                            if (text_end && text_end > text_start) {
-                                size_t tlen = text_end - text_start;
-                                char* text = (char*)malloc(tlen + 1);
-                                size_t ti = 0;
-                                for (size_t si = 0; si < tlen; ++si) {
-                                    if (text_start[si] == '\\' && si + 1 < tlen) {
-                                        char next = text_start[++si];
-                                        if (next == 'n') text[ti++] = '\n';
-                                        else if (next == 't') text[ti++] = '\t';
-                                        else if (next == 'r') text[ti++] = '\r';
-                                        else if (next == '"') text[ti++] = '"';
-                                        else if (next == '\\') text[ti++] = '\\';
-                                        else text[ti++] = next;
-                                    } else {
-                                        text[ti++] = text_start[si];
-                                    }
-                                }
-                                text[ti] = '\0';
-                                upsert_doc(uri, text, 2);
-                                publish_diagnostics(out, uri, text);
-                                free(text);
-                            }
-                        }
-                    }
-                }
+            char* uri = lsp_extract_json_string(msg, "uri");
+            char* text = lsp_extract_json_string(msg, "text");
+            if (uri && text) {
+                upsert_doc(uri, text, 2);
+                publish_diagnostics(out, uri, text);
             }
+            free(uri);
+            free(text);
         } else if (strstr(msg, "\"method\":\"textDocument/didClose\"")) {
             char* uri_start = strstr(msg, "\"uri\":\"");
             if (uri_start) {
@@ -516,9 +532,11 @@ int uf_lsp_run(FILE* in, FILE* out) {
 
             SourceSpan def_span;
             bool found = false;
+            size_t word_len = 0;
             if (doc_text) {
                 char* word = get_word_at_pos(doc_text, line, col);
                 if (word) {
+                    word_len = strlen(word);
                     UfArena arena;
                     uf_arena_init(&arena, 16384);
                     UfInterner interner;
@@ -545,7 +563,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
                 uint32_t dcol = def_span.start.col > 0 ? def_span.start.col - 1 : 0;
                 snprintf(resp, sizeof(resp),
                          "{\"jsonrpc\":\"2.0\",\"id\":%ld,\"result\":{\"uri\":\"%s\",\"range\":{\"start\":{\"line\":%u,\"character\":%u},\"end\":{\"line\":%u,\"character\":%u}}}}",
-                         id, uri, dline, dcol, dline, dcol + 5);
+                         id, uri, dline, dcol, dline, dcol + (uint32_t)word_len);
             } else {
                 snprintf(resp, sizeof(resp), "{\"jsonrpc\":\"2.0\",\"id\":%ld,\"result\":null}", id);
             }

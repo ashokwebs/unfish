@@ -134,7 +134,11 @@ static void export_expr(const UfExpr* expr, FILE* out, int indent) {
             fputs("], \"values\": [", out);
             for (size_t i = 0; i < expr->as.map_lit.count; ++i) {
                 if (i > 0) fputs(", ", out);
-                export_expr(expr->as.map_lit.values[i], out, indent);
+                if (expr->as.map_lit.values[i]) {
+                    export_expr(expr->as.map_lit.values[i], out, indent);
+                } else {
+                    fputs("null", out);
+                }
             }
             fputs("]}", out);
             break;
@@ -151,10 +155,39 @@ static void export_expr(const UfExpr* expr, FILE* out, int indent) {
                 if (i > 0) fputs(", ", out);
                 json_print_escaped(out, expr->as.fn_expr.param_types ? expr->as.fn_expr.param_types[i] : NULL);
             }
-            fputs("], \"return_type\": ", out);
+            fputs("], \"param_defaults\": [", out);
+            for (size_t i = 0; i < expr->as.fn_expr.param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                if (expr->as.fn_expr.param_defaults && expr->as.fn_expr.param_defaults[i]) {
+                    export_expr(expr->as.fn_expr.param_defaults[i], out, indent);
+                } else {
+                    fputs("null", out);
+                }
+            }
+            fprintf(out, "], \"has_rest\": %s, \"is_async\": %s, \"return_type\": ",
+                    expr->as.fn_expr.has_rest ? "true" : "false",
+                    expr->as.fn_expr.is_async ? "true" : "false");
             json_print_escaped(out, expr->as.fn_expr.return_type);
             fputs(", \"body\": ", out);
             export_stmt(expr->as.fn_expr.body, out, indent);
+            fputc('}', out);
+            break;
+        case UF_EXPR_AWAIT:
+            fputs("{\"kind\": \"await\", \"operand\": ", out);
+            export_expr(expr->as.await_expr.value, out, indent);
+            fputc('}', out);
+            break;
+        case UF_EXPR_STRING_INTERP:
+            fputs("{\"kind\": \"string_interp\", \"parts\": [", out);
+            for (size_t i = 0; i < expr->as.string_interp.count; ++i) {
+                if (i > 0) fputs(", ", out);
+                export_expr(expr->as.string_interp.parts[i], out, indent);
+            }
+            fputs("]}", out);
+            break;
+        case UF_EXPR_SPREAD:
+            fputs("{\"kind\": \"spread\", \"operand\": ", out);
+            export_expr(expr->as.spread.operand, out, indent);
             fputc('}', out);
             break;
     }
@@ -190,6 +223,38 @@ static void export_pattern(const UfPattern* pat, FILE* out, int indent) {
             }
             fputs("]}", out);
             break;
+        case UF_PAT_ARRAY:
+            fputs("{\"kind\": \"pattern_array\", \"has_rest\": ", out);
+            fputs(pat->as.array_pat.has_rest ? "true" : "false", out);
+            fputs(", \"elements\": [", out);
+            for (size_t i = 0; i < pat->as.array_pat.count; ++i) {
+                if (i > 0) fputs(", ", out);
+                export_pattern(pat->as.array_pat.elements[i], out, indent);
+            }
+            fputs("]}", out);
+            break;
+        case UF_PAT_MAP:
+            fputs("{\"kind\": \"pattern_map\", \"has_rest\": ", out);
+            fputs(pat->as.map_pat.has_rest ? "true" : "false", out);
+            fputs(", \"keys\": [", out);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, pat->as.map_pat.keys[i]);
+            }
+            fputs("], \"values\": [", out);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                if (i > 0) fputs(", ", out);
+                export_pattern(pat->as.map_pat.values[i], out, indent);
+            }
+            fputs("], \"rest_pattern\": ", out);
+            export_pattern(pat->as.map_pat.rest_pattern, out, indent);
+            fputc('}', out);
+            break;
+        case UF_PAT_REST:
+            fputs("{\"kind\": \"pattern_rest\", \"subpattern\": ", out);
+            export_pattern(pat->as.rest_pat.subpattern, out, indent);
+            fputc('}', out);
+            break;
     }
 }
 
@@ -205,6 +270,8 @@ static void export_stmt(const UfStmt* stmt, FILE* out, int indent) {
             json_print_escaped(out, stmt->as.let_stmt.name);
             fputs(", \"type_ann\": ", out);
             json_print_escaped(out, stmt->as.let_stmt.type_annotation);
+            fputs(", \"pattern\": ", out);
+            export_pattern(stmt->as.let_stmt.pattern, out, indent);
             fputs(", \"init\": ", out);
             export_expr(stmt->as.let_stmt.init, out, indent);
             fputc('}', out);
@@ -213,6 +280,8 @@ static void export_stmt(const UfStmt* stmt, FILE* out, int indent) {
         case UF_STMT_ASSIGN:
             fputs("{\"kind\": \"assign\", \"name\": ", out);
             json_print_escaped(out, stmt->as.assign_stmt.name);
+            fputs(", \"pattern\": ", out);
+            export_pattern(stmt->as.assign_stmt.pattern, out, indent);
             fputs(", \"value\": ", out);
             export_expr(stmt->as.assign_stmt.value, out, indent);
             fputc('}', out);
@@ -297,9 +366,30 @@ static void export_stmt(const UfStmt* stmt, FILE* out, int indent) {
                 if (i > 0) fputs(", ", out);
                 json_print_escaped(out, stmt->as.function_stmt.param_types ? stmt->as.function_stmt.param_types[i] : NULL);
             }
-            fputs("], \"return_type\": ", out);
+            fputs("], \"param_defaults\": [", out);
+            for (size_t i = 0; i < stmt->as.function_stmt.param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                if (stmt->as.function_stmt.param_defaults && stmt->as.function_stmt.param_defaults[i]) {
+                    export_expr(stmt->as.function_stmt.param_defaults[i], out, indent);
+                } else {
+                    fputs("null", out);
+                }
+            }
+            fprintf(out, "], \"has_rest\": %s, \"is_async\": %s, \"return_type\": ",
+                    stmt->as.function_stmt.has_rest ? "true" : "false",
+                    stmt->as.function_stmt.is_async ? "true" : "false");
             json_print_escaped(out, stmt->as.function_stmt.return_type);
-            fputs(", \"body\": ", out);
+            fputs(", \"type_params\": [", out);
+            for (size_t i = 0; i < stmt->as.function_stmt.type_param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, stmt->as.function_stmt.type_params[i]);
+            }
+            fputs("], \"type_param_bounds\": [", out);
+            for (size_t i = 0; i < stmt->as.function_stmt.type_param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, stmt->as.function_stmt.type_param_bounds ? stmt->as.function_stmt.type_param_bounds[i] : NULL);
+            }
+            fputs("], \"body\": ", out);
             export_stmt(stmt->as.function_stmt.body, out, indent);
             fputc('}', out);
             break;
@@ -328,7 +418,15 @@ static void export_stmt(const UfStmt* stmt, FILE* out, int indent) {
             fputs(", \"error_var\": ", out);
             json_print_escaped(out, stmt->as.try_catch.catch_var);
             fputs(", \"catch_block\": ", out);
-            export_stmt(stmt->as.try_catch.catch_block, out, indent);
+            if (stmt->as.try_catch.catch_block) {
+                export_stmt(stmt->as.try_catch.catch_block, out, indent);
+            } else {
+                fputs("null", out);
+            }
+            if (stmt->as.try_catch.finally_block) {
+                fputs(", \"finally_block\": ", out);
+                export_stmt(stmt->as.try_catch.finally_block, out, indent);
+            }
             fputc('}', out);
             break;
 
@@ -368,6 +466,93 @@ static void export_stmt(const UfStmt* stmt, FILE* out, int indent) {
             for (size_t i = 0; i < stmt->as.struct_stmt.field_count; ++i) {
                 if (i > 0) fputs(", ", out);
                 json_print_escaped(out, stmt->as.struct_stmt.field_types ? stmt->as.struct_stmt.field_types[i] : NULL);
+            }
+            fputs("], \"type_params\": [", out);
+            for (size_t i = 0; i < stmt->as.struct_stmt.type_param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, stmt->as.struct_stmt.type_params[i]);
+            }
+            fputs("], \"type_param_bounds\": [", out);
+            for (size_t i = 0; i < stmt->as.struct_stmt.type_param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, stmt->as.struct_stmt.type_param_bounds ? stmt->as.struct_stmt.type_param_bounds[i] : NULL);
+            }
+            fputs("], \"methods\": [", out);
+            for (size_t i = 0; i < stmt->as.struct_stmt.method_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                export_stmt(stmt->as.struct_stmt.methods[i], out, indent);
+            }
+            fputs("], \"impl_blocks\": [", out);
+            for (size_t i = 0; i < stmt->as.struct_stmt.impl_block_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                export_stmt(stmt->as.struct_stmt.impl_blocks[i], out, indent);
+            }
+            fputs("]}", out);
+            break;
+
+        case UF_STMT_TRAIT:
+            fputs("{\"kind\": \"trait\", \"name\": ", out);
+            json_print_escaped(out, stmt->as.trait_stmt.name);
+            fputs(", \"type_params\": [", out);
+            for (size_t i = 0; i < stmt->as.trait_stmt.type_param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, stmt->as.trait_stmt.type_params[i]);
+            }
+            fputs("], \"type_param_bounds\": [", out);
+            for (size_t i = 0; i < stmt->as.trait_stmt.type_param_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                json_print_escaped(out, stmt->as.trait_stmt.type_param_bounds ? stmt->as.trait_stmt.type_param_bounds[i] : NULL);
+            }
+            fputs("], \"methods\": [", out);
+            for (size_t i = 0; i < stmt->as.trait_stmt.method_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                fputs("{\"name\": ", out);
+                json_print_escaped(out, stmt->as.trait_stmt.method_names[i]);
+                fputs(", \"return_type\": ", out);
+                json_print_escaped(out, stmt->as.trait_stmt.method_return_types ? stmt->as.trait_stmt.method_return_types[i] : NULL);
+                fputs(", \"params\": [", out);
+                size_t pcount = stmt->as.trait_stmt.method_param_counts[i];
+                for (size_t p = 0; p < pcount; ++p) {
+                    if (p > 0) fputs(", ", out);
+                    fputs("{\"name\": ", out);
+                    json_print_escaped(out, stmt->as.trait_stmt.method_param_names[i][p]);
+                    fputs(", \"type\": ", out);
+                    json_print_escaped(out, (stmt->as.trait_stmt.method_param_types && stmt->as.trait_stmt.method_param_types[i]) ? stmt->as.trait_stmt.method_param_types[i][p] : NULL);
+                    fputs("}", out);
+                }
+                fputs("]}", out);
+            }
+            fputs("]}", out);
+            break;
+
+        case UF_STMT_IMPL:
+            fputs("{\"kind\": \"impl\", \"trait\": ", out);
+            json_print_escaped(out, stmt->as.impl_stmt.trait_name);
+            fputs(", \"struct\": ", out);
+            json_print_escaped(out, stmt->as.impl_stmt.struct_name);
+            fputs(", \"methods\": [", out);
+            for (size_t i = 0; i < stmt->as.impl_stmt.method_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                export_stmt(stmt->as.impl_stmt.methods[i], out, indent);
+            }
+            fputs("]}", out);
+            break;
+
+        case UF_STMT_ENUM:
+            fputs("{\"kind\": \"enum\", \"name\": ", out);
+            json_print_escaped(out, stmt->as.enum_stmt.name);
+            fputs(", \"variants\": [", out);
+            for (size_t i = 0; i < stmt->as.enum_stmt.variant_count; ++i) {
+                if (i > 0) fputs(", ", out);
+                const UfEnumVariant* v = &stmt->as.enum_stmt.variants[i];
+                fputs("{\"name\": ", out);
+                json_print_escaped(out, v->name);
+                fputs(", \"fields\": [", out);
+                for (size_t j = 0; j < v->field_count; ++j) {
+                    if (j > 0) fputs(", ", out);
+                    json_print_escaped(out, v->field_names[j]);
+                }
+                fputs("]}", out);
             }
             fputs("]}", out);
             break;

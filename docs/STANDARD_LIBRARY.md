@@ -195,3 +195,76 @@
   - `assert_true(condition, [message])`: Raises `AssertionError` if `condition` is falsy.
   - `assert_throws(fn, [message])`: Executes `fn()` inside a `try/catch` block and asserts that an exception was raised.
   - `run_tests(suite_map)`: Takes a map of test names to nullary functions, executes each with error isolation, prints per-test PASS/FAIL logs, and returns `true` if all passed.
+
+---
+
+## 6. Cooperative Concurrency Primitives
+
+Fibers in Unfish are lightweight, cooperative coroutines (green threads) operating within a single-threaded deterministic scheduler:
+
+| Function | Signature | Description |
+|---|---|---|
+| `channel([capacity])` | `([Number]) -> Channel` | Creates a new channel with optional fixed buffer capacity (default 0 for unbuffered). |
+| `send(channel, value)` | `(Channel, Any) -> Boolean` | Sends `value` into `channel`. Yields or buffers; returns `true` on delivery. Raises runtime error if closed. |
+| `recv(channel)` | `(Channel) -> Any` | Receives and returns next value from `channel`. Returns `null` if closed and empty. |
+| `close_channel(channel)` | `(Channel) -> Null` | Closes `channel` so no further values can be sent. |
+| `spawn(callable, ...args)` | `(Function, ...Any) -> Fiber` | Creates a new lightweight fiber and schedules it for execution. |
+| `yield([value])` | `([Any]) -> Any` | Cooperatively yields execution of the current fiber back to the scheduler. |
+| `run_scheduler()` | `() -> Number` | Executes runnable fibers until completion. Returns total fibers completed. |
+| `run_async(fn, ...args)` | `(Function, ...Any) -> Any` | Executes an async function, cooperatively awaits its returned Promise to completion, and unwraps the resolved value. |
+
+### Promises & Async / Await
+
+Unfish functions defined with `async function` return a first-class `Promise` object (`type_of(p) == "promise"`).
+* `await <expr>`: Evaluates `<expr>`; if `<expr>` is a `Promise`, suspends or drains scheduler tasks until the promise is settled, returning the resolved value (or raising unhandled rejection). If `<expr>` is not a promise, it returns `<expr>` unchanged. Must only appear within an `async function`.
+* `run_async(fn, ...args)`: Bridge function between synchronous top-level execution and asynchronous task graphs. Calls `fn(...args)`, awaits the resulting promise, runs any remaining scheduler tasks, and returns the result.
+
+---
+
+## 7. Systems & Raw Byte Buffers
+
+Raw contiguous byte arrays for low-level protocol parsing, binary files, and hardware interfacing:
+
+| Function | Signature | Description |
+|---|---|---|
+| `buffer(size)` | `(Number) -> Buffer` | Allocates a zero-initialized contiguous byte buffer of `size` bytes. |
+| `buffer_from_string(str)` | `(String) -> Buffer` | Copies UTF-8 bytes of `str` into a newly allocated buffer. |
+| `buffer_to_string(buf)` | `(Buffer) -> String` | Converts buffer bytes into a UTF-8 string. |
+| `buffer_size(buf)` | `(Buffer) -> Number` | Returns the capacity in bytes of `buf`. |
+| `buffer_get(buf, offset)` | `(Buffer, Number) -> Number` | Returns the byte at 0-based `offset` (`0..255`). Bounds-checked. |
+| `buffer_set(buf, offset, byte)` | `(Buffer, Number, Number) -> Number` | Sets the byte at `offset` to `byte & 0xff`. Bounds-checked. |
+| `buffer_fill(buf, byte)` | `(Buffer, Number) -> Buffer` | Sets every byte of `buf` to `byte & 0xff`. |
+| `buffer_slice(buf, start, [len])` | `(Buffer, Number, [Number]) -> Buffer` | Returns a newly allocated slice from `start` for `len` bytes. |
+| `buffer_read_u16_le(buf, offset)` | `(Buffer, Number) -> Number` | Reads 16-bit unsigned integer at `offset` in little-endian. |
+| `buffer_write_u16_le(buf, offset, val)`| `(Buffer, Number, Number) -> Number` | Writes 16-bit unsigned integer at `offset` in little-endian. |
+| `buffer_read_u32_le(buf, offset)` | `(Buffer, Number) -> Number` | Reads 32-bit unsigned integer at `offset` in little-endian. |
+| `buffer_write_u32_le(buf, offset, val)`| `(Buffer, Number, Number) -> Number` | Writes 32-bit unsigned integer at `offset` in little-endian. |
+| `buffer_read_i32_le(buf, offset)` | `(Buffer, Number) -> Number` | Reads 32-bit signed integer at `offset` in little-endian. |
+| `buffer_write_i32_le(buf, offset, val)`| `(Buffer, Number, Number) -> Number` | Writes 32-bit signed integer at `offset` in little-endian. |
+| `inspect(value)` | `(Any) -> Map` | Returns runtime introspection metadata (type, heap size, ref counts). |
+
+---
+
+## 8. Bitwise Operations & Hex Utilities
+
+Fixed-width conversions and 32-bit bitwise logic:
+
+| Function | Signature | Description |
+|---|---|---|
+| `u8(n)` | `(Number) -> Number` | Clamps to unsigned 8-bit integer (`0..255`). |
+| `i8(n)` | `(Number) -> Number` | Clamps to signed 8-bit integer (`-128..127`). |
+| `u16(n)` | `(Number) -> Number` | Clamps to unsigned 16-bit integer (`0..65535`). |
+| `i16(n)` | `(Number) -> Number` | Clamps to signed 16-bit integer (`-32768..32767`). |
+| `u32(n)` | `(Number) -> Number` | Clamps to unsigned 32-bit integer (`0..4294967295`). |
+| `i32(n)` | `(Number) -> Number` | Clamps to signed 32-bit integer (`-2147483648..2147483647`). |
+| `band(a, b)` | `(Number, Number) -> Number` | Bitwise AND (`a & b`). |
+| `bor(a, b)` | `(Number, Number) -> Number` | Bitwise OR (`a \| b`). |
+| `bxor(a, b)` | `(Number, Number) -> Number` | Bitwise XOR (`a ^ b`). |
+| `bnot(a)` | `(Number) -> Number` | Bitwise NOT (`~a`). |
+| `shl(a, b)` | `(Number, Number) -> Number` | Bitwise shift left (`a << b`). |
+| `shr(a, b)` | `(Number, Number) -> Number` | Logical bitwise shift right (`a >>> b`). |
+| `sar(a, b)` | `(Number, Number) -> Number` | Arithmetic bitwise shift right (`a >> b`). |
+| `to_hex(n)` | `(Number) -> String` | Formats integer as lowercase hexadecimal string. |
+| `from_hex(str)` | `(String) -> Number` | Parses hexadecimal string (with optional `0x` prefix) into Number. |
+| `buffer_to_hex(buf)` | `(Buffer) -> String` | Encodes entire buffer contents as lowercase hexadecimal string. |
+| `buffer_from_hex(str)` | `(String) -> Buffer` | Decodes hexadecimal string into a new raw byte buffer. |

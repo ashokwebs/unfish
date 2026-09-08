@@ -35,8 +35,16 @@ static char advance(JsonParser* p) {
 
 static UfValue parse_value(UfRuntime* rt, JsonParser* p);
 
+static inline int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 static UfValue parse_string(UfRuntime* rt, JsonParser* p) {
-    if (advance(p) != '"') {
+    skip_whitespace(p);
+    if (p->pos >= p->len || p->src[p->pos++] != '"') {
         p->has_error = true;
         return uf_val_null();
     }
@@ -64,6 +72,54 @@ static UfValue parse_string(UfRuntime* rt, JsonParser* p) {
                 case 'n':  c = '\n'; break;
                 case 'r':  c = '\r'; break;
                 case 't':  c = '\t'; break;
+                case 'u': {
+                    if (p->pos + 4 <= p->len) {
+                        int d0 = hex_digit(p->src[p->pos]);
+                        int d1 = hex_digit(p->src[p->pos + 1]);
+                        int d2 = hex_digit(p->src[p->pos + 2]);
+                        int d3 = hex_digit(p->src[p->pos + 3]);
+                        if (d0 >= 0 && d1 >= 0 && d2 >= 0 && d3 >= 0) {
+                            p->pos += 4;
+                            uint32_t cp = (uint32_t)((d0 << 12) | (d1 << 8) | (d2 << 4) | d3);
+                            if (cp >= 0xD800 && cp <= 0xDBFF && p->pos + 6 <= p->len &&
+                                p->src[p->pos] == '\\' && p->src[p->pos + 1] == 'u') {
+                                int s0 = hex_digit(p->src[p->pos + 2]);
+                                int s1 = hex_digit(p->src[p->pos + 3]);
+                                int s2 = hex_digit(p->src[p->pos + 4]);
+                                int s3 = hex_digit(p->src[p->pos + 5]);
+                                if (s0 >= 0 && s1 >= 0 && s2 >= 0 && s3 >= 0) {
+                                    uint32_t low = (uint32_t)((s0 << 12) | (s1 << 8) | (s2 << 4) | s3);
+                                    if (low >= 0xDC00 && low <= 0xDFFF) {
+                                        p->pos += 6;
+                                        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                                    }
+                                }
+                            }
+                            if (len + 4 >= cap) {
+                                cap = (cap * 2) + 8;
+                                buf = (char*)realloc(buf, cap);
+                            }
+                            if (cp <= 0x7F) {
+                                buf[len++] = (char)cp;
+                            } else if (cp <= 0x7FF) {
+                                buf[len++] = (char)(0xC0 | ((cp >> 6) & 0x1F));
+                                buf[len++] = (char)(0x80 | (cp & 0x3F));
+                            } else if (cp <= 0xFFFF) {
+                                buf[len++] = (char)(0xE0 | ((cp >> 12) & 0x0F));
+                                buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                buf[len++] = (char)(0x80 | (cp & 0x3F));
+                            } else {
+                                buf[len++] = (char)(0xF0 | ((cp >> 18) & 0x07));
+                                buf[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                                buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                buf[len++] = (char)(0x80 | (cp & 0x3F));
+                            }
+                            continue;
+                        }
+                    }
+                    c = esc;
+                    break;
+                }
                 default:   c = esc; break;
             }
         }
@@ -284,6 +340,24 @@ static void json_visit_leave(UfJsonVisited* vis) {
     if (vis->count > 0) vis->count--;
 }
 
+static void stringify_json_string(StringBuilder* sb, const char* s, size_t slen) {
+    sb_append(sb, "\"", 1);
+    for (size_t i = 0; i < slen; ++i) {
+        char c = s[i];
+        switch (c) {
+            case '"':  sb_append(sb, "\\\"", 2); break;
+            case '\\': sb_append(sb, "\\\\", 2); break;
+            case '\b': sb_append(sb, "\\b", 2); break;
+            case '\f': sb_append(sb, "\\f", 2); break;
+            case '\n': sb_append(sb, "\\n", 2); break;
+            case '\r': sb_append(sb, "\\r", 2); break;
+            case '\t': sb_append(sb, "\\t", 2); break;
+            default:   sb_append(sb, &c, 1); break;
+        }
+    }
+    sb_append(sb, "\"", 1);
+}
+
 /* Returns false (without raising anything itself) on a detected cycle, so
  * the top-level caller can free its StringBuilder/visited-set before
  * raising the catchable error — uf_runtime_error may longjmp out past this
@@ -313,23 +387,7 @@ static bool stringify_value(StringBuilder* sb, UfValue val, UfJsonVisited* vis) 
             return true;
         }
         case UF_VAL_STRING: {
-            sb_append(sb, "\"", 1);
-            const char* s = val.as.string->chars;
-            size_t slen = val.as.string->length;
-            for (size_t i = 0; i < slen; ++i) {
-                char c = s[i];
-                switch (c) {
-                    case '"':  sb_append(sb, "\\\"", 2); break;
-                    case '\\': sb_append(sb, "\\\\", 2); break;
-                    case '\b': sb_append(sb, "\\b", 2); break;
-                    case '\f': sb_append(sb, "\\f", 2); break;
-                    case '\n': sb_append(sb, "\\n", 2); break;
-                    case '\r': sb_append(sb, "\\r", 2); break;
-                    case '\t': sb_append(sb, "\\t", 2); break;
-                    default:   sb_append(sb, &c, 1); break;
-                }
-            }
-            sb_append(sb, "\"", 1);
+            stringify_json_string(sb, val.as.string->chars, val.as.string->length);
             return true;
         }
         case UF_VAL_ARRAY: {
@@ -355,9 +413,8 @@ static bool stringify_value(StringBuilder* sb, UfValue val, UfJsonVisited* vis) 
                 if (i > 0) sb_append(sb, ", ", 2);
                 UfValue k = map->order_keys[i];
                 char* k_str = uf_val_to_string(k);
-                sb_append(sb, "\"", 1);
-                sb_append(sb, k_str, strlen(k_str));
-                sb_append(sb, "\": ", 3);
+                stringify_json_string(sb, k_str, strlen(k_str));
+                sb_append(sb, ": ", 2);
                 free(k_str);
                 UfValue v = uf_map_get(map, k);
                 if (!stringify_value(sb, v, vis)) {

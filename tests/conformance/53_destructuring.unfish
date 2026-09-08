@@ -1,0 +1,79 @@
+# expect: 1
+# expect: 2
+# expect: 3
+# expect: 10
+# expect: 30
+# expect: 1
+# expect: [2, 3, 4, 5]
+# expect: 7
+# expect: 8
+# expect: null
+# expect: Alice
+# expect: 30
+# expect: 1
+# expect: 2
+# expect: 3
+# expect: 100
+# expect: 200
+# expect: 10
+# expect: 20
+# expect: 30
+# expect: 42
+# expect: []
+# expect: [2, 3]
+# expect: circle
+let [a, b, c] = [1, 2, 3]
+say a
+say b
+say c
+
+let [x, _, z] = [10, 99, 30]
+say x
+say z
+
+let [head, ...tail] = [1, 2, 3, 4, 5]
+say head
+say tail
+
+let [p, q, r] = [7, 8]
+say p
+say q
+say r
+
+let {name, age} = {"name": "Alice", "age": 30}
+say name
+say age
+
+let {first, ...rest} = {"first": 1, "second": 2, "third": 3}
+say first
+say rest["second"]
+say rest["third"]
+
+let m = 0
+let n = 0
+[m, n] = [100, 200]
+say m
+say n
+
+let [[inner1, inner2], outer] = [[10, 20], 30]
+say inner1
+say inner2
+say outer
+
+let [only, ...nothing] = [42]
+say only
+say nothing
+
+let nums = [1, 2, 3]
+match nums:
+    when [1, ...mrest]:
+        say mrest
+    else:
+        say "no match"
+
+let obj = {"kind": "circle", "radius": 5}
+match obj:
+    when {kind, radius}:
+        say kind
+    else:
+        say "unknown"

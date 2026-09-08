@@ -10,6 +10,7 @@ const char* uf_token_kind_name(UfTokenKind kind) {
         case UF_TOK_IDENTIFIER: return "IDENTIFIER";
         case UF_TOK_NUMBER:     return "NUMBER";
         case UF_TOK_STRING:     return "STRING";
+        case UF_TOK_FSTRING:    return "FSTRING";
         case UF_TOK_LET:        return "let";
         case UF_TOK_SAY:        return "say";
         case UF_TOK_FUNCTION:   return "function";
@@ -25,10 +26,16 @@ const char* uf_token_kind_name(UfTokenKind kind) {
         case UF_TOK_CONTINUE:   return "continue";
         case UF_TOK_TRY:        return "try";
         case UF_TOK_CATCH:      return "catch";
+        case UF_TOK_FINALLY:    return "finally";
         case UF_TOK_IMPORT:     return "import";
         case UF_TOK_FROM:       return "from";
         case UF_TOK_AS:         return "as";
         case UF_TOK_STRUCT:     return "struct";
+        case UF_TOK_ENUM:       return "enum";
+        case UF_TOK_TRAIT:      return "trait";
+        case UF_TOK_IMPL:       return "impl";
+        case UF_TOK_ASYNC:      return "async";
+        case UF_TOK_AWAIT:      return "await";
         case UF_TOK_MATCH:      return "match";
         case UF_TOK_WHEN:       return "when";
         case UF_TOK_AND:        return "and";
@@ -58,7 +65,11 @@ const char* uf_token_kind_name(UfTokenKind kind) {
         case UF_TOK_LBRACE:     return "{";
         case UF_TOK_RBRACE:     return "}";
         case UF_TOK_DOT:        return ".";
+        case UF_TOK_DOTDOTDOT: return "...";
+        case UF_TOK_PIPE:       return "|";
+        case UF_TOK_PIPE_RIGHT: return "|>";
     }
+
     return "<unknown>";
 }
 

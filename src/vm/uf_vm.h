@@ -29,6 +29,7 @@ typedef struct UfVMFrame {
     UfClosureObject* closure;
     uint8_t* ip;
     UfValue* slots;
+    size_t argc;
 } UfVMFrame;
 
 #define UF_VM_HANDLERS_MAX 64
@@ -63,7 +64,9 @@ void uf_vm_init(UfVM* vm, UfRuntime* rt);
 void uf_vm_free(UfVM* vm);
 
 static inline void uf_vm_push(UfVM* vm, UfValue value) {
-    *vm->stack_top++ = value;
+    if (vm->stack_top < vm->stack + UF_VM_STACK_MAX) {
+        *vm->stack_top++ = value;
+    }
 }
 
 static inline UfValue uf_vm_pop(UfVM* vm) {
