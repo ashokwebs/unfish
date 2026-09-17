@@ -80,7 +80,8 @@ static void print_usage(const char* prog) {
     printf("  %s test [path] [--vm] [--regvm] [--strict] [--filter <pat>] Run test suites\n", prog);
     printf("  %s doc [path] [-o <out>] [--format md|html] Generate API documentation\n", prog);
     printf("  %s pkg <init|check|run|test|build> Manage Unfish packages\n", prog);
-    printf("  %s learn [lesson_id]              Launch interactive CLI tutorial\n", prog);
+    printf("  %s studio [--port <p>]            Launch Unfish Studio browser IDE\n", prog);
+    printf("  %s learn [--serve|--web] [id]     Launch interactive tutorial (CLI or web)\n", prog);
     printf("  %s playground [--port <p>]        Launch interactive Web Playground\n", prog);
     printf("  %s lsp                            Launch Language Server Protocol (LSP) server\n", prog);
     printf("  %s repl                           Launch interactive REPL\n", prog);
@@ -1303,6 +1304,26 @@ int main(int argc, char* argv[]) {
 
     if (strcmp(cmd, "learn") == 0) {
         arg_idx++;
+        bool serve_web = false;
+        int port = 8080;
+        while (arg_idx < argc && (strcmp(argv[arg_idx], "--serve") == 0 || strcmp(argv[arg_idx], "--web") == 0 || strcmp(argv[arg_idx], "--port") == 0 || strcmp(argv[arg_idx], "-p") == 0)) {
+            if ((strcmp(argv[arg_idx], "--port") == 0 || strcmp(argv[arg_idx], "-p") == 0) && arg_idx + 1 < argc) {
+                port = atoi(argv[arg_idx + 1]);
+                arg_idx += 2;
+                serve_web = true;
+            } else {
+                serve_web = true;
+                arg_idx++;
+            }
+        }
+        if (serve_web) {
+            UfPlaygroundOptions opts;
+            memset(&opts, 0, sizeof(opts));
+            opts.port = port;
+            opts.web_root = "web";
+            opts.open_browser = true;
+            return uf_playground_start(&opts);
+        }
         if (arg_idx < argc && (strcmp(argv[arg_idx], "--list") == 0 || strcmp(argv[arg_idx], "list") == 0 || strcmp(argv[arg_idx], "-l") == 0)) {
             uf_learn_list();
             return 0;
@@ -1315,7 +1336,7 @@ int main(int argc, char* argv[]) {
         return uf_learn_start(lesson_num);
     }
 
-    if (strcmp(cmd, "playground") == 0) {
+    if (strcmp(cmd, "studio") == 0 || strcmp(cmd, "playground") == 0) {
         arg_idx++;
         UfPlaygroundOptions opts;
         memset(&opts, 0, sizeof(opts));

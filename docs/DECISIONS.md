@@ -591,3 +591,30 @@
      - Sandboxed targets (`__wasm__`, `__wasi__`, `UF_EMBEDDED`) safely guard `sys.exec` (returning `-1`) and `sys.set_env` (returning `false`) to avoid WASI link errors.
 * **Consequences**: Unfish provides a comprehensive, production-ready standard library with 100% 5-way differential parity across all five runtime engines.
 
+## ADR 038: Unfish Web Ecosystem Architecture (Studio IDE, Learn Platform & Dual-Engine Bridge)
+* **Date**: Ecosystem Release (v2.1.0)
+* **Status**: Accepted
+* **Context**: A serious programming language requires a first-class web experience for both software development and interactive education. The ecosystem requires an in-browser IDE with multi-file workspaces, visual blocks synchronization, step debugging, and multiple execution engines, alongside a dedicated documentation platform with runnable in-place code snippets, computer architecture visualization ("Learn the Computer"), and instant search.
+* **Decision**:
+  1. **Dual Execution Architecture (Native C99 Bridge + In-Browser Engine)**:
+     - When running locally via `unfish studio` or `unfish learn --web`, web applications connect to the native C99 HTTP server (`src/tooling/uf_playground.c`), routing execution to native binaries via `/api/run` (AST Interpreter), `/api/run-vm` (Stack VM), `/api/run-regvm` (Register VM), `/api/tokens`, `/api/disasm`, `/api/format`, and `/api/check`.
+     - For standalone static deployment (e.g. GitHub Pages), `web/unfish_engine.js` provides a complete, zero-dependency browser runtime implementing a tokenizing scanner, Pratt parser, bytecode disassembler, and tree-walking interpreter supporting all language features (functions, closures, structs, enums, pattern matching, maps, arrays, destructuring, and builtins).
+  2. **Unfish Studio (`web/studio.html`)**:
+     - Modern IDE layout with activity bar, project explorer, multi-file workspace (`unfish.toml`, `src/`, `tests/`), syntax-highlighted editor with line numbers, clickable breakpoint gutters, search/replace, and auto-indentation.
+     - Two-way interactive visual block studio with palette insertion, reordering, and instant code synchronization.
+     - Multi-pane drawer: Output Console with ANSI color emulation, Problems with jump-to-line, Step Debugger (call stack and variables table), AST tree inspector, Bytecode disassembler, and Tokens inspector.
+     - Project export to JSON and shareable permalinks via compressed URL hashes.
+  3. **Unfish Learn Platform (`web/learn.html`)**:
+     - Comprehensive 22-chapter progressive language tutorial.
+     - In-place interactive code runners with "Open in Studio" integration.
+     - "Learn the Computer through Unfish": 5-layer interactive pipeline visualizer showing Tokens -> AST -> Scopes -> Bytecode ISA -> Runtime Memory layout for any user code.
+     - Searchable Standard Library Reference across all 6 modules and builtins.
+     - Global instant search modal (<kbd>Ctrl+K</kbd>).
+  4. **Unified Ecosystem Portal (`web/index.html`)**:
+     - Central landing page seamlessly connecting Studio, Learn, Documentation, and GitHub.
+     - Embedded live try-it-out playground with sample algorithm switcher.
+  5. **CLI Tooling Integration**:
+     - `unfish studio [--port <p>]` launches the web IDE and opens the browser.
+     - `unfish learn [--serve|--web] [--port <p>]` launches the web documentation platform.
+* **Consequences**: Unfish now features a complete, professional web ecosystem with zero fake mocks, real multi-tier execution, and an educational bridge from visual blocks to computer architecture.
+

@@ -57,7 +57,8 @@ The unified `unfish` CLI offers commands across the entire software development 
 | `unfish test [path] [--filter <pat>]` | Discover and run `.unfish` test suites |
 | `unfish doc [path] [-o <out>] [--format md\|html]` | Generate API documentation from `##` docstrings |
 | `unfish pkg <init\|check\|run\|test\|build>` | Manage Unfish packages via `unfish.toml` |
-| `unfish learn [lesson_id]` | Launch the interactive CLI tutorial |
+| `unfish studio [--port <p>]` | Launch Unfish Studio browser IDE with multi-file workspace, visual blocks, and debugging |
+| `unfish learn [--serve\|--web] [id]` | Launch interactive tutorial (CLI lesson or web documentation) |
 | `unfish playground [--port <p>]` | Launch the browser playground and visual block editor |
 | `unfish version` | Display version and build information |
 

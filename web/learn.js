@@ -1,0 +1,248 @@
+/**
+ * 🐡 Unfish Learn — Documentation & Education Platform Controller
+ */
+
+(function() {
+  'use strict';
+
+  const engine = new window.UnfishEngine();
+
+  // Sidebar navigation
+  const navItems = document.querySelectorAll('.nav-item');
+  const chapters = document.querySelectorAll('.doc-chapter');
+
+  navItems.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = item.dataset.target;
+      switchChapter(target);
+    });
+  });
+
+  function switchChapter(targetId) {
+    navItems.forEach(n => n.classList.toggle('active', n.dataset.target === targetId));
+    chapters.forEach(c => c.classList.toggle('active', c.id === `doc-${targetId}`));
+    window.location.hash = targetId;
+    document.getElementById('learn-content').scrollTop = 0;
+  }
+
+  // Handle URL hash on load
+  if (window.location.hash) {
+    const hash = window.location.hash.substring(1);
+    const match = document.getElementById(`doc-${hash}`);
+    if (match) {
+      switchChapter(hash);
+    }
+  }
+
+  // Interactive Code Runners
+  document.querySelectorAll('.code-runner').forEach(runner => {
+    const btnRun = runner.querySelector('.btn-run-example');
+    const btnOpenStudio = runner.querySelector('.btn-open-studio');
+    const editor = runner.querySelector('.runner-editor');
+    const output = runner.querySelector('.runner-output');
+
+    if (btnRun && editor && output) {
+      btnRun.addEventListener('click', () => {
+        const code = editor.value;
+        btnRun.textContent = 'Running...';
+        btnRun.disabled = true;
+
+        setTimeout(() => {
+          const res = engine.run(code);
+          output.classList.add('active');
+          if (res.exit_code === 0) {
+            output.textContent = res.stdout || '(Program completed with no output)';
+            output.style.color = 'var(--accent-green)';
+          } else {
+            output.textContent = res.stderr || 'Execution failed';
+            output.style.color = 'var(--accent-red)';
+          }
+          btnRun.textContent = '▶ Run in Place';
+          btnRun.disabled = false;
+        }, 30);
+      });
+    }
+
+    if (btnOpenStudio && editor) {
+      btnOpenStudio.addEventListener('click', () => {
+        const code = editor.value;
+        const proj = {
+          'unfish.toml': '[package]\nname = "learn_example"\nversion = "1.0.0"\nentry = "src/main.uf"',
+          'src/main.uf': code
+        };
+        const encoded = btoa(encodeURIComponent(JSON.stringify(proj)));
+        window.open(`studio.html#project=${encoded}`, '_blank');
+      });
+    }
+  });
+
+  // "Learn the Computer" Pipeline Visualizer
+  const pipelineCodeInput = document.getElementById('pipeline-code-input');
+  const btnPipelineAnalyze = document.getElementById('btn-pipeline-analyze');
+  const pipelineSteps = document.querySelectorAll('.pipeline-step');
+  const pipelineOutputView = document.getElementById('pipeline-output-view');
+
+  let currentPipelineData = null;
+  let activePipelineStage = 'tokens';
+
+  function analyzePipeline() {
+    const code = pipelineCodeInput.value;
+    try {
+      const { tokens } = engine.tokenize(code);
+      const ast = engine.parse(code);
+      const disasm = engine.disassemble(code);
+      const runRes = engine.run(code);
+
+      currentPipelineData = {
+        tokens: tokens.map(t => t.toString()).join('\n'),
+        ast: engine.formatAst(ast),
+        disasm: disasm,
+        output: runRes.exit_code === 0 ? (runRes.stdout || '(no output)') : `Error:\n${runRes.stderr}`,
+        memory: `[UNFISH RUNTIME HEAP SNAPSHOT]
+• Program Execution Status: ${runRes.exit_code === 0 ? 'Success (Exit 0)' : 'Runtime Error'}
+• Value Representation: 16-byte Tagged Union (UfValue)
+• Object Headers: UfObj (next, type, is_marked)
+• Active Call Frames: 1 (<main>)
+• Temporary GC Roots: protected in rt->temp_roots
+• Active Scheduler Fibers: 0 pending
+• Total Parsed Statements: ${ast.body ? ast.body.length : 0}`
+      };
+
+      updatePipelineDisplay();
+    } catch (err) {
+      pipelineOutputView.textContent = `Pipeline Error: ${err.message}`;
+    }
+  }
+
+  function updatePipelineDisplay() {
+    if (!currentPipelineData) return;
+    pipelineOutputView.textContent = currentPipelineData[activePipelineStage] || '(no data)';
+  }
+
+  if (btnPipelineAnalyze) {
+    btnPipelineAnalyze.addEventListener('click', analyzePipeline);
+  }
+
+  pipelineSteps.forEach(step => {
+    step.addEventListener('click', () => {
+      pipelineSteps.forEach(s => s.classList.remove('active'));
+      step.classList.add('active');
+      activePipelineStage = step.dataset.stage;
+      updatePipelineDisplay();
+    });
+  });
+
+  // Initial analysis
+  if (pipelineCodeInput) {
+    analyzePipeline();
+  }
+
+  // Global Search
+  const searchInput = document.getElementById('global-search-input');
+  const searchModal = document.getElementById('search-modal');
+  const modalSearchInput = document.getElementById('modal-search-input');
+  const searchResultsList = document.getElementById('search-results-list');
+
+  const SEARCH_INDEX = [
+    { target: 'intro', title: 'What is Unfish?', text: 'general-purpose programming language pure ANSI C99 zero dependencies philosophy' },
+    { target: 'install', title: 'Installation & Setup', text: 'make gcc clang build from source test-asan benchmarks' },
+    { target: 'first-program', title: 'Your First Program', text: 'fibonacci recursion say print function let' },
+    { target: 'repl-cli', title: 'REPL & Toolchain', text: 'unfish run vm regvm build wasm debug format studio lsp repl' },
+    { target: 'learn-computer', title: 'Learn the Computer', text: 'pipeline tokens ast bytecode isa memory gc layout virtual machine' },
+    { target: 'tut-01', title: '01. Hello & Text Output', text: 'say print string interpolation f-string formatted text' },
+    { target: 'tut-02', title: '02. Values & Types', text: 'number string boolean null array map type_of tagged union 16 bytes' },
+    { target: 'tut-03', title: '03. Variables & Scope', text: 'let assignment scoping lexical blocks shadowing' },
+    { target: 'tut-04', title: '04. Expressions & Operators', text: 'pratt parser arithmetic comparison logical and or not pipe' },
+    { target: 'tut-05', title: '05. Conditions & Logic', text: 'if else off-side rule indentation colon' },
+    { target: 'tut-06', title: '06. Loops & Iteration', text: 'while for in repeat times break continue' },
+    { target: 'tut-07', title: '07. Functions & Defaults', text: 'function fn return default parameters recursion' },
+    { target: 'tut-09', title: '09. Closures & Pipelines', text: 'lambda higher order functions map filter reduce first class' },
+    { target: 'tut-12', title: '12. Structs & Methods', text: 'struct fields methods self object oriented' },
+    { target: 'tut-13', title: '13. Enums & Matching', text: 'enum sum types pattern matching match when variants' },
+    { target: 'tut-17', title: '17. Fibers & Concurrency', text: 'cooperative concurrency spawn yield channel send recv scheduler csp' },
+    { target: 'stdlib-core', title: 'Core Builtins', text: 'len push pop range concat flatten zip pad_start pad_end trim clock assert' },
+    { target: 'stdlib-sys', title: 'Module: sys', text: 'platform exit args cwd set_env exec system' },
+    { target: 'stdlib-fs', title: 'Module: fs', text: 'read_text write_text append_text exists delete_file list_dir mkdir is_file' }
+  ];
+
+  function openSearch() {
+    searchModal.classList.add('active');
+    modalSearchInput.value = '';
+    renderSearchResults('');
+    modalSearchInput.focus();
+  }
+
+  function closeSearch() {
+    searchModal.classList.remove('active');
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('focus', openSearch);
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      openSearch();
+    } else if (e.key === 'Escape') {
+      closeSearch();
+    }
+  });
+
+  searchModal.addEventListener('click', (e) => {
+    if (e.target === searchModal) closeSearch();
+  });
+
+  modalSearchInput.addEventListener('input', () => {
+    renderSearchResults(modalSearchInput.value.trim().toLowerCase());
+  });
+
+  function renderSearchResults(query) {
+    searchResultsList.innerHTML = '';
+    if (!query) {
+      searchResultsList.innerHTML = '<div style="padding:12px 16px; color:var(--text-muted); font-size:0.85rem;">Type to search documentation and tutorials...</div>';
+      return;
+    }
+
+    const matches = SEARCH_INDEX.filter(item => {
+      return item.title.toLowerCase().includes(query) || item.text.toLowerCase().includes(query);
+    });
+
+    if (matches.length === 0) {
+      searchResultsList.innerHTML = '<div style="padding:12px 16px; color:var(--text-muted); font-size:0.85rem;">No results found.</div>';
+      return;
+    }
+
+    matches.forEach(m => {
+      const el = document.createElement('div');
+      el.className = 'search-result-item';
+      el.innerHTML = `
+        <span class="result-title">${m.title}</span>
+        <span class="result-snippet">${m.text}</span>
+      `;
+      el.addEventListener('click', () => {
+        closeSearch();
+        switchChapter(m.target);
+      });
+      searchResultsList.appendChild(el);
+    });
+  }
+
+  // Theme toggle
+  const btnThemeToggle = document.getElementById('btn-theme-toggle');
+  if (btnThemeToggle) {
+    btnThemeToggle.addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme');
+      const next = cur === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('unfish_theme', next);
+    });
+  }
+
+  const savedTheme = localStorage.getItem('unfish_theme');
+  if (savedTheme) {
+    document.documentElement.setAttribute('data-theme', savedTheme);
+  }
+
+})();

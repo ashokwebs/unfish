@@ -154,7 +154,7 @@ static int execute_command_capture(const char* const argv[], char** out_str, cha
     return 1;
 }
 
-static void handle_api_run(int client_fd, const char* body, bool use_vm) {
+static void handle_api_run(int client_fd, const char* body, int engine_mode) {
     char tmp_path[] = "/tmp/unfish_play_XXXXXX";
     int fd = mkstemp(tmp_path);
     if (fd < 0) {
@@ -168,12 +168,16 @@ static void handle_api_run(int client_fd, const char* body, bool use_vm) {
     close(fd);
 
     const char* self_bin = uf_find_self_binary();
-    const char* argv[6];
+    const char* argv[7];
     int argc = 0;
     argv[argc++] = self_bin;
     argv[argc++] = "run";
-    if (use_vm) {
+    if (engine_mode == 1) {
         argv[argc++] = "--vm";
+    } else if (engine_mode == 2) {
+        argv[argc++] = "--regvm";
+    } else if (engine_mode == 3) {
+        argv[argc++] = "--wasm";
     }
     argv[argc++] = tmp_path;
     argv[argc] = NULL;
@@ -257,11 +261,25 @@ static void handle_static_file(int client_fd, const char* web_root, const char* 
     char file_path[1024];
     if (strcmp(url_path, "/") == 0 || strcmp(url_path, "/index.html") == 0) {
         snprintf(file_path, sizeof(file_path), "%s/index.html", web_root);
+    } else if (strcmp(url_path, "/studio") == 0 || strcmp(url_path, "/studio/") == 0 || strcmp(url_path, "/studio.html") == 0) {
+        snprintf(file_path, sizeof(file_path), "%s/studio.html", web_root);
+    } else if (strcmp(url_path, "/learn") == 0 || strcmp(url_path, "/learn/") == 0 || strcmp(url_path, "/learn.html") == 0) {
+        snprintf(file_path, sizeof(file_path), "%s/learn.html", web_root);
     } else {
         snprintf(file_path, sizeof(file_path), "%s%s", web_root, url_path);
     }
 
     FILE* f = fopen(file_path, "rb");
+    if (!f && !strrchr(url_path, '.')) {
+        char try_html[1024];
+        snprintf(try_html, sizeof(try_html), "%s%s.html", web_root, url_path);
+        f = fopen(try_html, "rb");
+        if (f) {
+            strncpy(file_path, try_html, sizeof(file_path) - 1);
+            file_path[sizeof(file_path) - 1] = '\0';
+        }
+    }
+
     if (!f) {
         send_response(client_fd, 404, "Not Found", "text/plain", "File Not Found", 14);
         return;
@@ -387,19 +405,29 @@ int uf_playground_start(const UfPlaygroundOptions* options) {
         if (strcmp(method, "OPTIONS") == 0) {
             send_response(client_fd, 204, "No Content", "text/plain", "", 0);
         } else if (strcmp(url, "/api/run") == 0 && strcmp(method, "POST") == 0) {
-            handle_api_run(client_fd, body_start, false);
+            handle_api_run(client_fd, body_start, 0);
         } else if (strcmp(url, "/api/run-vm") == 0 && strcmp(method, "POST") == 0) {
-            handle_api_run(client_fd, body_start, true);
+            handle_api_run(client_fd, body_start, 1);
+        } else if (strcmp(url, "/api/run-regvm") == 0 && strcmp(method, "POST") == 0) {
+            handle_api_run(client_fd, body_start, 2);
+        } else if (strcmp(url, "/api/run-wasm") == 0 && strcmp(method, "POST") == 0) {
+            handle_api_run(client_fd, body_start, 3);
         } else if (strcmp(url, "/api/blocks") == 0 && strcmp(method, "POST") == 0) {
             handle_api_command(client_fd, "blocks-export", body_start);
         } else if (strcmp(url, "/api/blocks-import") == 0 && strcmp(method, "POST") == 0) {
             handle_api_command(client_fd, "blocks-import", body_start);
         } else if (strcmp(url, "/api/ast") == 0 && strcmp(method, "POST") == 0) {
             handle_api_command(client_fd, "ast", body_start);
+        } else if (strcmp(url, "/api/tokens") == 0 && strcmp(method, "POST") == 0) {
+            handle_api_command(client_fd, "tokens", body_start);
+        } else if (strcmp(url, "/api/disasm") == 0 && strcmp(method, "POST") == 0) {
+            handle_api_command(client_fd, "disasm", body_start);
+        } else if (strcmp(url, "/api/check") == 0 && strcmp(method, "POST") == 0) {
+            handle_api_command(client_fd, "check", body_start);
         } else if (strcmp(url, "/api/format") == 0 && strcmp(method, "POST") == 0) {
             handle_api_command(client_fd, "format", body_start);
         } else if (strcmp(url, "/api/status") == 0 && strcmp(method, "GET") == 0) {
-            const char* status_body = "{\"status\":\"ok\",\"version\":\"" UF_VERSION_STRING "\"}";
+            const char* status_body = "{\"status\":\"ok\",\"version\":\"" UF_VERSION_STRING "\",\"features\":[\"ast\",\"vm\",\"regvm\",\"wasm\",\"disasm\",\"tokens\",\"blocks\",\"check\"]}";
             send_response(client_fd, 200, "OK", "application/json", status_body, strlen(status_body));
         } else if (strcmp(url, "/api/shutdown") == 0) {
             const char* shut_body = "{\"status\":\"stopping\"}";

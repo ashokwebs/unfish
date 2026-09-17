@@ -9,7 +9,7 @@
 
 ### COMPLETE (100% Implemented & Verified)
 * **Formal Language Specification & Grammar**: EBNF, lexical rules, off-side indentation, operator precedence table (`docs/LANGUAGE_SPEC.md`).
-* **Complete Documentation Architecture**: 37 Architectural Decision Records (ADRs 001 through 037) in `docs/DECISIONS.md`.
+* **Complete Documentation Architecture**: 38 Architectural Decision Records (ADRs 001 through 038) in `docs/DECISIONS.md`.
 * **Lexer**: UTF-8 scanner emitting typed tokens (`UfToken`) with source spans, indentation stack (`INDENT`, `DEDENT`, `NEWLINE`), string escapes, number scanning, brackets (`[`, `]`), braces (`{`, `}`), dot (`.`), type symbols (`:`, `->`), match syntax (`match`, `case`, `_`), and diagnostics.
 * **AST Data Structures**: Strongly typed AST nodes with source span preservation (`UfExpr`, `UfStmt`, `UfProgram`), supporting functions, closures, structs, patterns, and type annotations.
 * **AST Pretty Printer**: S-expression tree printer (`uf_ast_print`) supporting all expression/statement kinds.
@@ -53,9 +53,13 @@
   - Traits & Interfaces (`trait`, `impl`, dynamic dispatch).
   - Parametric Generics (`<T: Bound>`, monomorphization).
   - Asynchronous Concurrency (`async`, `await`, `Promise`).
-  - Interactive Visual Block Studio (`unfish playground`, two-way canvas editing, toolbox palette, real-time sync).
+  - Interactive Visual Block Studio (`unfish studio`, two-way canvas editing, toolbox palette, real-time sync).
   - Embedded ARM Runtime Profile (`--embedded`, `--arm`, bare-metal freestanding profile for ARM Cortex-M).
-* **Unified CLI (`unfish`)**: Subcommands: `run`, `check`, `ast`, `tokens`, `repl`, `format`, `debug`, `trace`, `blocks-export`, `blocks-import`, `compile`, `disasm`, `emit-c`, `build`, `test`, `doc`, `pkg`, `learn`, `playground`, `lsp`, `version`.
+* **Unfish Web Ecosystem (v2.1.0)**:
+  - **Unfish Studio**: Real browser IDE with multi-file workspace (`unfish.toml`, `src/`, `tests/`), line numbers, clickable breakpoint gutters, auto-indentation, search & replace, 2-way visual blocks studio, multi-engine execution (AST, VM, RegVM), step debugger, AST inspector, bytecode disassembler, tokens inspector, and shareable project URLs.
+  - **Unfish Learn**: Dedicated learning & documentation platform with 22-chapter progressive tutorial, in-place runnable code snippets, "Learn the Computer through Unfish" 5-layer architectural visualizer, searchable standard library reference, and instant search (<kbd>Ctrl+K</kbd>).
+  - **Unfish Ecosystem Portal**: Central landing page seamlessly connecting Studio, Learn, CLI, and GitHub.
+* **Unified CLI (`unfish`)**: Subcommands: `run`, `check`, `ast`, `tokens`, `repl`, `format`, `debug`, `trace`, `blocks-export`, `blocks-import`, `compile`, `disasm`, `emit-c`, `build`, `test`, `doc`, `pkg`, `learn`, `studio`, `playground`, `lsp`, `version`.
 
 ### PARTIAL
 * *None.* (All roadmap phases 0 through 5 are 100% complete and operational).

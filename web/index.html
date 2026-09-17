@@ -3,242 +3,274 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🐡 Unfish Web Playground & Visual Block Studio</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>🐡 Unfish — A Programming Language That Grows With You</title>
+  <link rel="stylesheet" href="portal.css">
 </head>
 <body>
-  <div class="app-container">
-    <!-- Top Toolbar -->
-    <header class="toolbar">
-      <div class="brand">
-        <span class="logo">🐡</span>
-        <span class="brand-title">Unfish</span>
-        <span class="badge">v2.0.0</span>
+  <!-- Header -->
+  <header class="portal-header">
+    <a href="index.html" class="portal-brand">
+      <span class="portal-logo">🐡</span>
+      <span class="portal-name">Unfish</span>
+    </a>
+
+    <nav class="portal-nav">
+      <a href="studio.html" class="nav-link">Studio IDE</a>
+      <a href="learn.html" class="nav-link">Learn &amp; Tutorials</a>
+      <a href="learn.html#stdlib-core" class="nav-link">Documentation</a>
+      <a href="learn.html#learn-computer" class="nav-link">Learn the Computer</a>
+      <a href="https://github.com/google/unfish" target="_blank" class="nav-link">GitHub</a>
+      <a href="studio.html" class="btn btn-primary">Launch Studio</a>
+    </nav>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-pill">
+      <span>⚡ v2.0 Released</span> • <span>Pure ANSI C99</span> • <span>Zero Dependencies</span>
+    </div>
+
+    <h1 class="hero-title">
+      A programming language that grows with you.
+    </h1>
+
+    <p class="hero-subtitle">
+      From interactive visual blocks to clean indentation-based text, through algorithms and data structures, down to bytecode virtual machines, memory layouts, and native C99/WebAssembly compilation.
+    </p>
+
+    <div class="hero-cta-group">
+      <a href="studio.html" class="btn btn-primary btn-lg">
+        🚀 Launch Unfish Studio
+      </a>
+      <a href="learn.html" class="btn btn-lg">
+        📚 Start Learning Unfish
+      </a>
+    </div>
+  </section>
+
+  <!-- Interactive Mini Playground -->
+  <section class="interactive-showcase">
+    <div class="showcase-card">
+      <div class="showcase-header">
+        <div style="display:flex; align-items:center; gap:0.6rem;">
+          <span style="font-size:1.1rem;">🐡</span>
+          <span style="font-weight:700; font-size:0.9rem; color:var(--text-title);">Try Unfish Live</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:0.6rem;">
+          <select id="quick-example-select" class="showcase-select">
+            <option value="hello">01. Hello &amp; Interpolation</option>
+            <option value="fib">02. Recursive Fibonacci</option>
+            <option value="structs">03. Structs &amp; Methods</option>
+            <option value="matching">04. Enums &amp; Pattern Matching</option>
+          </select>
+
+          <button id="btn-quick-run" class="btn btn-primary" style="padding:5px 12px; font-size:0.82rem;">
+            ▶ Run
+          </button>
+
+          <button id="btn-open-in-studio" class="btn" style="padding:5px 12px; font-size:0.82rem;">
+            Open in Studio ↗
+          </button>
+        </div>
       </div>
 
-      <div class="controls">
-        <label for="example-select">Example:</label>
-        <select id="example-select" class="select-input">
-          <option value="hello">Hello & Interpolation</option>
-          <option value="enums">Enums & Pattern Matching</option>
-          <option value="structs">Structs & Methods</option>
-          <option value="destructure">Destructuring & Rest</option>
-          <option value="closures">Closures & Higher-Order</option>
-          <option value="fibonacci">Fibonacci & Recursion</option>
-          <option value="sorting">Bubble Sort</option>
-        </select>
+      <div class="showcase-grid">
+        <div class="showcase-editor-pane">
+          <textarea id="quick-editor" class="showcase-textarea" spellcheck="false"></textarea>
+        </div>
 
-        <button id="btn-run" class="btn btn-primary" title="Run program (Ctrl+Enter)">
-          <span class="icon">▶</span> Run
-        </button>
+        <div class="showcase-terminal-pane" id="quick-terminal">
+          <span style="color:var(--text-muted);">Click 'Run' to execute in the browser engine.</span>
+        </div>
+      </div>
+    </div>
+  </section>
 
-        <button id="btn-vm" class="btn btn-secondary" title="Run in Bytecode VM">
-          ⚡ VM
-        </button>
-
-        <button id="btn-format" class="btn btn-secondary" title="Format code cleanly">
-          ✨ Format
-        </button>
-
-        <button id="btn-clear" class="btn btn-ghost" title="Clear console">
-          🗑️ Clear
-        </button>
+  <!-- Architectural Pillars -->
+  <section class="pillars-section">
+    <div class="section-container">
+      <div class="section-header">
+        <div class="section-tag">Core Architecture</div>
+        <h2 class="section-title">Designed for Intellectual Ascent</h2>
       </div>
 
-      <div class="status-indicator">
-        <span id="backend-status" class="status-badge live">● Ready</span>
+      <div class="pillars-grid">
+        <div class="pillar-card">
+          <div class="pillar-icon">🧩</div>
+          <h3 class="pillar-title">Visual Blocks ↔ Source Code</h3>
+          <p class="pillar-text">
+            Bi-directional synchronization between interactive visual blocks and clean text. Learn the mental model through visual logic, then seamlessly transition to human-readable source code.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon">⚡</div>
+          <h3 class="pillar-title">5-Way Differential Parity</h3>
+          <p class="pillar-text">
+            Guaranteed 100% byte-identical execution across five execution engines: AST Tree-Walking Interpreter, Stack Bytecode VM, Register VM, Native C99 compiler, and WebAssembly.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon">🔬</div>
+          <h3 class="pillar-title">Learn the Computer</h3>
+          <p class="pillar-text">
+            Never hide how software actually works. Inspect the token stream, Pratt AST, symbol scopes, virtual machine bytecode, and heap object memory layout for any program.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon">🏛️</div>
+          <h3 class="pillar-title">Modern Systems Semantics</h3>
+          <p class="pillar-text">
+            First-class structs with methods, algebraic enums with pattern matching, cooperative fibers with CSP channels, and contiguous byte buffers with little-endian access.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon">🛡️</div>
+          <h3 class="pillar-title">Memory Safe &amp; Leak Free</h3>
+          <p class="pillar-text">
+            Object-tracked Mark-and-Sweep garbage collection with temporary root protection stacks. Verified 100% clean under AddressSanitizer and UndefinedBehaviorSanitizer.
+          </p>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon">💻</div>
+          <h3 class="pillar-title">Zero External Dependencies</h3>
+          <p class="pillar-text">
+            Written in clean, warning-free ANSI C99 with zero third-party dependencies. Runs on Linux, macOS, Windows, modern browsers via WASM, and bare-metal embedded ARM Cortex-M.
+          </p>
+        </div>
       </div>
-    </header>
+    </div>
+  </section>
 
-    <!-- Main Workspace -->
-    <main class="workspace">
-      <!-- Left: Editor Pane -->
-      <section class="pane editor-pane">
-        <div class="pane-header">
-          <span class="pane-title">Source Code (Unfish)</span>
-          <span class="shortcut-tip">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run</span>
-        </div>
-        <div class="editor-wrapper">
-          <div id="line-numbers" class="line-numbers">1</div>
-          <textarea id="code-editor" class="code-editor" spellcheck="false" placeholder="Write Unfish code here..."></textarea>
-        </div>
-      </section>
+  <!-- Quick Start CLI -->
+  <section class="quickstart-section">
+    <div class="section-container">
+      <div class="section-header">
+        <div class="section-tag">Developer Setup</div>
+        <h2 class="section-title">Build &amp; Run in Seconds</h2>
+      </div>
 
-      <!-- Right: Tabbed Output / Visualizer Pane -->
-      <section class="pane output-pane">
-        <nav class="tabs">
-          <button class="tab-btn active" data-tab="console">Console</button>
-          <button class="tab-btn" data-tab="blocks">Visual Blocks Studio</button>
-          <button class="tab-btn" data-tab="ast">AST Inspector</button>
-          <button class="tab-btn" data-tab="cheatsheet">Cheatsheet</button>
-        </nav>
+      <div class="quickstart-box">
+        <span class="quickstart-comment"># 1. Clone repository</span><br>
+        <span class="quickstart-cmd">git clone https://github.com/google/unfish.git</span><br>
+        <span class="quickstart-cmd">cd unfish</span><br><br>
 
-        <!-- Tab 1: Terminal Console -->
-        <div id="tab-console" class="tab-content active">
-          <div class="console-toolbar">
-            <span id="execution-stats" class="execution-stats">Execution status: Idle</span>
-          </div>
-          <div id="console-output" class="terminal-view">
-            <span class="terminal-line system">🐡 Welcome to Unfish Studio v2.0! Select an example or write code and click Run.</span>
-          </div>
-        </div>
+        <span class="quickstart-comment"># 2. Build the unified binary (compiles with gcc or clang in &lt; 2 seconds)</span><br>
+        <span class="quickstart-cmd">make -j4</span><br><br>
 
-        <!-- Tab 2: Visual Blocks Editor & Studio -->
-        <div id="tab-blocks" class="tab-content blocks-tab-layout">
-          <div class="blocks-editor-toolbar">
-            <div class="blocks-toolbar-left">
-              <span class="toolbar-label">Interactive Blocks Canvas</span>
-              <span id="blocks-sync-status" class="sync-status-pill">● Synced with Code</span>
-            </div>
-            <div class="blocks-toolbar-right">
-              <button id="btn-blocks-sync" class="btn btn-sm btn-primary" title="Sync changes from blocks back to code editor">
-                ⟳ Sync to Code
-              </button>
-              <button id="btn-blocks-format" class="btn btn-sm btn-secondary" title="Re-import and format code cleanly">
-                ✨ Format &amp; Sync
-              </button>
-              <button id="btn-blocks-export" class="btn btn-sm btn-secondary" title="Export blocks as JSON">
-                💾 Export JSON
-              </button>
-              <button id="btn-blocks-clear" class="btn btn-sm btn-ghost" title="Clear blocks canvas">
-                🗑️ Clear
-              </button>
-            </div>
-          </div>
+        <span class="quickstart-comment"># 3. Run a program (AST, Stack VM, Register VM, or Native C99)</span><br>
+        <span class="quickstart-cmd">./bin/unfish run examples/hello.unfish</span><br>
+        <span class="quickstart-cmd">./bin/unfish run --vm examples/hello.unfish</span><br>
+        <span class="quickstart-cmd">./bin/unfish build -o bin/hello examples/hello.unfish && ./bin/hello</span><br><br>
 
-          <div class="blocks-workspace">
-            <!-- Left: Block Palette / Toolbox -->
-            <aside class="blocks-palette" id="blocks-palette">
-              <div class="palette-header">Toolbox Palette</div>
-              
-              <div class="palette-group">
-                <span class="palette-group-title">Output</span>
-                <button class="palette-item item-say" data-kind="say">
-                  <span class="palette-icon">📢</span> say &quot;Hello&quot;
-                </button>
-              </div>
+        <span class="quickstart-comment"># 4. Launch the local browser IDE &amp; documentation server</span><br>
+        <span class="quickstart-cmd">./bin/unfish studio</span>
+      </div>
+    </div>
+  </section>
 
-              <div class="palette-group">
-                <span class="palette-group-title">Variables</span>
-                <button class="palette-item item-let" data-kind="let">
-                  <span class="palette-icon">📦</span> let x = 42
-                </button>
-                <button class="palette-item item-set" data-kind="set">
-                  <span class="palette-icon">✏️</span> x = 100
-                </button>
-              </div>
-
-              <div class="palette-group">
-                <span class="palette-group-title">Logic &amp; Loops</span>
-                <button class="palette-item item-if" data-kind="if">
-                  <span class="palette-icon">🔀</span> if condition:
-                </button>
-                <button class="palette-item item-while" data-kind="while">
-                  <span class="palette-icon">🔄</span> while condition:
-                </button>
-                <button class="palette-item item-for" data-kind="for">
-                  <span class="palette-icon">🔁</span> for item in list:
-                </button>
-                <button class="palette-item item-repeat" data-kind="repeat">
-                  <span class="palette-icon">🔢</span> repeat 5 times:
-                </button>
-              </div>
-
-              <div class="palette-group">
-                <span class="palette-group-title">Functions</span>
-                <button class="palette-item item-function" data-kind="function">
-                  <span class="palette-icon">⚡</span> function foo(x):
-                </button>
-                <button class="palette-item item-return" data-kind="return">
-                  <span class="palette-icon">↩️</span> return value
-                </button>
-              </div>
-
-              <div class="palette-group">
-                <span class="palette-group-title">Data Structures</span>
-                <button class="palette-item item-struct" data-kind="struct">
-                  <span class="palette-icon">🏛️</span> struct Point:
-                </button>
-                <button class="palette-item item-enum" data-kind="enum">
-                  <span class="palette-icon">🏷️</span> enum Color:
-                </button>
-                <button class="palette-item item-match" data-kind="match">
-                  <span class="palette-icon">🎯</span> match val:
-                </button>
-                <button class="palette-item item-when" data-kind="when">
-                  <span class="palette-icon">👉</span> when Pattern:
-                </button>
-              </div>
-
-              <div class="palette-group">
-                <span class="palette-group-title">Error Recovery &amp; Fibers</span>
-                <button class="palette-item item-try" data-kind="try">
-                  <span class="palette-icon">🛡️</span> try:
-                </button>
-                <button class="palette-item item-catch" data-kind="catch">
-                  <span class="palette-icon">🪤</span> catch err:
-                </button>
-                <button class="palette-item item-finally" data-kind="finally">
-                  <span class="palette-icon">🧹</span> finally:
-                </button>
-                <button class="palette-item item-spawn" data-kind="spawn">
-                  <span class="palette-icon">🧵</span> spawn task()
-                </button>
-                <button class="palette-item item-yield" data-kind="yield">
-                  <span class="palette-icon">⏸️</span> yield
-                </button>
-              </div>
-            </aside>
-
-            <!-- Right: Interactive Blocks Canvas -->
-            <div class="blocks-canvas-area">
-              <div class="blocks-canvas" id="blocks-container">
-                <div class="blocks-placeholder">Loading blocks...</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 3: AST Inspector -->
-        <div id="tab-ast" class="tab-content">
-          <pre id="ast-output" class="tree-view">Click 'Run' to inspect the Abstract Syntax Tree.</pre>
-        </div>
-
-        <!-- Tab 4: Language Cheatsheet -->
-        <div id="tab-cheatsheet" class="tab-content cheatsheet-view">
-          <h3>🐡 Unfish Quick Syntax Reference</h3>
-          <div class="cheatsheet-grid">
-            <div class="cheatsheet-card">
-              <h4>Variables & Output</h4>
-              <code>let x = 42<br>let name = "Alice"<br>say f"Hello, {name}!"</code>
-            </div>
-            <div class="cheatsheet-card">
-              <h4>Functions & Closures</h4>
-              <code>function add(a, b = 0):<br>&nbsp;&nbsp;&nbsp;&nbsp;return a + b<br><br>let double = fn(x): x * 2</code>
-            </div>
-            <div class="cheatsheet-card">
-              <h4>Structs & Methods</h4>
-              <code>struct Point:<br>&nbsp;&nbsp;&nbsp;&nbsp;x<br>&nbsp;&nbsp;&nbsp;&nbsp;y<br>&nbsp;&nbsp;&nbsp;&nbsp;fn dist(self):<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return (self.x^2 + self.y^2)^0.5</code>
-            </div>
-            <div class="cheatsheet-card">
-              <h4>Enums & Pattern Matching</h4>
-              <code>enum Result:<br>&nbsp;&nbsp;&nbsp;&nbsp;Ok(value)<br>&nbsp;&nbsp;&nbsp;&nbsp;Err(message)<br><br>match res:<br>&nbsp;&nbsp;&nbsp;&nbsp;when Ok(v): say v<br>&nbsp;&nbsp;&nbsp;&nbsp;when Err(e): say e</code>
-            </div>
-            <div class="cheatsheet-card">
-              <h4>Destructuring & Spread</h4>
-              <code>let [head, ...tail] = [1, 2, 3]<br>let {name, age} = user<br>let merged = [...a, ...b]</code>
-            </div>
-            <div class="cheatsheet-card">
-              <h4>Error Handling</h4>
-              <code>try:<br>&nbsp;&nbsp;&nbsp;&nbsp;1 / 0<br>catch err:<br>&nbsp;&nbsp;&nbsp;&nbsp;say f"Caught: {err}"<br>finally:<br>&nbsp;&nbsp;&nbsp;&nbsp;say "Cleanup done"</code>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
+  <!-- Footer -->
+  <footer class="portal-footer">
+    <div class="footer-links">
+      <a href="studio.html" class="footer-link">Unfish Studio</a>
+      <a href="learn.html" class="footer-link">Tutorials</a>
+      <a href="learn.html#stdlib-core" class="footer-link">Standard Library</a>
+      <a href="learn.html#spec-grammar" class="footer-link">Language Specification</a>
+      <a href="learn.html#learn-computer" class="footer-link">Learn the Computer</a>
+      <a href="https://github.com/google/unfish" target="_blank" class="footer-link">GitHub Repository</a>
+    </div>
+    <p>
+      🐡 Unfish — Serious Programming Language &amp; Runtime Environment • Pure ANSI C99
+    </p>
+  </footer>
 
   <script src="unfish_engine.js"></script>
-  <script src="playground.js"></script>
+  <script>
+    (function() {
+      const EXAMPLES = {
+        hello: `let name = "Explorer"
+let version = "2.0.0"
+
+say f"Hello, {name}!"
+say f"Welcome to Unfish v{version}."
+say "All five execution engines produce byte-identical output."`,
+
+        fib: `function fib(n):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+say "Computing Fibonacci sequence:"
+for i in range(0, 10):
+    say f"fib({i}) = {fib(i)}"`,
+
+        structs: `struct Vector2D:
+    x
+    y
+
+    fn magnitude(self):
+        return (self.x^2 + self.y^2)^0.5
+
+let vec = Vector2D(3, 4)
+say f"Vector: ({vec.x}, {vec.y})"
+say f"Magnitude: {vec.magnitude()}"`,
+
+        matching: `enum Shape:
+    Circle(radius)
+    Box(width, height)
+
+function calculate_area(shape):
+    match shape:
+        when Circle(r):
+            return 3.14159 * r * r
+        when Box(w, h):
+            return w * h
+
+say f"Circle area: {calculate_area(Shape.Circle(5))}"
+say f"Box area:    {calculate_area(Shape.Box(4, 6))}"`
+      };
+
+      const engine = new window.UnfishEngine();
+      const editor = document.getElementById('quick-editor');
+      const terminal = document.getElementById('quick-terminal');
+      const select = document.getElementById('quick-example-select');
+      const btnRun = document.getElementById('btn-quick-run');
+      const btnOpenStudio = document.getElementById('btn-open-in-studio');
+
+      editor.value = EXAMPLES.hello;
+
+      select.addEventListener('change', () => {
+        editor.value = EXAMPLES[select.value] || EXAMPLES.hello;
+        terminal.textContent = "Click 'Run' to execute in the browser engine.";
+      });
+
+      btnRun.addEventListener('click', () => {
+        const code = editor.value;
+        const res = engine.run(code);
+        if (res.exit_code === 0) {
+          terminal.textContent = res.stdout || '(Program completed with no output)';
+          terminal.style.color = 'var(--accent-green)';
+        } else {
+          terminal.textContent = res.stderr || 'Execution failed';
+          terminal.style.color = 'var(--accent-red)';
+        }
+      });
+
+      btnOpenStudio.addEventListener('click', () => {
+        const code = editor.value;
+        const proj = {
+          'unfish.toml': '[package]\nname = "quick_try"\nversion = "1.0.0"\nentry = "src/main.uf"',
+          'src/main.uf': code
+        };
+        const encoded = btoa(encodeURIComponent(JSON.stringify(proj)));
+        window.location.href = `studio.html#project=${encoded}`;
+      });
+    })();
+  </script>
 </body>
 </html>
