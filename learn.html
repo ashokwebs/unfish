@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📚 Unfish Learn — The Official Guide & Documentation</title>
+  <link rel="stylesheet" href="learn.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="learn-header">
+    <a href="index.html" class="header-brand">
+      <span class="logo">🐡</span>
+      <span class="brand-name">Unfish Learn</span>
+      <span class="brand-badge">Documentation &amp; Tutorials</span>
+    </a>
+
+    <!-- Global Search -->
+    <div class="search-container">
+      <input type="text" id="global-search-input" class="search-input" placeholder="Search tutorials, builtins, compiler internals...">
+      <span class="search-shortcut">Ctrl+K</span>
+    </div>
+
+    <!-- Actions -->
+    <div class="header-actions">
+      <a href="studio.html" class="btn btn-primary">
+        🚀 Open Studio IDE
+      </a>
+      <a href="index.html" class="btn">
+        Portal
+      </a>
+      <button id="btn-theme-toggle" class="btn" title="Toggle theme">
+        🌓
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="learn-container">
+    <!-- Sidebar Navigation -->
+    <nav class="learn-sidebar" id="learn-sidebar">
+      <!-- Section 1: Getting Started -->
+      <div class="nav-section">
+        <div class="nav-section-title">Getting Started</div>
+        <a class="nav-item active" data-target="intro">
+          <span class="nav-icon">🐡</span> What is Unfish?
+        </a>
+        <a class="nav-item" data-target="install">
+          <span class="nav-icon">⚡</span> Installation &amp; Setup
+        </a>
+        <a class="nav-item" data-target="first-program">
+          <span class="nav-icon">🚀</span> Your First Program
+        </a>
+        <a class="nav-item" data-target="repl-cli">
+          <span class="nav-icon">💻</span> REPL &amp; Toolchain
+        </a>
+      </div>
+
+      <!-- Section 2: Learn the Computer -->
+      <div class="nav-section">
+        <div class="nav-section-title">Educational Pipeline</div>
+        <a class="nav-item" data-target="learn-computer">
+          <span class="nav-icon">🔬</span> Learn the Computer
+        </a>
+      </div>
+
+      <!-- Section 3: Progressive Language Tutorial -->
+      <div class="nav-section">
+        <div class="nav-section-title">Language Tutorial</div>
+        <a class="nav-item" data-target="tut-01">01. Hello &amp; Text Output</a>
+        <a class="nav-item" data-target="tut-02">02. Values &amp; Types</a>
+        <a class="nav-item" data-target="tut-03">03. Variables &amp; Scope</a>
+        <a class="nav-item" data-target="tut-04">04. Expressions &amp; Operators</a>
+        <a class="nav-item" data-target="tut-05">05. Conditions &amp; Logic</a>
+        <a class="nav-item" data-target="tut-06">06. Loops &amp; Iteration</a>
+        <a class="nav-item" data-target="tut-07">07. Functions &amp; Defaults</a>
+        <a class="nav-item" data-target="tut-08">08. Lexical Environments</a>
+        <a class="nav-item" data-target="tut-09">09. Closures &amp; Pipelines</a>
+        <a class="nav-item" data-target="tut-10">10. Arrays &amp; Collections</a>
+        <a class="nav-item" data-target="tut-11">11. Strings &amp; Formatting</a>
+        <a class="nav-item" data-target="tut-12">12. Structs &amp; Methods</a>
+        <a class="nav-item" data-target="tut-13">13. Enums &amp; Matching</a>
+        <a class="nav-item" data-target="tut-14">14. Destructuring &amp; Rest</a>
+        <a class="nav-item" data-target="tut-15">15. Modules &amp; Packages</a>
+        <a class="nav-item" data-target="tut-16">16. Structured Errors</a>
+        <a class="nav-item" data-target="tut-17">17. Fibers &amp; Concurrency</a>
+        <a class="nav-item" data-target="tut-18">18. Systems &amp; Buffers</a>
+        <a class="nav-item" data-target="tut-19">19. Memory &amp; GC Model</a>
+        <a class="nav-item" data-target="tut-20">20. Bytecode Virtual Machines</a>
+        <a class="nav-item" data-target="tut-21">21. Native C99 &amp; WebAssembly</a>
+        <a class="nav-item" data-target="tut-22">22. How Unfish Works</a>
+      </div>
+
+      <!-- Section 4: Standard Library -->
+      <div class="nav-section">
+        <div class="nav-section-title">Reference</div>
+        <a class="nav-item" data-target="stdlib-core">Core Built-in Functions</a>
+        <a class="nav-item" data-target="stdlib-sys">Module: sys</a>
+        <a class="nav-item" data-target="stdlib-fs">Module: fs (Filesystem)</a>
+        <a class="nav-item" data-target="stdlib-time">Module: time</a>
+        <a class="nav-item" data-target="stdlib-random">Module: random</a>
+        <a class="nav-item" data-target="stdlib-json">Module: json</a>
+        <a class="nav-item" data-target="stdlib-testing">Module: testing</a>
+      </div>
+
+      <!-- Section 5: Specification & Internals -->
+      <div class="nav-section">
+        <div class="nav-section-title">Specification &amp; Architecture</div>
+        <a class="nav-item" data-target="spec-grammar">Formal EBNF Grammar</a>
+        <a class="nav-item" data-target="spec-semantics">Evaluation Semantics</a>
+        <a class="nav-item" data-target="internals-c99">Compiler &amp; Runtime Internals</a>
+        <a class="nav-item" data-target="examples-showcase">Curated Examples Library</a>
+      </div>
+    </nav>
+
+    <!-- Content Area -->
+    <main class="learn-content" id="learn-content">
+      <!-- Chapter: What is Unfish? -->
+      <article id="doc-intro" class="doc-chapter active">
+        <h1>🐡 Welcome to Unfish</h1>
+        <p>
+          <strong>Unfish</strong> is a serious, general-purpose programming language, compiler, bytecode virtual machine, and educational computing environment implemented in pure <strong>ANSI C99</strong> with zero external dependencies.
+        </p>
+
+        <blockquote>
+          "Hide complexity until the learner is ready — never hide it forever."
+        </blockquote>
+
+        <h2>The Unbroken Path of Intellectual Ascent</h2>
+        <p>
+          Most programming languages force learners into a compromise: either use an overly simplified toy environment (like Scratch or simple web editors) that conceals how computers actually work, or dive directly into complex industrial languages (like C++ or Rust) where boilerplate and cryptic toolchains overwhelm beginners.
+        </p>
+        <p>
+          Unfish resolves this dilemma through a clean, unified architecture:
+        </p>
+        <ul>
+          <li><strong>Level 1: Visual Blocks</strong> — Drag, snap, and assemble visual logic blocks with real-time two-way synchronization into source code.</li>
+          <li><strong>Level 2: Clean Scripting</strong> — Human-oriented, indentation-based syntax without semicolons or noisy braces.</li>
+          <li><strong>Level 3: Modern Language Engineering</strong> — Structs, object methods, algebraic enums, pattern matching, closures, cooperative fibers, and destructuring.</li>
+          <li><strong>Level 4: Computer Systems &amp; Runtimes</strong> — Contiguous byte buffers, little-endian access, memory layout inspection, mark-and-sweep garbage collection, and custom bytecode virtual machines.</li>
+          <li><strong>Level 5: Native &amp; WebAssembly Compilation</strong> — Compiling directly into standalone, dependency-free C99 machine code and WebAssembly.</li>
+        </ul>
+
+        <h2>The Five-Engine Differential Architecture</h2>
+        <p>
+          Unfish features five distinct execution tiers kept in 100% lockstep by an automated differential conformance suite:
+        </p>
+        <table class="stdlib-table">
+          <thead>
+            <tr><th>Tier</th><th>Engine</th><th>Description</th><th>Best For</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>AST Interpreter</code></td>
+              <td>Direct syntax tree walking interpreter</td>
+              <td>Interactive REPL, instant startup, visual blocks</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>Stack Bytecode VM</code></td>
+              <td>36-opcode stack virtual machine with upvalues</td>
+              <td>2x–6x execution speedup, instruction tracing</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>Register Bytecode VM</code></td>
+              <td>256-register 3-address VM with computed-goto</td>
+              <td>Fast interpreted execution, compiler education</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>Native C99 Compiler</code></td>
+              <td>AOT transpilation into freestanding C99</td>
+              <td>30x–200x native execution speedup, binary deployment</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td><code>WebAssembly Target</code></td>
+              <td>Portable WebAssembly binary output</td>
+              <td>In-browser execution, serverless workers</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Interactive Runner -->
+        <div class="code-runner" data-example="hello">
+          <div class="runner-header">
+            <span class="runner-title">examples/hello.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="6" spellcheck="false">let name = "Developer"
+let version = "2.0.0"
+
+say f"Hello, {name}!"
+say f"Welcome to Unfish v{version}."
+say "All five execution engines produce byte-identical output."</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter: Installation -->
+      <article id="doc-install" class="doc-chapter">
+        <h1>⚡ Installation &amp; Setup</h1>
+        <p>
+          Unfish requires only a standard C99 compiler (such as <code>gcc</code> or <code>clang</code>) and standard POSIX <code>make</code>. It has zero external dependencies beyond libc and <code>-lm</code>.
+        </p>
+
+        <h2>Building from Source</h2>
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">Terminal Shell (Bash)</span>
+          </div>
+          <pre class="runner-editor" style="user-select:all;">git clone https://github.com/google/unfish.git
+cd unfish
+make -j4
+./bin/unfish version</pre>
+        </div>
+
+        <h2>Running the Test Suites</h2>
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">Verification Commands</span>
+          </div>
+          <pre class="runner-editor" style="user-select:all;"># Run all 21 unit test suites and 91/91 5-way differential conformance tests
+make test
+
+# Verify zero memory leaks under AddressSanitizer & UndefinedBehaviorSanitizer
+make test-asan
+
+# Run multi-tier performance benchmarks
+make bench</pre>
+        </div>
+      </article>
+
+      <!-- Chapter: First Program -->
+      <article id="doc-first-program" class="doc-chapter">
+        <h1>🚀 Your First Program</h1>
+        <p>
+          Unfish source code uses the <code>.uf</code> or <code>.unfish</code> file extension. Let's write a program that calculates Fibonacci numbers and prints them using formatted strings.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">fibonacci.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="12" spellcheck="false">function fib(n):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+say "Computing Fibonacci numbers:"
+for i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+    say f"  fib({i}) = {fib(i)}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter: REPL & Toolchain -->
+      <article id="doc-repl-cli" class="doc-chapter">
+        <h1>💻 REPL &amp; Developer Toolchain</h1>
+        <p>
+          The <code>unfish</code> executable provides a unified interface across the development lifecycle:
+        </p>
+        <table class="stdlib-table">
+          <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>unfish run &lt;file&gt;</code></td><td>Execute script using tree-walking AST interpreter</td></tr>
+            <tr><td><code>unfish run --vm &lt;file&gt;</code></td><td>Execute script using Stack Bytecode VM</td></tr>
+            <tr><td><code>unfish run --regvm &lt;file&gt;</code></td><td>Execute script using Register Bytecode VM</td></tr>
+            <tr><td><code>unfish build -o &lt;bin&gt; &lt;file&gt;</code></td><td>Compile program to native executable binary</td></tr>
+            <tr><td><code>unfish build --wasm &lt;file&gt;</code></td><td>Compile program to WebAssembly module</td></tr>
+            <tr><td><code>unfish format -i &lt;file&gt;</code></td><td>Format source code to canonical style in place</td></tr>
+            <tr><td><code>unfish debug &lt;file&gt;</code></td><td>Launch interactive step debugger with breakpoints</td></tr>
+            <tr><td><code>unfish studio</code></td><td>Launch the browser IDE &amp; visual blocks canvas</td></tr>
+            <tr><td><code>unfish lsp</code></td><td>Start Language Server Protocol server for VS Code</td></tr>
+            <tr><td><code>unfish repl</code></td><td>Launch interactive Read-Eval-Print Loop</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Chapter: Learn the Computer -->
+      <article id="doc-learn-computer" class="doc-chapter">
+        <h1>🔬 Learn the Computer through Unfish</h1>
+        <p>
+          A defining mission of Unfish is to teach computer systems by making every layer of language execution visible and tangible. Type any code below and click through the tabs to observe how human-readable text transforms into tokens, syntax trees, bytecode instructions, and runtime memory.
+        </p>
+
+        <div class="pipeline-visualizer" id="pipeline-visualizer">
+          <div class="pipeline-header">
+            <span style="font-weight:700; color:var(--text-title); font-size:0.95rem;">Interactive Architectural Pipeline Explorer</span>
+          </div>
+
+          <div style="padding:12px; background:var(--bg-sidebar); border-bottom:1px solid var(--border);">
+            <textarea id="pipeline-code-input" class="runner-editor" rows="5" spellcheck="false" style="border:1px solid var(--border); border-radius:6px; background:var(--bg-code);">let count = 3
+function get_sum(n):
+    return n * (n + 1) / 2
+
+say f"Sum is {get_sum(count)}"</textarea>
+            <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+              <button id="btn-pipeline-analyze" class="btn btn-primary btn-sm">Analyze Layers</button>
+            </div>
+          </div>
+
+          <nav class="pipeline-steps">
+            <button class="pipeline-step active" data-stage="tokens">1. Lexical Tokens</button>
+            <button class="pipeline-step" data-stage="ast">2. Pratt AST</button>
+            <button class="pipeline-step" data-stage="disasm">3. Bytecode ISA</button>
+            <button class="pipeline-step" data-stage="output">4. Execution Output</button>
+            <button class="pipeline-step" data-stage="memory">5. Memory Layout</button>
+          </nav>
+
+          <div class="pipeline-body">
+            <pre id="pipeline-output-view" class="pipeline-view"></pre>
+          </div>
+        </div>
+      </article>
+
+      <!-- Chapter 01: Hello -->
+      <article id="doc-tut-01" class="doc-chapter">
+        <h1>01. Hello World &amp; Text Output</h1>
+        <p>
+          In Unfish, printing to standard output is done with <code>say</code> (appends a newline) or <code>print</code> (no trailing newline). Unfish also features Python-style string interpolation via <code>f"..."</code>.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut01_output.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="6" spellcheck="false">say "Hello, Unfish!"
+print "Counting: "
+print "1, "
+print "2, "
+say "3!"
+
+let user = "Ada Lovelace"
+say f"Welcome, {user}!"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 02: Values -->
+      <article id="doc-tut-02" class="doc-chapter">
+        <h1>02. Values &amp; Primitive Types</h1>
+        <p>
+          Unfish runtime values are represented internally by a 16-byte tagged union (<code>UfValue</code>). The primitive types are:
+        </p>
+        <ul>
+          <li><strong>Numbers</strong> — 64-bit IEEE 754 floating-point numbers (<code>42</code>, <code>3.14159</code>, <code>0xFF</code>, <code>1e6</code>).</li>
+          <li><strong>Strings</strong> — Contiguous UTF-8 encoded text with length tracking and string interning.</li>
+          <li><strong>Booleans</strong> — <code>true</code> or <code>false</code>.</li>
+          <li><strong>Null</strong> — Represents absence of value (<code>null</code>).</li>
+        </ul>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut02_values.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="8" spellcheck="false">say f"type_of(42)      -> {type_of(42)}"
+say f"type_of(3.14)    -> {type_of(3.14)}"
+say f"type_of('hello') -> {type_of('hello')}"
+say f"type_of(true)    -> {type_of(true)}"
+say f"type_of(null)    -> {type_of(null)}"
+say f"type_of([1, 2])  -> {type_of([1, 2])}"
+say f"type_of({'a': 1})-> {type_of({'a': 1})}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 03: Variables -->
+      <article id="doc-tut-03" class="doc-chapter">
+        <h1>03. Variables &amp; Lexical Scope</h1>
+        <p>
+          Variables in Unfish are declared with the <code>let</code> keyword. Once declared, variables can be reassigned with <code>=</code>:
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut03_variables.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="9" spellcheck="false">let x = 10
+say f"Initial x: {x}"
+
+x = x + 5
+say f"Updated x: {x}"
+
+if true:
+    let inner = "inside block"
+    say f"Inner scope: {inner}"
+    say f"Outer visible: {x}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 04: Expressions -->
+      <article id="doc-tut-04" class="doc-chapter">
+        <h1>04. Expressions &amp; Operators</h1>
+        <p>
+          Unfish parses expressions using Vaughan Pratt's top-down operator precedence table. It supports standard arithmetic (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code>), comparisons, logical operators (<code>and</code>, <code>or</code>, <code>not</code>), and the forward pipe operator (<code>|&gt;</code>).
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut04_operators.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="8" spellcheck="false">say f"2 + 3 * 4 = {2 + 3 * 4}"
+say f"2 ^ 10 = {2 ^ 10}"
+say f"10 / 3 = {10 / 3}"
+say f"10 % 3 = {10 % 3}"
+
+let numbers = [5, 2, 8, 1, 9]
+say f"Min: {min(10, 20)}, Max: {max(10, 20)}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 05: Conditions -->
+      <article id="doc-tut-05" class="doc-chapter">
+        <h1>05. Conditional Logic</h1>
+        <p>
+          Blocks in Unfish are delimited using off-side indentation (4 spaces) introduced with a colon <code>:</code>.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut05_conditions.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="11" spellcheck="false">let score = 85
+
+if score >= 90:
+    say "Grade: A"
+else if score >= 80:
+    say "Grade: B"
+else if score >= 70:
+    say "Grade: C"
+else:
+    say "Grade: F"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 06: Loops -->
+      <article id="doc-tut-06" class="doc-chapter">
+        <h1>06. Loops &amp; Iteration</h1>
+        <p>
+          Unfish supports three loop constructs:
+        </p>
+        <ul>
+          <li><code>while &lt;condition&gt;:</code> — Loop while condition remains truthy.</li>
+          <li><code>for item in &lt;collection&gt;:</code> — Iterate over arrays, strings, or map keys.</li>
+          <li><code>repeat &lt;count&gt; times:</code> — Dedicated beginner-friendly fixed count loop.</li>
+        </ul>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut06_loops.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="12" spellcheck="false">say "--- Repeat Loop ---"
+repeat 3 times:
+    say "Learning Unfish!"
+
+say "--- For-In Loop ---"
+let fruits = ["Apple", "Banana", "Cherry"]
+for f in fruits:
+    say f"Fruit: {f}"
+
+say "--- While Loop ---"
+let n = 3
+while n > 0:
+    say f"Countdown: {n}"
+    n = n - 1</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 07: Functions -->
+      <article id="doc-tut-07" class="doc-chapter">
+        <h1>07. Functions &amp; Default Parameters</h1>
+        <p>
+          Functions are declared with <code>function</code> or <code>fn</code> and can include default parameter values:
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut07_functions.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="9" spellcheck="false">function greet(name, greeting = "Hello"):
+    return f"{greeting}, {name}!"
+
+say greet("Grace Hopper")
+say greet("Alan Turing", "Good morning")
+
+function factorial(n):
+    if n <= 1: return 1
+    return n * factorial(n - 1)
+
+say f"factorial(6) = {factorial(6)}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 09: Closures -->
+      <article id="doc-tut-09" class="doc-chapter">
+        <h1>09. Closures &amp; Functional Pipelines</h1>
+        <p>
+          Functions in Unfish are first-class values that capture variables from their enclosing lexical environments. Anonymous lambda functions can be written with <code>fn(args): expr</code>.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut09_closures.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="12" spellcheck="false">function make_multiplier(factor):
+    return fn(x): x * factor
+
+let double = make_multiplier(2)
+let triple = make_multiplier(3)
+
+say f"double(21) = {double(21)}"
+say f"triple(14) = {triple(14)}"
+
+let data = [1, 2, 3, 4, 5, 6]
+let evens = filter(data, fn(x): x % 2 == 0)
+let doubled_evens = map(evens, double)
+
+say f"Evens doubled: {doubled_evens}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 12: Structs -->
+      <article id="doc-tut-12" class="doc-chapter">
+        <h1>12. Structs &amp; Object Methods</h1>
+        <p>
+          Unfish provides lightweight structs with instance fields and methods bound to <code>self</code>:
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut12_structs.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="14" spellcheck="false">struct Rectangle:
+    width
+    height
+
+    fn area(self):
+        return self.width * self.height
+
+    fn perimeter(self):
+        return 2 * (self.width + self.height)
+
+let rect = Rectangle(10, 5)
+say f"Dimensions: {rect.width}x{rect.height}"
+say f"Area: {rect.area()}"
+say f"Perimeter: {rect.perimeter()}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 13: Enums -->
+      <article id="doc-tut-13" class="doc-chapter">
+        <h1>13. Enums &amp; Pattern Matching</h1>
+        <p>
+          Enums in Unfish are tagged sum types whose variants can carry data, matched with <code>match ... when ...</code>:
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut13_enums.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="16" spellcheck="false">enum Result:
+    Ok(val)
+    Err(msg)
+
+function safe_divide(a, b):
+    if b == 0:
+        return Result.Err("Division by zero")
+    return Result.Ok(a / b)
+
+function handle_result(res):
+    match res:
+        when Ok(v):
+            say f"Success: result is {v}"
+        when Err(e):
+            say f"Failed: error was '{e}'"
+
+handle_result(safe_divide(42, 6))
+handle_result(safe_divide(42, 0))</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 17: Concurrency -->
+      <article id="doc-tut-17" class="doc-chapter">
+        <h1>17. Cooperative Fibers &amp; CSP Channels</h1>
+        <p>
+          Concurrency in Unfish is based on lightweight green threads (fibers) and Communicating Sequential Processes (CSP) channels, operating with deterministic scheduling and zero race conditions.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut17_concurrency.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="16" spellcheck="false">let ch = channel(5)
+
+spawn function():
+    say "Worker fiber active"
+    for i in [100, 200, 300]:
+        send(ch, i)
+        yield
+    close_channel(ch)
+
+say "Main fiber reading channel:"
+while true:
+    let msg = recv(ch)
+    if msg == null:
+        break
+    say f"Received: {msg}"
+
+say "Scheduler drained cleanly."</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Standard Library Reference: Core -->
+      <article id="doc-stdlib-core" class="doc-chapter">
+        <h1>Core Built-in Functions</h1>
+        <p>All core functions are available globally in every Unfish program without needing an <code>import</code> statement.</p>
+
+        <table class="stdlib-table">
+          <thead><tr><th>Function</th><th>Signature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>say(val)</code></td><td><code>(Any) -&gt; null</code></td><td>Prints value followed by a newline to standard output</td></tr>
+            <tr><td><code>print(val)</code></td><td><code>(Any) -&gt; null</code></td><td>Prints value without a trailing newline</td></tr>
+            <tr><td><code>len(coll)</code></td><td><code>(Any) -&gt; Number</code></td><td>Returns length of string, array, or byte buffer</td></tr>
+            <tr><td><code>type_of(val)</code></td><td><code>(Any) -&gt; String</code></td><td>Returns type name: <code>"number"</code>, <code>"string"</code>, etc.</td></tr>
+            <tr><td><code>push(arr, val)</code></td><td><code>(Array, Any) -&gt; null</code></td><td>Appends value to dynamic array</td></tr>
+            <tr><td><code>pop(arr)</code></td><td><code>(Array) -&gt; Any</code></td><td>Removes and returns last element</td></tr>
+            <tr><td><code>range(a, [b, step])</code></td><td><code>(Number, ...) -&gt; Array</code></td><td>Generates range of numbers</td></tr>
+            <tr><td><code>concat(a, b)</code></td><td><code>(Array, Array) -&gt; Array</code></td><td>Non-destructively merges two arrays</td></tr>
+            <tr><td><code>flatten(arr)</code></td><td><code>(Array) -&gt; Array</code></td><td>Flattens one level of nested arrays</td></tr>
+            <tr><td><code>zip(a, b)</code></td><td><code>(Array, Array) -&gt; Array</code></td><td>Combines two arrays element-wise into pairs</td></tr>
+            <tr><td><code>pad_start(s, len, [p])</code></td><td><code>(String, Number, [String]) -&gt; String</code></td><td>Pads string on the left to target length</td></tr>
+            <tr><td><code>pad_end(s, len, [p])</code></td><td><code>(String, Number, [String]) -&gt; String</code></td><td>Pads string on the right to target length</td></tr>
+            <tr><td><code>trim_start(s)</code></td><td><code>(String) -&gt; String</code></td><td>Removes leading whitespace</td></tr>
+            <tr><td><code>trim_end(s)</code></td><td><code>(String) -&gt; String</code></td><td>Removes trailing whitespace</td></tr>
+            <tr><td><code>chars(s)</code></td><td><code>(String) -&gt; Array</code></td><td>Returns array of single-character strings</td></tr>
+            <tr><td><code>count(s, sub)</code></td><td><code>(String, String) -&gt; Number</code></td><td>Count of non-overlapping occurrences</td></tr>
+            <tr><td><code>clock()</code></td><td><code>() -&gt; Number</code></td><td>High-resolution wall-clock timestamp in seconds</td></tr>
+            <tr><td><code>assert(cond, [msg])</code></td><td><code>(Any, [String]) -&gt; null</code></td><td>Raises AssertionError if condition is falsy</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Standard Library Reference: sys -->
+      <article id="doc-stdlib-sys" class="doc-chapter">
+        <h1>Module: sys</h1>
+        <p>Access operating system parameters, environment variables, and process control. Import with <code>import sys</code> or <code>from sys import platform, exit</code>.</p>
+
+        <table class="stdlib-table">
+          <thead><tr><th>Function</th><th>Signature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>sys.platform()</code></td><td><code>() -&gt; String</code></td><td>Returns host OS name: <code>"linux"</code>, <code>"darwin"</code>, <code>"windows"</code></td></tr>
+            <tr><td><code>sys.exit(code)</code></td><td><code>(Number) -&gt; never</code></td><td>Terminates process with integer exit code</td></tr>
+            <tr><td><code>sys.args()</code></td><td><code>() -&gt; Array</code></td><td>Array of CLI argument strings passed to script</td></tr>
+            <tr><td><code>sys.cwd()</code></td><td><code>() -&gt; String</code></td><td>Current working directory path string</td></tr>
+            <tr><td><code>sys.env(key)</code></td><td><code>(String) -&gt; String|null</code></td><td>Returns environment variable value, or null</td></tr>
+            <tr><td><code>sys.set_env(k, v)</code></td><td><code>(String, String) -&gt; Boolean</code></td><td>Sets host environment variable</td></tr>
+            <tr><td><code>sys.exec(cmd)</code></td><td><code>(String) -&gt; Number</code></td><td>Executes shell command via <code>system()</code></td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Standard Library Reference: fs -->
+      <article id="doc-stdlib-fs" class="doc-chapter">
+        <h1>Module: fs (Sandboxed Filesystem)</h1>
+        <p>File I/O and directory operations. Import with <code>import fs</code>.</p>
+
+        <table class="stdlib-table">
+          <thead><tr><th>Function</th><th>Signature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>fs.read_text(path)</code></td><td><code>(String) -&gt; String|null</code></td><td>Reads entire file contents as UTF-8 string</td></tr>
+            <tr><td><code>fs.write_text(path, text)</code></td><td><code>(String, String) -&gt; Boolean</code></td><td>Overwrites file with text</td></tr>
+            <tr><td><code>fs.append_text(path, text)</code></td><td><code>(String, String) -&gt; Boolean</code></td><td>Appends text to end of file</td></tr>
+            <tr><td><code>fs.exists(path)</code></td><td><code>(String) -&gt; Boolean</code></td><td>Returns true if file or directory exists</td></tr>
+            <tr><td><code>fs.delete_file(path)</code></td><td><code>(String) -&gt; Boolean</code></td><td>Deletes file at path</td></tr>
+            <tr><td><code>fs.list_dir(path)</code></td><td><code>(String) -&gt; Array|null</code></td><td>Returns array of entry filenames in directory</td></tr>
+            <tr><td><code>fs.mkdir(path)</code></td><td><code>(String) -&gt; Boolean</code></td><td>Creates new directory</td></tr>
+            <tr><td><code>fs.remove_dir(path)</code></td><td><code>(String) -&gt; Boolean</code></td><td>Removes empty directory</td></tr>
+            <tr><td><code>fs.is_file(path)</code></td><td><code>(String) -&gt; Boolean</code></td><td>Returns true if path is a regular file</td></tr>
+            <tr><td><code>fs.is_dir(path)</code></td><td><code>(String) -&gt; Boolean</code></td><td>Returns true if path is a directory</td></tr>
+            <tr><td><code>fs.file_size(path)</code></td><td><code>(String) -&gt; Number|null</code></td><td>Returns file size in bytes</td></tr>
+          </tbody>
+        </table>
+      </article>
+    </main>
+  </div>
+
+  <!-- Global Search Modal -->
+  <div class="search-modal-overlay" id="search-modal">
+    <div class="search-modal-box">
+      <div class="search-modal-input-wrap">
+        <input type="text" id="modal-search-input" class="search-modal-input" placeholder="Type to search documentation...">
+      </div>
+      <div class="search-results-list" id="search-results-list">
+        <!-- Search results rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <script src="unfish_engine.js"></script>
+  <script src="learn.js"></script>
+</body>
+</html>
