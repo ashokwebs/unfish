@@ -123,6 +123,22 @@ static void emit_expr(FILE* out, const UfExpr* expr, int indent);
 static void emit_statement(FILE* out, const UfStmt* stmt, int indent);
 static void emit_block(FILE* out, const UfStmt* stmt, int indent);
 static void emit_pattern(FILE* out, const UfPattern* pat, int indent);
+static void emit_statement(FILE* out, const UfStmt* stmt, int indent);
+
+/* `nested` selects the struct-body form (`impl Trait:`), where the target is
+ * implied by the enclosing struct, over the free-standing form
+ * (`impl Trait for Struct:`). */
+static void emit_impl_block(FILE* out, const UfStmt* stmt, int indent, bool nested) {
+    emit_indent(out, indent);
+    if (!nested && stmt->as.impl_stmt.struct_name) {
+        fprintf(out, "impl %s for %s:\n", stmt->as.impl_stmt.trait_name, stmt->as.impl_stmt.struct_name);
+    } else {
+        fprintf(out, "impl %s:\n", stmt->as.impl_stmt.trait_name);
+    }
+    for (size_t i = 0; i < stmt->as.impl_stmt.method_count; ++i) {
+        emit_statement(out, stmt->as.impl_stmt.methods[i], indent + 1);
+    }
+}
 
 static void emit_expr(FILE* out, const UfExpr* expr, int indent) {
     if (!expr) return;
@@ -256,8 +272,34 @@ static void emit_expr(FILE* out, const UfExpr* expr, int indent) {
                 fputc(':', out);
             }
             if (expr->as.fn_expr.body) {
-                fputc('\n', out);
-                emit_block(out, expr->as.fn_expr.body, indent + 1);
+                /* A single-statement body stays on one line: `function(x): x * 3`.
+                 * Expanding it into an indented block is not just a style choice
+                 * here -- a block-bodied lambda cannot be re-parsed inside an
+                 * argument list, so formatting
+                 *     assert_throws(function(): error("boom"), "msg")
+                 * used to emit code that no longer parsed, turning valid input
+                 * into a syntax error. */
+                const UfStmt* body = expr->as.fn_expr.body;
+                const UfStmt* only = NULL;
+                if (body->kind == UF_STMT_BLOCK) {
+                    if (body->as.block.count == 1) only = body->as.block.stmts[0];
+                } else {
+                    only = body;
+                }
+
+                if (only && only->kind == UF_STMT_EXPR) {
+                    fputc(' ', out);
+                    emit_expr(out, only->as.expr_stmt.expr, indent);
+                } else if (only && only->kind == UF_STMT_RETURN) {
+                    fputs(" return", out);
+                    if (only->as.return_stmt.value) {
+                        fputc(' ', out);
+                        emit_expr(out, only->as.return_stmt.value, indent);
+                    }
+                } else {
+                    fputc('\n', out);
+                    emit_block(out, expr->as.fn_expr.body, indent + 1);
+                }
             }
             break;
         }
@@ -346,7 +388,12 @@ static void emit_pattern(FILE* out, const UfPattern* pat, int indent) {
             }
             if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
                 if (pat->as.map_pat.count > 0) fputs(", ", out);
-                fputs("...", out);
+                /* A UF_PAT_REST subpattern prints its own "..."; writing one
+                 * here as well doubled the ellipsis on every formatting pass,
+                 * so `...rest` grew to `......rest` and kept growing. */
+                if (pat->as.map_pat.rest_pattern->kind != UF_PAT_REST) {
+                    fputs("...", out);
+                }
                 emit_pattern(out, pat->as.map_pat.rest_pattern, indent);
             }
             fputc('}', out);
@@ -623,7 +670,11 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
                 emit_statement(out, stmt->as.struct_stmt.methods[i], indent + 1);
             }
             for (size_t i = 0; i < stmt->as.struct_stmt.impl_block_count; ++i) {
-                emit_statement(out, stmt->as.struct_stmt.impl_blocks[i], indent + 1);
+                /* An impl nested in a struct body names only the trait -- its
+                 * target is the enclosing struct. The parser fills in
+                 * struct_name anyway, so emitting the generic `impl T for S:`
+                 * form here produced a body the parser then rejected. */
+                emit_impl_block(out, stmt->as.struct_stmt.impl_blocks[i], indent + 1, true);
             }
             break;
 
@@ -662,15 +713,7 @@ static void emit_statement(FILE* out, const UfStmt* stmt, int indent) {
             break;
 
         case UF_STMT_IMPL:
-            emit_indent(out, indent);
-            if (stmt->as.impl_stmt.struct_name) {
-                fprintf(out, "impl %s for %s:\n", stmt->as.impl_stmt.trait_name, stmt->as.impl_stmt.struct_name);
-            } else {
-                fprintf(out, "impl %s:\n", stmt->as.impl_stmt.trait_name);
-            }
-            for (size_t i = 0; i < stmt->as.impl_stmt.method_count; ++i) {
-                emit_statement(out, stmt->as.impl_stmt.methods[i], indent + 1);
-            }
+            emit_impl_block(out, stmt, indent, false);
             break;
 
         case UF_STMT_ENUM:

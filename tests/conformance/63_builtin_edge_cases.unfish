@@ -1,0 +1,59 @@
+# expect: caught DomainError
+# expect: caught DomainError
+# expect: caught DomainError
+# expect: null
+# expect: null
+# expect: null
+# expect: 42
+# expect: 3.5
+# expect:
+# expect:
+# expect:
+# expect: c
+# expect: hel
+# expect:
+# expect: lo
+# expect: true
+# expect: false
+# expect: true
+# expect: false
+
+# Edge cases where the native C99 backend used to disagree with the
+# interpreter and both VMs -- silently, because no test covered them.
+# sqrt/log returned nan/-inf instead of raising; to_number accepted a
+# partial parse; char_at raised instead of returning ""; substring
+# clamped a negative index instead of counting back from the end; and
+# the AST interpreter alone refused to order strings at all.
+
+fn attempt(f):
+    try:
+        f()
+    catch err:
+        say("caught " + err.kind)
+
+attempt(function(): return sqrt(-1))
+attempt(function(): return log(0))
+attempt(function(): return log(-1))
+
+say(to_number("12abc"))
+say(to_number("abc"))
+say(to_number(""))
+say(to_number(" 42 "))
+say(to_number("3.5"))
+
+# char_at: out of range yields "" rather than raising
+say(char_at("abc", 10))
+say(char_at("", 0))
+say(char_at("abc", -10))
+say(char_at("abc", -1))
+
+# substring: a negative index counts back from the end before clamping
+say(substring("hello", 0, 3))
+say(substring("hello", -1, 3))
+say(substring("hello", -2, 5))
+
+# relational operators order strings lexicographically on every backend
+say("a" < "b")
+say("b" < "a")
+say("2" > "10")
+say("apple" >= "banana")

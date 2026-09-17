@@ -20,7 +20,11 @@
 
 #define UFC_MAGIC_STACK "UFC\x01"
 #define UFC_MAGIC_REG   "UFR\x01"
-#define UFC_VERSION     2
+/* Bump whenever the compilers' output or their accept/reject behaviour changes,
+ * so that bytecode cached by an older build is discarded rather than replayed.
+ * v3: compilers now reject programs that exceed internal limits instead of
+ * silently emitting broken bytecode. */
+#define UFC_VERSION     3
 
 uint64_t uf_cache_hash_source(const char* source, size_t length) {
     uint64_t hash = 14695981039346656037ULL;

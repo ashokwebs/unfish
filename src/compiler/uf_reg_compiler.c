@@ -2,6 +2,8 @@
 #include "../vm2/uf_regvm.h"
 #include "../runtime/uf_env.h"
 #include "../runtime/uf_module.h"
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,13 +62,40 @@ typedef struct UfRegCompiler {
     UfRuntime* rt;
     UfDiagnosticReporter* reporter;
     bool had_error;
+    /* Line of the statement/expression currently being compiled, so that
+     * internal-limit errors raised deep in helpers still point somewhere useful. */
+    int current_line;
 } UfRegCompiler;
+
+/* Report a compile-time failure (an internal limit, or a construct the
+ * compiler cannot lower) as a real diagnostic instead of silently emitting
+ * broken bytecode. Only the first error per compiler is reported; later ones
+ * are almost always cascades of the first. */
+static void compile_error(UfRegCompiler* c, int line, const char* fmt, ...) {
+    if (c->had_error) return;
+    c->had_error = true;
+    if (!c->reporter) return;
+
+    char message[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    if (line <= 0) line = c->current_line;
+    const char* file = c->reporter->file_name;
+    SourceLoc loc = source_loc_make(file, (uint32_t)(line > 0 ? line : 1), 1, 0);
+    uf_report_error(c->reporter, UF_DIAG_SYNTAX_ERROR, source_span_make(loc, loc), "%s", message);
+}
 
 /* --- Register Allocation Helpers --- */
 
 static uint8_t alloc_reg(UfRegCompiler* c) {
     if (c->next_reg >= 250) {
-        c->had_error = true;
+        compile_error(c, c->current_line,
+                      "Expression too complex in function '%s': out of registers "
+                      "(limit is 250); split it into smaller expressions",
+                      c->fn_name ? c->fn_name : "<script>");
         return 0;
     }
     uint8_t r = c->next_reg++;
@@ -84,7 +113,10 @@ static void free_reg(UfRegCompiler* c, uint8_t reg) {
 
 static uint8_t alloc_reg_block(UfRegCompiler* c, uint8_t count) {
     if (c->next_reg + count >= 250) {
-        c->had_error = true;
+        compile_error(c, c->current_line,
+                      "Expression too complex in function '%s': out of registers "
+                      "(limit is 250); split it into smaller expressions",
+                      c->fn_name ? c->fn_name : "<script>");
         return 0;
     }
     uint8_t base = c->next_reg;
@@ -170,9 +202,11 @@ static void end_scope(UfRegCompiler* c, int line) {
 }
 
 static int add_local(UfRegCompiler* c, const char* name, int line) {
-    (void)line;
     if (c->local_count >= 250) {
-        c->had_error = true;
+        compile_error(c, line,
+                      "Too many local variables in function '%s' (limit is 250); "
+                      "split it into smaller functions",
+                      c->fn_name ? c->fn_name : "<script>");
         return -1;
     }
     c->next_reg = (uint8_t)c->local_count;
@@ -206,7 +240,9 @@ static int add_upvalue(UfRegCompiler* c, uint8_t index, bool is_local) {
         }
     }
     if (c->upvalue_count >= 256) {
-        c->had_error = true;
+        compile_error(c, c->current_line,
+                      "Too many captured variables in function '%s' (limit is 256)",
+                      c->fn_name ? c->fn_name : "<script>");
         return 0;
     }
     c->upvalues[c->upvalue_count].index = index;
@@ -258,6 +294,7 @@ static void compiler_init(UfRegCompiler* c, UfRegCompiler* enclosing, RegFunctio
     c->current_loop = NULL;
     c->next_reg = 0;
     c->max_regs = 0;
+    c->current_line = enclosing ? enclosing->current_line : 0;
 
     c->function = uf_reg_fn_new(rt, fn_name, arity, min_arity, has_rest);
     c->chunk = &c->function->chunk;
@@ -280,6 +317,7 @@ static void compile_destructure_pattern(UfRegCompiler* c, const UfPattern* pat, 
 
 static uint8_t compile_expr(UfRegCompiler* c, const UfExpr* expr, int target_reg) {
     if (!expr || c->had_error) return 0;
+    c->current_line = (int)expr->span.start.line;
     int line = (int)expr->span.start.line;
     uint8_t dst = (target_reg >= 0) ? (uint8_t)target_reg : alloc_reg(c);
 
@@ -552,6 +590,14 @@ static uint8_t compile_expr(UfRegCompiler* c, const UfExpr* expr, int target_reg
                 }
             }
 
+            /* A failure inside the nested function invalidates the whole
+             * compilation: without this the enclosing compiler would happily
+             * emit a closure over half-built bytecode and the VM would run it. */
+            if (fn_c.had_error) {
+                c->had_error = true;
+                return dst;
+            }
+
             uint16_t fn_idx = (uint16_t)make_constant(c, uf_val_reg_fn(c->rt, fn_c.function));
             emit_abx(c, ROP_CLOSURE, dst, fn_idx, line);
             break;
@@ -790,6 +836,7 @@ static UfRegFunction* compile_reg_method_helper(UfRegCompiler* c, UfStmt* method
 static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
     if (!stmt || c->had_error) return;
     int line = (int)stmt->span.start.line;
+    c->current_line = line;
 
     switch (stmt->kind) {
         case UF_STMT_LET: {
@@ -1067,7 +1114,7 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
 
         case UF_STMT_BREAK: {
             if (!c->current_loop) {
-                c->had_error = true;
+                compile_error(c, line, "'break' outside of a loop");
                 return;
             }
             for (int i = c->local_count - 1; i >= 0; --i) {
@@ -1090,7 +1137,7 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
 
         case UF_STMT_CONTINUE: {
             if (!c->current_loop) {
-                c->had_error = true;
+                compile_error(c, line, "'continue' outside of a loop");
                 return;
             }
             for (int i = c->local_count - 1; i >= 0; --i) {
@@ -1146,6 +1193,14 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
                     fn_c.function->upvalues[i].index = fn_c.upvalues[i].index;
                     fn_c.function->upvalues[i].is_local = fn_c.upvalues[i].is_local ? 1 : 0;
                 }
+            }
+
+            /* A failure inside the nested function invalidates the whole
+             * compilation: without this the enclosing compiler would happily
+             * emit a closure over half-built bytecode and the VM would run it. */
+            if (fn_c.had_error) {
+                c->had_error = true;
+                return;
             }
 
             uint16_t fn_idx = (uint16_t)make_constant(c, uf_val_reg_fn(c->rt, fn_c.function));

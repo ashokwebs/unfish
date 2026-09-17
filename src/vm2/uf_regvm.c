@@ -192,6 +192,12 @@ static void regvm_runtime_error(UfRegVM* vm, const char* fmt, ...) {
     /* Check if an internal try handler can catch this */
     if (vm->handler_count > 0) {
         UfRegVMHandler* h = &vm->handlers[--vm->handler_count];
+        /* This handler is being consumed here rather than by a longjmp, so the
+         * runtime's parallel handler stack has to be popped too. Leaving it
+         * behind desynchronises the two stacks, and a later uf_runtime_raise()
+         * would longjmp into this spent handler with the VM's handler stack
+         * empty -- indexing vm->handlers[-1] and jumping to a garbage ip. */
+        if (vm->rt && vm->rt->try_handler_count > 0) vm->rt->try_handler_count--;
         while (vm->frame_count > h->frame_index + 1) {
             UfRegFrame* top = &vm->frames[vm->frame_count - 1];
             close_upvalues(vm, top->regs);
@@ -1659,6 +1665,14 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
                 th->scope_env = vm->rt->current_env;
 
                 if (setjmp(th->jmp) != 0) {
+                    /* Defensive: a longjmp must always be paired with a live
+                     * VM handler. Bail out rather than index handlers[-1] if
+                     * the two stacks ever drift apart again. */
+                    if (vm->handler_count <= 0) {
+                        vm->had_error = true;
+                        if (vm->rt) vm->rt->had_runtime_error = true;
+                        return uf_val_null();
+                    }
                     UfRegVMHandler* cur_h = &vm->handlers[vm->handler_count - 1];
                     UfValue err = vm->rt->current_error;
                     while (vm->frame_count - 1 > cur_h->frame_index) {

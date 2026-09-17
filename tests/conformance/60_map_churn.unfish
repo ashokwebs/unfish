@@ -1,0 +1,64 @@
+# expect: 200
+# expect: 100
+# expect: 150
+# expect: 1
+# expect: 199
+# expect: 40
+# expect: 0
+# expect: false
+# expect: true
+# expect: true
+# expect: 150
+# expect: 59000
+# expect: 150
+# expect: 150
+
+# Deletion followed by re-insertion: the native backend probes its map
+# linearly from the key hash, so a removed slot has to leave a marker behind
+# or every key whose probe ran through it becomes unreachable. This churns
+# enough keys, across enough table growths, to walk those probe chains.
+
+let m = {}
+let i = 0
+while i < 200:
+    m["key" + to_string(i)] = i
+    i = i + 1
+say(len(m))
+
+# Remove every even key.
+i = 0
+while i < 200:
+    if i % 2 == 0:
+        delete(m, "key" + to_string(i))
+    i = i + 1
+say(len(m))
+
+# Put back every fourth key, with a new value.
+i = 0
+while i < 200:
+    if i % 4 == 0:
+        m["key" + to_string(i)] = i * 10
+    i = i + 1
+say(len(m))
+
+# Surviving odd keys keep their original values; revived keys carry the new one.
+say(m["key1"])
+say(m["key199"])
+say(m["key4"])
+say(m["key0"])
+
+# A key deleted and never revived stays gone.
+say(has_key(m, "key2"))
+say(m["key2"] == null)
+say(has_key(m, "key0"))
+
+# Iteration visits every live entry exactly once.
+let seen = 0
+let total = 0
+for k in m:
+    seen = seen + 1
+    total = total + m[k]
+say(seen)
+say(total)
+say(len(keys(m)))
+say(len(values(m)))

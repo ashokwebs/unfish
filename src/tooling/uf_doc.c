@@ -118,15 +118,20 @@ static void parse_doc_comments(const char* source, DocIndex* idx) {
 
             char* doc_text = uf_strbuf_detach(&doc_buf);
 
-            if (!seen_code && idx->module_doc == NULL) {
-                /* Check if there are only blank lines before next code */
-                size_t probe = i;
-                while (probe < total_lines) {
-                    const char* pl = lines[probe];
-                    while (*pl == ' ' || *pl == '\t') pl++;
-                    if (*pl != '\0' && strncmp(pl, "##", 2) != 0) break;
-                    probe++;
-                }
+            /* A leading '##' block belongs to the declaration it sits directly
+             * on top of; it is the module's own docstring only when a blank
+             * line separates it from whatever follows. This test used to be
+             * computed and then discarded, so the first documented declaration
+             * in any file without a separate module docstring silently lost
+             * its documentation to the file header. */
+            bool attached_to_decl = false;
+            if (i < total_lines) {
+                const char* next = lines[i];
+                while (*next == ' ' || *next == '\t') next++;
+                if (*next != '\0' && *next != '#') attached_to_decl = true;
+            }
+
+            if (!seen_code && idx->module_doc == NULL && !attached_to_decl) {
                 idx->module_doc = doc_text;
             } else {
                 /* Associate with next non-blank, non-comment line */

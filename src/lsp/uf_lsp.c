@@ -395,8 +395,17 @@ int uf_lsp_run(FILE* in, FILE* out) {
         char* msg = lsp_read_message(in);
         if (!msg) break;
 
-        /* Simple JSON-RPC dispatch */
-        if (strstr(msg, "\"method\":\"initialize\"")) {
+        /* JSON-RPC dispatch. The method name is pulled out with the
+         * whitespace-tolerant extractor rather than matched as the literal
+         * substring "\"method\":\"x\"": whitespace around a colon is
+         * insignificant in JSON, and a client that pretty-prints its requests
+         * (`"method": "initialize"`) previously matched nothing at all, so the
+         * server answered every single request with a null result and
+         * published no diagnostics. */
+        char* method = lsp_extract_json_string(msg, "method");
+        const char* m = method ? method : "";
+
+        if (strcmp(m, "initialize") == 0) {
             char* id_ptr = strstr(msg, "\"id\":");
             long id = id_ptr ? strtol(id_ptr + 5, NULL, 10) : 1;
             char resp[1024];
@@ -410,18 +419,19 @@ int uf_lsp_run(FILE* in, FILE* out) {
                      "\"documentFormattingProvider\":true"
                      "}}}", id);
             lsp_send_message(out, resp);
-        } else if (strstr(msg, "\"method\":\"initialized\"")) {
+        } else if (strcmp(m, "initialized") == 0) {
             /* No response required */
-        } else if (strstr(msg, "\"method\":\"shutdown\"")) {
+        } else if (strcmp(m, "shutdown") == 0) {
             char* id_ptr = strstr(msg, "\"id\":");
             long id = id_ptr ? strtol(id_ptr + 5, NULL, 10) : 1;
             char resp[128];
             snprintf(resp, sizeof(resp), "{\"jsonrpc\":\"2.0\",\"id\":%ld,\"result\":null}", id);
             lsp_send_message(out, resp);
-        } else if (strstr(msg, "\"method\":\"exit\"")) {
+        } else if (strcmp(m, "exit") == 0) {
+            free(method);
             free(msg);
             break;
-        } else if (strstr(msg, "\"method\":\"textDocument/didOpen\"")) {
+        } else if (strcmp(m, "textDocument/didOpen") == 0) {
             char* uri = lsp_extract_json_string(msg, "uri");
             char* text = lsp_extract_json_string(msg, "text");
             if (uri && text) {
@@ -430,7 +440,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
             }
             free(uri);
             free(text);
-        } else if (strstr(msg, "\"method\":\"textDocument/didChange\"")) {
+        } else if (strcmp(m, "textDocument/didChange") == 0) {
             char* uri = lsp_extract_json_string(msg, "uri");
             char* text = lsp_extract_json_string(msg, "text");
             if (uri && text) {
@@ -439,7 +449,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
             }
             free(uri);
             free(text);
-        } else if (strstr(msg, "\"method\":\"textDocument/didClose\"")) {
+        } else if (strcmp(m, "textDocument/didClose") == 0) {
             char* uri_start = strstr(msg, "\"uri\":\"");
             if (uri_start) {
                 uri_start += 7;
@@ -454,7 +464,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
                     }
                 }
             }
-        } else if (strstr(msg, "\"method\":\"textDocument/hover\"")) {
+        } else if (strcmp(m, "textDocument/hover") == 0) {
             char* id_ptr = strstr(msg, "\"id\":");
             long id = id_ptr ? strtol(id_ptr + 5, NULL, 10) : 1;
             char* uri_start = strstr(msg, "\"uri\":\"");
@@ -504,7 +514,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
                 snprintf(resp, sizeof(resp), "{\"jsonrpc\":\"2.0\",\"id\":%ld,\"result\":null}", id);
             }
             lsp_send_message(out, resp);
-        } else if (strstr(msg, "\"method\":\"textDocument/definition\"")) {
+        } else if (strcmp(m, "textDocument/definition") == 0) {
             char* id_ptr = strstr(msg, "\"id\":");
             long id = id_ptr ? strtol(id_ptr + 5, NULL, 10) : 1;
             char* uri_start = strstr(msg, "\"uri\":\"");
@@ -568,7 +578,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
                 snprintf(resp, sizeof(resp), "{\"jsonrpc\":\"2.0\",\"id\":%ld,\"result\":null}", id);
             }
             lsp_send_message(out, resp);
-        } else if (strstr(msg, "\"method\":\"textDocument/completion\"")) {
+        } else if (strcmp(m, "textDocument/completion") == 0) {
             char* id_ptr = strstr(msg, "\"id\":");
             long id = id_ptr ? strtol(id_ptr + 5, NULL, 10) : 1;
 
@@ -609,7 +619,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
                      "{\"jsonrpc\":\"2.0\",\"id\":%ld,\"result\":{\"isIncomplete\":false,\"items\":[%s]}}",
                      id, items);
             lsp_send_message(out, resp);
-        } else if (strstr(msg, "\"method\":\"textDocument/formatting\"")) {
+        } else if (strcmp(m, "textDocument/formatting") == 0) {
             char* id_ptr = strstr(msg, "\"id\":");
             long id = id_ptr ? strtol(id_ptr + 5, NULL, 10) : 1;
             char* uri_start = strstr(msg, "\"uri\":\"");
@@ -683,6 +693,7 @@ int uf_lsp_run(FILE* in, FILE* out) {
             }
         }
 
+        free(method);
         free(msg);
     }
 

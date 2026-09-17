@@ -2757,6 +2757,7 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
             fprintf(out, "    (void)_env; (void)_argc; (void)_args;\n");
             fprintf(out, "    UfCatchFrame* _fn_catch_entry = g_catch_stack;\n");
             fprintf(out, "    (void)_fn_catch_entry;\n");
+            fprintf(out, "    uf_rt_check_stack();\n");
             for (size_t c = 0; c < ctx->lambdas[i].capture_count; ++c) {
                 const char* cname = ctx->lambdas[i].captures[c];
                 const char* ctype = is_boxed_name(cname) ? "UfVal*" : "UfVal";
@@ -2850,6 +2851,7 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
             fputs(") {\n", out);
             fputs("    UfCatchFrame* _fn_catch_entry = g_catch_stack;\n", out);
             fputs("    (void)_fn_catch_entry;\n", out);
+            fputs("    uf_rt_check_stack();\n", out);
             for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
                 const char* pname = stmt->as.function_stmt.params[p];
                 if (is_boxed_name(pname)) {
@@ -2895,6 +2897,7 @@ static void emit_module_unit(FILE* out, UfEmitContext* ctx, const UfProgram* pro
             fputs(") {\n", out);
             fputs("    UfCatchFrame* _fn_catch_entry = g_catch_stack;\n", out);
             fputs("    (void)_fn_catch_entry;\n", out);
+            fputs("    uf_rt_check_stack();\n", out);
             for (size_t p = 0; p < stmt->as.function_stmt.param_count; ++p) {
                 const char* pname = stmt->as.function_stmt.params[p];
                 if (is_boxed_name(pname)) {

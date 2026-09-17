@@ -514,17 +514,32 @@ UfValue uf_evaluate_expression(UfRuntime* rt, UfEnv* env, const UfExpr* expr) {
                 case UF_TOK_LTEQ:
                 case UF_TOK_GT:
                 case UF_TOK_GTEQ: {
-                    if (left.kind != UF_VAL_NUMBER || right.kind != UF_VAL_NUMBER) {
-                        uf_runtime_error(rt, expr->span, "Comparison operands must be numbers, got '%s' and '%s'",
-                                         uf_val_type_name(left), uf_val_type_name(right));
-                    } else {
+                    /* Strings order lexicographically, exactly as the bytecode
+                     * VMs, the native backend, and sort()'s default comparison
+                     * already do. The interpreter used to reject them outright,
+                     * so `"a" < "b"` was the one thing sort() could do that a
+                     * hand-written comparison could not. */
+                    int cmp = 0;
+                    bool comparable = true;
+                    if (left.kind == UF_VAL_NUMBER && right.kind == UF_VAL_NUMBER) {
                         double a = left.as.number;
                         double b = right.as.number;
+                        cmp = (a < b) ? -1 : ((a > b) ? 1 : 0);
+                    } else if (left.kind == UF_VAL_STRING && right.kind == UF_VAL_STRING) {
+                        cmp = strcmp(left.as.string->chars, right.as.string->chars);
+                    } else {
+                        comparable = false;
+                    }
 
-                        if (expr->as.binary.op == UF_TOK_LT)   result = uf_val_bool(a < b);
-                        if (expr->as.binary.op == UF_TOK_LTEQ) result = uf_val_bool(a <= b);
-                        if (expr->as.binary.op == UF_TOK_GT)   result = uf_val_bool(a > b);
-                        if (expr->as.binary.op == UF_TOK_GTEQ) result = uf_val_bool(a >= b);
+                    if (!comparable) {
+                        uf_runtime_error(rt, expr->span,
+                                         "Comparison operands must both be numbers or both be strings, got '%s' and '%s'",
+                                         uf_val_type_name(left), uf_val_type_name(right));
+                    } else {
+                        if (expr->as.binary.op == UF_TOK_LT)   result = uf_val_bool(cmp < 0);
+                        if (expr->as.binary.op == UF_TOK_LTEQ) result = uf_val_bool(cmp <= 0);
+                        if (expr->as.binary.op == UF_TOK_GT)   result = uf_val_bool(cmp > 0);
+                        if (expr->as.binary.op == UF_TOK_GTEQ) result = uf_val_bool(cmp >= 0);
                     }
                     break;
                 }

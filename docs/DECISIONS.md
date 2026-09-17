@@ -206,6 +206,18 @@
   5. **Native `error(message, [kind])`**: Standard library built-in enabling user scripts to raise custom exceptions with arbitrary error kinds (defaulting to `"UserError"`).
 * **Consequences**: Complete, structured, and leak-free exception handling across nested function calls, verified under AddressSanitizer and UndefinedBehaviorSanitizer.
 
+## ADR 018: Multi-Module Native C99 Compilation & Namespaced Symbol Resolution
+* **Date**: Milestone 25 (Phase 9)
+* **Status**: Accepted
+* **Context**: Unfish projects can be organized across multiple source files using `import` and `from ... import` statements. Single-file compilation for native binaries was insufficient for modular applications. We needed a static compilation strategy that discovers, resolves, and links multi-module Unfish programs into a single standalone C99 binary without external linker complexity.
+* **Decision**:
+  1. **Compile-Time Discovery**: Statically traverse the module dependency graph starting from the entry script, parsing each imported `.unfish` module recursively.
+  2. **Cycle Detection**: Track an `is_loading` state per module during dependency resolution to detect and report `CircularImportError`.
+  3. **Symbol Namespacing**: Mangle identifiers in generated C99 code using a module-prefixed namespace pattern (`uf_m_<modname>_<ident>`), preventing global symbol collisions across modules.
+  4. **Module Initializers**: Emit a dedicated initialization function (`uf_init_mod_<modname>`) per module that registers its exported functions, variables, and structs into the runtime module registry.
+  5. **Resolution Order**: Standardize module lookup across: caller directory -> current working directory -> executable-relative bundled stdlib (`<bin>/../src/stdlib/`) -> `UNFISH_PATH`.
+* **Consequences**: Unfish programs with complex multi-module directory structures compile into self-contained, high-performance native C99 binaries with zero runtime dependencies beyond standard libc.
+
 ## ADR 019: Standard Library Modularization and Sandboxed Core Modules
 * **Date**: Milestone 9 (Phase 4 Part 2)
 * **Status**: Accepted

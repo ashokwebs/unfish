@@ -280,14 +280,17 @@ struct UfRtArray {
 typedef struct {
     UfVal key;
     UfVal value;
-    bool occupied;
+    uint32_t hash;   /* cached key hash, valid while `occupied` */
+    bool occupied;   /* slot holds a live entry */
+    bool tombstone;  /* slot held an entry that was deleted; probing continues */
 } UfRtMapEntry;
 
 struct UfRtMap {
     UfRtHeader header;
     UfRtMapEntry* entries;
     size_t count;
-    size_t capacity;
+    size_t capacity;      /* always a power of two, so hash & (capacity-1) indexes */
+    size_t tombstones;
     UfVal* order_keys;
     size_t order_count;
 };
@@ -351,6 +354,24 @@ typedef struct UfCatchFrame {
 
 static UfCatchFrame* g_catch_stack = NULL;
 
+/* --- Recursion depth guard ---------------------------------------------
+ * Native code recurses on the real C stack, so runaway recursion would
+ * segfault the process instead of raising the catchable StackOverflowError
+ * that the interpreter and both VMs produce. Every generated Unfish function
+ * calls uf_rt_check_stack() on entry.
+ *
+ * We measure how far the stack has grown from main() rather than counting
+ * frames: a counter would need a matching decrement on every exit path, and
+ * `uf_throw` longjmps straight out of nested calls without running any
+ * epilogue, which would leave the count permanently skewed. Comparing
+ * addresses as uintptr_t also keeps us clear of the undefined behaviour of
+ * relational operators on unrelated pointers. */
+static uintptr_t g_uf_stack_base = 0;
+
+/* Well under the usual 8 MB default so the guard fires before the OS does,
+ * with room left for uf_raise() itself to build and throw the error. */
+#define UF_RT_STACK_LIMIT_BYTES ((uintptr_t)4 * 1024 * 1024)
+
 static inline void uf_catch_push(UfCatchFrame* frame) {
     frame->prev = g_catch_stack;
     frame->error.kind = UF_RT_NULL;
@@ -376,6 +397,10 @@ static void* uf_rt_alloc(UfRtKind kind, size_t size) {
 }
 
 static inline void uf_init(int argc, char** argv) {
+    char _stack_probe;
+    /* Only ever used for pointer arithmetic, never dereferenced, so it stays
+     * valid as a reference point after uf_init returns. */
+    g_uf_stack_base = (uintptr_t)&_stack_probe;
     g_uf_rt.all_objects = NULL;
     g_uf_rt.argc = argc;
     g_uf_rt.argv = argv;
@@ -636,6 +661,17 @@ static inline void uf_raise(const char* msg, const char* kind) {
     uf_throw(uf_val_error(m, k));
 }
 
+static inline void uf_rt_check_stack(void) {
+    char probe;
+    uintptr_t here = (uintptr_t)&probe;
+    uintptr_t used = (here < g_uf_stack_base) ? (g_uf_stack_base - here)
+                                              : (here - g_uf_stack_base);
+    if (g_uf_stack_base != 0 && used > UF_RT_STACK_LIMIT_BYTES) {
+        uf_raise("StackOverflowError: Maximum call stack depth exceeded",
+                 "StackOverflowError");
+    }
+}
+
 static inline UfVal uf_array_new(size_t capacity) {
     UfRtArray* arr = (UfRtArray*)uf_rt_alloc(UF_RT_ARRAY, sizeof(UfRtArray));
     arr->count = 0;
@@ -654,14 +690,105 @@ static inline void uf_array_push(UfVal arr, UfVal item) {
     a->elements[a->count++] = item;
 }
 
+/* --- Map hashing -------------------------------------------------------
+ * Map keys are always strings. Entries live in an open-addressed table
+ * probed linearly from the key's hash; `capacity` is kept a power of two so
+ * the modulo is a mask. Deletion leaves a tombstone so that probe chains
+ * running through the removed slot stay intact. */
+
+static inline size_t uf_map_round_capacity(size_t requested) {
+    size_t cap = 8;
+    /* Stop before the shift overflows to 0 and spins forever. Callers pass
+     * literal/collection sizes, so this ceiling is never reached in practice. */
+    size_t max_cap = ((size_t)1) << (sizeof(size_t) * 8 - 2);
+    while (cap < requested && cap < max_cap) cap <<= 1;
+    return cap;
+}
+
+static inline uint32_t uf_rt_str_hash(const char* chars, size_t length) {
+    /* FNV-1a */
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < length; ++i) {
+        hash ^= (uint8_t)chars[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static inline uint32_t uf_map_key_hash(UfVal key) {
+    if (key.kind != UF_RT_STRING) return 0;
+    return uf_rt_str_hash(key.as.string->chars, key.as.string->length);
+}
+
+static inline bool uf_map_key_eq(UfVal entry_key, const char* chars, size_t length) {
+    if (entry_key.kind != UF_RT_STRING) return false;
+    UfRtString* s = entry_key.as.string;
+    return s->length == length && memcmp(s->chars, chars, length) == 0;
+}
+
+/* Locate `chars` in the table. On a hit, sets *found and returns the live
+ * slot. On a miss, returns the slot the key should be inserted into (the
+ * first tombstone passed, else the terminating empty slot). */
+static inline size_t uf_map_find_slot(UfRtMap* m, const char* chars, size_t length,
+                                      uint32_t hash, bool* found) {
+    size_t mask = m->capacity - 1;
+    size_t idx = (size_t)hash & mask;
+    size_t insert_at = m->capacity; /* sentinel: no tombstone seen yet */
+    *found = false;
+    for (size_t probed = 0; probed < m->capacity; ++probed) {
+        UfRtMapEntry* e = &m->entries[idx];
+        if (e->occupied) {
+            if (e->hash == hash && uf_map_key_eq(e->key, chars, length)) {
+                *found = true;
+                return idx;
+            }
+        } else if (e->tombstone) {
+            if (insert_at == m->capacity) insert_at = idx;
+        } else {
+            return (insert_at == m->capacity) ? idx : insert_at;
+        }
+        idx = (idx + 1) & mask;
+    }
+    return (insert_at == m->capacity) ? 0 : insert_at;
+}
+
 static inline UfVal uf_map_new(size_t capacity) {
     UfRtMap* m = (UfRtMap*)uf_rt_alloc(UF_RT_MAP, sizeof(UfRtMap));
     m->count = 0;
-    m->capacity = capacity < 8 ? 8 : capacity;
+    m->tombstones = 0;
+    m->capacity = uf_map_round_capacity(capacity);
     m->entries = (UfRtMapEntry*)calloc(m->capacity, sizeof(UfRtMapEntry));
     m->order_keys = (UfVal*)malloc(sizeof(UfVal) * m->capacity);
     m->order_count = 0;
     UfVal v; v.kind = UF_RT_MAP; v.as.map = m; return v;
+}
+
+/* Look up a C string key; returns NULL when absent. */
+static inline UfRtMapEntry* uf_map_lookup(UfRtMap* m, const char* chars, size_t length) {
+    bool found = false;
+    size_t slot = uf_map_find_slot(m, chars, length, uf_rt_str_hash(chars, length), &found);
+    return found ? &m->entries[slot] : NULL;
+}
+
+static inline void uf_map_grow(UfRtMap* m) {
+    size_t old_cap = m->capacity;
+    UfRtMapEntry* old_entries = m->entries;
+
+    m->capacity = old_cap * 2;
+    m->entries = (UfRtMapEntry*)calloc(m->capacity, sizeof(UfRtMapEntry));
+    m->count = 0;
+    m->tombstones = 0; /* tombstones are dropped by the rehash */
+
+    size_t mask = m->capacity - 1;
+    for (size_t i = 0; i < old_cap; ++i) {
+        if (!old_entries[i].occupied) continue;
+        size_t idx = (size_t)old_entries[i].hash & mask;
+        while (m->entries[idx].occupied) idx = (idx + 1) & mask;
+        m->entries[idx] = old_entries[i];
+        m->count++;
+    }
+    free(old_entries);
+    m->order_keys = (UfVal*)realloc(m->order_keys, sizeof(UfVal) * m->capacity);
 }
 
 static inline void uf_set(UfVal target, UfVal index, UfVal value);
@@ -870,17 +997,18 @@ static inline char* uf_to_str_impl(UfVal v, UfToStrVisited* vis) {
                 strcat(res, ": ");
                 free(k);
                 /* Find value */
-                for (size_t j = 0; j < v.as.map->capacity; ++j) {
-                    if (v.as.map->entries[j].occupied &&
-                        strcmp(v.as.map->entries[j].key.as.string->chars, v.as.map->order_keys[i].as.string->chars) == 0) {
-                        char* val_s = uf_to_str_impl(v.as.map->entries[j].value, vis);
+                {
+                    UfVal _ok = v.as.map->order_keys[i];
+                    UfRtMapEntry* _e = uf_map_lookup(v.as.map, _ok.as.string->chars,
+                                                     _ok.as.string->length);
+                    if (_e) {
+                        char* val_s = uf_to_str_impl(_e->value, vis);
                         if (strlen(res) + strlen(val_s) + 4 >= cap) {
                             cap = (cap + strlen(val_s)) * 2;
                             res = (char*)realloc(res, cap);
                         }
                         strcat(res, val_s);
                         free(val_s);
-                        break;
                     }
                 }
             }
@@ -1321,13 +1449,9 @@ static inline UfVal uf_get(UfVal target, UfVal index) {
     }
     if (target.kind == UF_RT_MAP) {
         if (index.kind != UF_RT_STRING) return uf_null();
-        for (size_t i = 0; i < target.as.map->capacity; ++i) {
-            if (target.as.map->entries[i].occupied &&
-                strcmp(target.as.map->entries[i].key.as.string->chars, index.as.string->chars) == 0) {
-                return target.as.map->entries[i].value;
-            }
-        }
-        return uf_null();
+        UfRtMapEntry* e = uf_map_lookup(target.as.map, index.as.string->chars,
+                                        index.as.string->length);
+        return e ? e->value : uf_null();
     }
     fprintf(stderr, "Runtime Error: Cannot index value of this type\n"); exit(3);
 }
@@ -1379,54 +1503,34 @@ static inline void uf_set(UfVal target, UfVal index, UfVal value) {
     if (target.kind == UF_RT_MAP) {
         if (index.kind != UF_RT_STRING) { fprintf(stderr, "Runtime Error: Map key must be string\n"); exit(3); }
         UfRtMap* m = target.as.map;
-        /* Update existing key */
-        for (size_t i = 0; i < m->capacity; ++i) {
-            if (m->entries[i].occupied && strcmp(m->entries[i].key.as.string->chars, index.as.string->chars) == 0) {
-                m->entries[i].value = value;
-                return;
-            }
+        uint32_t hash = uf_map_key_hash(index);
+        const char* kchars = index.as.string->chars;
+        size_t klen = index.as.string->length;
+
+        /* Update in place if the key is already present. */
+        bool found = false;
+        size_t slot = uf_map_find_slot(m, kchars, klen, hash, &found);
+        if (found) {
+            m->entries[slot].value = value;
+            return;
         }
-        /* Grow if at 75% load factor or completely full */
-        if (m->count * 4 >= m->capacity * 3) {
-            size_t old_cap = m->capacity;
-            UfRtMapEntry* old_entries = m->entries;
-            m->capacity = old_cap * 2;
-            m->entries = (UfRtMapEntry*)calloc(m->capacity, sizeof(UfRtMapEntry));
-            m->count = 0;
-            /* Reinsert existing entries */
-            for (size_t i = 0; i < old_cap; ++i) {
-                if (old_entries[i].occupied) {
-                    /* Find empty slot in new table */
-                    for (size_t j = 0; j < m->capacity; ++j) {
-                        if (!m->entries[j].occupied) {
-                            m->entries[j] = old_entries[i];
-                            m->count++;
-                            break;
-                        }
-                    }
-                }
-            }
-            free(old_entries);
-            /* Grow order_keys too */
-            m->order_keys = (UfVal*)realloc(m->order_keys, sizeof(UfVal) * m->capacity);
+
+        /* Grow at a 75% load factor, counting tombstones: they occupy slots
+         * and lengthen probe chains just as live entries do. */
+        if ((m->count + m->tombstones + 1) * 4 >= m->capacity * 3) {
+            uf_map_grow(m);
+            slot = uf_map_find_slot(m, kchars, klen, hash, &found);
         }
-        /* Insert into first empty slot */
-        for (size_t i = 0; i < m->capacity; ++i) {
-            if (!m->entries[i].occupied) {
-                m->entries[i].occupied = true;
-                m->entries[i].key = index;
-                m->entries[i].value = value;
-                m->count++;
-                if (m->order_count >= m->capacity) {
-                    m->capacity *= 2;
-                    m->entries = (UfRtMapEntry*)realloc(m->entries, sizeof(UfRtMapEntry) * m->capacity);
-                    memset(&m->entries[m->capacity / 2], 0, sizeof(UfRtMapEntry) * (m->capacity / 2));
-                    m->order_keys = (UfVal*)realloc(m->order_keys, sizeof(UfVal) * m->capacity);
-                }
-                m->order_keys[m->order_count++] = index;
-                return;
-            }
-        }
+
+        if (m->entries[slot].tombstone) m->tombstones--;
+        m->entries[slot].occupied = true;
+        m->entries[slot].tombstone = false;
+        m->entries[slot].hash = hash;
+        m->entries[slot].key = index;
+        m->entries[slot].value = value;
+        m->count++;
+        m->order_keys[m->order_count++] = index;
+        return;
     }
     fprintf(stderr, "Runtime Error: Cannot assign to index of this type\n"); exit(3);
 }
@@ -1577,14 +1681,8 @@ static inline UfVal uf_array_slice(UfVal arr, size_t start_idx) {
 
 static inline UfVal uf_destructure_get_key(UfVal target, const char* key) {
     if (target.kind == UF_RT_MAP) {
-        for (size_t i = 0; i < target.as.map->capacity; ++i) {
-            if (target.as.map->entries[i].occupied &&
-                target.as.map->entries[i].key.kind == UF_RT_STRING &&
-                strcmp(target.as.map->entries[i].key.as.string->chars, key) == 0) {
-                return target.as.map->entries[i].value;
-            }
-        }
-        return uf_null();
+        UfRtMapEntry* e = uf_map_lookup(target.as.map, key, strlen(key));
+        return e ? e->value : uf_null();
     } else if (target.kind == UF_RT_INSTANCE) {
         UfRtInstance* inst = target.as.instance;
         for (size_t i = 0; i < inst->field_count; ++i) {
@@ -2112,11 +2210,25 @@ static inline UfVal uf_math_abs(UfVal a) { return uf_num(fabs(a.as.number)); }
 static inline UfVal uf_math_floor(UfVal a) { return uf_num(floor(a.as.number)); }
 static inline UfVal uf_math_ceil(UfVal a) { return uf_num(ceil(a.as.number)); }
 static inline UfVal uf_math_round(UfVal a) { return uf_num(round(a.as.number)); }
-static inline UfVal uf_math_sqrt(UfVal a) { return uf_num(sqrt(a.as.number)); }
+/* sqrt/log validate their domain here for the same reason the interpreter and
+ * both VMs do: returning a silent nan/-inf from the native tier would mean a
+ * program that reports a clean, catchable error in development quietly
+ * produces garbage once compiled. Messages match uf_stdlib.c exactly. */
+static inline UfVal uf_math_sqrt(UfVal a) {
+    if (a.as.number < 0) {
+        uf_raise("'sqrt()' domain error: cannot compute square root of negative number", "DomainError");
+    }
+    return uf_num(sqrt(a.as.number));
+}
 static inline UfVal uf_math_pow(UfVal a, UfVal b) { return uf_num(pow(a.as.number, b.as.number)); }
 static inline UfVal uf_math_min(UfVal a, UfVal b) { return uf_num(fmin(a.as.number, b.as.number)); }
 static inline UfVal uf_math_max(UfVal a, UfVal b) { return uf_num(fmax(a.as.number, b.as.number)); }
-static inline UfVal uf_math_log(UfVal a) { return uf_num(log(a.as.number)); }
+static inline UfVal uf_math_log(UfVal a) {
+    if (a.as.number <= 0) {
+        uf_raise("'log()' domain error: argument must be positive", "DomainError");
+    }
+    return uf_num(log(a.as.number));
+}
 static inline UfVal uf_math_sin(UfVal a) { return uf_num(sin(a.as.number)); }
 static inline UfVal uf_math_cos(UfVal a) { return uf_num(cos(a.as.number)); }
 static inline UfVal uf_math_tan(UfVal a) { return uf_num(tan(a.as.number)); }
@@ -2193,14 +2305,35 @@ static inline UfVal uf_str_ends_with(UfVal s, UfVal suffix) {
 }
 
 static inline UfVal uf_str_char_at(UfVal s, UfVal idx) {
-    return uf_get(s, idx);
+    /* char_at() is deliberately NOT string indexing: a negative index counts
+     * from the end and an out-of-range index yields "" rather than raising,
+     * matching std_char_at() in uf_stdlib.c. Delegating to uf_get() instead
+     * aborted the program on any out-of-range index. */
+    if (s.kind != UF_RT_STRING || idx.kind != UF_RT_NUMBER) return uf_str("");
+    UfRtString* str = s.as.string;
+    long i = (long)idx.as.number;
+    if (i < 0) i += (long)str->length;
+    if (i < 0 || (size_t)i >= str->length) return uf_str("");
+    char ch[2];
+    ch[0] = str->chars[i];
+    ch[1] = '\0';
+    return uf_str(ch);
 }
 
 static inline UfVal uf_str_to_number(UfVal s) {
     if (s.kind != UF_RT_STRING) return uf_null();
+    const char* str = s.as.string->chars;
+    while (isspace((unsigned char)*str)) str++;
+    if (*str == '\0') return uf_null();
+
     char* endptr = NULL;
-    double d = strtod(s.as.string->chars, &endptr);
-    if (endptr == s.as.string->chars) return uf_null();
+    double d = strtod(str, &endptr);
+    if (endptr == str) return uf_null();
+    /* Trailing garbage makes the whole conversion fail, matching uf_stdlib.c:
+     * to_number("12abc") is null, not 12. */
+    while (isspace((unsigned char)*endptr)) endptr++;
+    if (*endptr != '\0') return uf_null();
+
     return uf_num(d);
 }
 
@@ -2246,9 +2379,16 @@ static inline UfVal uf_str_substring(UfVal s, UfVal start_v, UfVal end_v) {
     UfRtString* str = s.as.string;
     long start = (start_v.kind == UF_RT_NUMBER) ? (long)start_v.as.number : 0;
     long end = (end_v.kind == UF_RT_NUMBER) ? (long)end_v.as.number : (long)str->length;
+    /* Clamping order mirrors std_substring() in uf_stdlib.c: a negative index
+     * counts back from the end *first*, and only then is the range clamped.
+     * Clamping a negative start straight to 0 made substring("hello", -1, 3)
+     * return "hel" natively where every other backend returns "". */
+    if (start < 0) start += (long)str->length;
+    if (end < 0) end += (long)str->length;
     if (start < 0) start = 0;
+    if (start > (long)str->length) start = (long)str->length;
+    if (end < start) end = start;
     if (end > (long)str->length) end = (long)str->length;
-    if (start > end) start = end;
     size_t count = (size_t)(end - start);
     char* buf = (char*)malloc(count + 1);
     if (count > 0) memcpy(buf, str->chars + start, count);
@@ -2435,12 +2575,8 @@ static inline UfVal uf_map_values(UfVal target) {
     UfVal arr = uf_array_new(m->order_count);
     for (size_t i = 0; i < m->order_count; ++i) {
         UfVal key = m->order_keys[i];
-        for (size_t j = 0; j < m->capacity; ++j) {
-            if (m->entries[j].occupied && strcmp(m->entries[j].key.as.string->chars, key.as.string->chars) == 0) {
-                uf_array_push(arr, m->entries[j].value);
-                break;
-            }
-        }
+        UfRtMapEntry* e = uf_map_lookup(m, key.as.string->chars, key.as.string->length);
+        if (e) uf_array_push(arr, e->value);
     }
     return arr;
 }
@@ -2448,34 +2584,29 @@ static inline UfVal uf_map_values(UfVal target) {
 static inline UfVal uf_map_has_key(UfVal target, UfVal key) {
     if (target.kind != UF_RT_MAP || key.kind != UF_RT_STRING) return uf_bool(false);
     UfRtMap* m = target.as.map;
-    for (size_t i = 0; i < m->capacity; ++i) {
-        if (m->entries[i].occupied && strcmp(m->entries[i].key.as.string->chars, key.as.string->chars) == 0) {
-            return uf_bool(true);
-        }
-    }
-    return uf_bool(false);
+    return uf_bool(uf_map_lookup(m, key.as.string->chars, key.as.string->length) != NULL);
 }
 
 static inline UfVal uf_map_delete(UfVal target, UfVal key) {
     if (target.kind != UF_RT_MAP || key.kind != UF_RT_STRING) return uf_bool(false);
     UfRtMap* m = target.as.map;
-    for (size_t i = 0; i < m->capacity; ++i) {
-        if (m->entries[i].occupied && strcmp(m->entries[i].key.as.string->chars, key.as.string->chars) == 0) {
-            m->entries[i].occupied = false;
-            m->count--;
-            for (size_t k = 0; k < m->order_count; ++k) {
-                if (strcmp(m->order_keys[k].as.string->chars, key.as.string->chars) == 0) {
-                    for (size_t p = k; p + 1 < m->order_count; ++p) {
-                        m->order_keys[p] = m->order_keys[p + 1];
-                    }
-                    m->order_count--;
-                    break;
-                }
+    UfRtMapEntry* e = uf_map_lookup(m, key.as.string->chars, key.as.string->length);
+    if (!e) return uf_bool(false);
+
+    e->occupied = false;
+    e->tombstone = true; /* keep probe chains through this slot intact */
+    m->count--;
+    m->tombstones++;
+    for (size_t k = 0; k < m->order_count; ++k) {
+        if (uf_map_key_eq(m->order_keys[k], key.as.string->chars, key.as.string->length)) {
+            for (size_t p = k; p + 1 < m->order_count; ++p) {
+                m->order_keys[p] = m->order_keys[p + 1];
             }
-            return uf_bool(true);
+            m->order_count--;
+            break;
         }
     }
-    return uf_bool(false);
+    return uf_bool(true);
 }
 
 static inline UfVal uf_iter_get(UfVal target, long idx) {
@@ -3365,12 +3496,9 @@ static inline UfVal uf_import_symbol(UfVal mod, const char* mod_name, const char
         return uf_null();
     }
     UfRtMap* m = mod.as.map;
-    for (size_t i = 0; i < m->capacity; ++i) {
-        if (m->entries[i].occupied &&
-            m->entries[i].key.kind == UF_RT_STRING &&
-            strcmp(m->entries[i].key.as.string->chars, sym) == 0) {
-            return m->entries[i].value;
-        }
+    {
+        UfRtMapEntry* e = uf_map_lookup(m, sym, strlen(sym));
+        if (e) return e->value;
     }
     char err[128];
     snprintf(err, sizeof(err), "Cannot import name '%s' from module '%s'", sym, mod_name);

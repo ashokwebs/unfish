@@ -152,11 +152,71 @@ static void test_compile_loops_and_conditionals(void) {
     printf("test_compile_loops_and_conditionals passed!\n");
 }
 
+
+/* Regression: a nested function that blows an internal compiler limit used to
+ * leave the enclosing compiler happily emitting a closure over half-built
+ * bytecode. The VM then ran it and printed `null` instead of the real result,
+ * with a success exit code and no diagnostic at all. Compilation must fail
+ * loudly, and the failure must propagate out of the nested function. */
+static void test_compile_reports_internal_limits(void) {
+    /* 300 locals accumulated across nested scopes inside one function, which
+     * overflows the 256-slot local array while keeping every individual block
+     * under the parser's per-block statement limit. */
+    UfStrBuf sb;
+    uf_strbuf_init(&sb);
+    uf_strbuf_append(&sb, "fn f(k):\n");
+    int n = 0;
+    for (int blk = 0; blk < 6; ++blk) {
+        char header[128];
+        snprintf(header, sizeof(header), "%*sif k > -1:\n", 4 * (blk + 1), "");
+        uf_strbuf_append(&sb, header);
+        for (int i = 0; i < 50; ++i) {
+            char line[160];
+            snprintf(line, sizeof(line), "%*slet v%d = k + %d\n", 4 * (blk + 2), "", n, n);
+            uf_strbuf_append(&sb, line);
+            n++;
+        }
+    }
+    {
+        char tail[128];
+        snprintf(tail, sizeof(tail), "%*sreturn 7\n", 4 * 7, "");
+        uf_strbuf_append(&sb, tail);
+    }
+    uf_strbuf_append(&sb, "say(f(1))\n");
+
+    const char* src = sb.data;
+
+    UfArena arena;
+    uf_arena_init(&arena, 8192);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "test.unfish", src);
+
+    UfProgram* prog = parse_source(src, &arena, &interner, &reporter);
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+
+    UfBytecodeFunction* fn = uf_compile(prog, &rt, &reporter);
+
+    /* Must refuse to produce bytecode, and must say why. */
+    assert(fn == NULL);
+    assert(reporter.error_count > 0);
+
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    uf_strbuf_free(&sb);
+    printf("test_compile_reports_internal_limits passed!\n");
+}
+
 int main(void) {
     printf("Running bytecode compiler unit tests...\n");
     test_compile_simple();
     test_compile_closure();
     test_compile_loops_and_conditionals();
+    test_compile_reports_internal_limits();
     printf("All bytecode compiler unit tests passed successfully!\n");
     return 0;
 }

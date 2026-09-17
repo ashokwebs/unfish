@@ -210,11 +210,67 @@ static void test_reg_compiler_programs(void) {
     printf("test_reg_compiler_programs passed!\n");
 }
 
+
+/* Regression: a deeply right-nested expression exhausts the 250 virtual
+ * registers. The allocator used to return register 0 -- which aliases the
+ * live closure slot -- so the program ran on corrupt bytecode and printed
+ * nothing (or a wrong value) with no diagnostic. Compilation must now fail
+ * with a reported error. */
+static void test_reg_compiler_reports_internal_limits(void) {
+    UfStrBuf sb;
+    uf_strbuf_init(&sb);
+    uf_strbuf_append(&sb, "let r = ");
+    const int depth = 300;
+    for (int i = 1; i <= depth; ++i) {
+        char part[32];
+        snprintf(part, sizeof(part), "(%d + ", i);
+        uf_strbuf_append(&sb, part);
+    }
+    uf_strbuf_append(&sb, "0");
+    for (int i = 0; i < depth; ++i) {
+        uf_strbuf_append(&sb, ")");
+    }
+    uf_strbuf_append(&sb, "\nsay(r)\n");
+
+    const char* src = sb.data;
+
+    UfArena arena;
+    uf_arena_init(&arena, 8192);
+    UfInterner interner;
+    uf_interner_init(&interner, &arena);
+    UfDiagnosticReporter reporter;
+    uf_diag_reporter_init(&reporter, "test.unfish", src);
+
+    UfLexer lexer;
+    uf_lexer_init(&lexer, "test.unfish", src, &arena, &interner, &reporter);
+    UfParser parser;
+    uf_parser_init(&parser, &lexer, &arena, &reporter);
+    UfProgram* prog = uf_parse_program(&parser);
+    assert(prog && !parser.had_error);
+
+    UfRuntime rt;
+    uf_runtime_init(&rt, &reporter);
+    uf_stdlib_register_runtime(&rt);
+
+    UfRegFunction* fn = uf_reg_compile(prog, &rt, &reporter);
+
+    /* Must refuse to produce bytecode, and must say why. */
+    assert(fn == NULL);
+    assert(reporter.error_count > 0);
+
+    uf_runtime_free(&rt);
+    uf_interner_free(&interner);
+    uf_arena_free(&arena);
+    uf_strbuf_free(&sb);
+    printf("test_reg_compiler_reports_internal_limits passed!\n");
+}
+
 int main(void) {
     printf("Running Register VM unit tests...\n");
     test_instruction_encoding();
     test_raw_regvm_execution();
     test_reg_compiler_programs();
+    test_reg_compiler_reports_internal_limits();
     printf("All Register VM unit tests passed successfully!\n");
     return 0;
 }

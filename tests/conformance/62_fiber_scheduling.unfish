@@ -1,0 +1,43 @@
+# expect: a1
+# expect: a2
+# expect: b1
+# expect: b2
+# expect: fibers: 2
+# expect: a
+# expect: b
+# expect: c
+
+# Pins the scheduler's *actual* semantics so that changing them is a
+# deliberate, visible edit rather than a silent behavioural drift:
+#
+#   - run_scheduler() runs each spawned fiber to completion, in spawn order.
+#   - yield() marks a scheduling point but does not suspend, so two fibers
+#     do NOT interleave (true interleaving would print a1 b1 a2 b2).
+#   - a channel's capacity argument is a hint, not backpressure: send()
+#     never blocks, so a capacity-1 channel still accepts three values.
+#
+# If fibers ever gain real context switching, this test should be updated
+# alongside that change -- and the README's description with it.
+
+fn a():
+    say("a1")
+    yield()
+    say("a2")
+
+fn b():
+    say("b1")
+    yield()
+    say("b2")
+
+spawn(a)
+spawn(b)
+let count = run_scheduler()
+say("fibers: " + to_string(count))
+
+let ch = channel(1)
+send(ch, "a")
+send(ch, "b")
+send(ch, "c")
+say(recv(ch))
+say(recv(ch))
+say(recv(ch))

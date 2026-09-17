@@ -11,24 +11,27 @@
 | UTF-8 Dynamic Strings (`String`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
 | First-Class Functions & Closures (`Function`, `Closure`) | **IMPLEMENTED** | `src/runtime/uf_value.c`, `src/runtime/uf_env.c` |
 | Native Host Functions (`NativeFunction`) | **IMPLEMENTED** | `src/runtime/uf_runtime.c` |
-| Bytecode Functions (`BytecodeFunction`) | **IMPLEMENTED** | `src/compiler/uf_compiler.c`, `src/vm/uf_vm.c` |
+| Bytecode Functions (`BytecodeFunction`, `RegFn`, `RegClosure`) | **IMPLEMENTED** | `src/compiler/uf_compiler.c`, `src/compiler/uf_reg_compiler.c` |
 | Collections (`Array`, `Map`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
 | Error Objects (`Error`) | **IMPLEMENTED** | `src/runtime/uf_value.c` |
 | Modules (`Module`) | **IMPLEMENTED** | `src/runtime/uf_module.c` |
-| User-Defined Structs & Instances (`StructDef`, `Instance`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c` |
+| User-Defined Structs & Methods (`StructDef`, `Instance`, `BoundMethod`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c` |
+| Enums & Sum Types (`EnumDef`, `EnumVal`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c` |
+| Interfaces & Traits (`TraitDef`, `impl Trait for Struct`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/semantic/uf_semantic.c` |
+| Parametric Generics (`<T: Bound>`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/semantic/uf_semantic.c` |
 | Cooperative Concurrency (`Fiber`, `Channel`) | **IMPLEMENTED** | `src/runtime/uf_fiber.c`, `src/runtime/uf_value.c` |
+| Asynchronous Concurrency (`Promise`, `async`, `await`) | **IMPLEMENTED** | `src/runtime/uf_fiber.c`, `src/runtime/uf_value.c` |
 | Raw Contiguous Byte Buffers (`Buffer`) | **IMPLEMENTED** | `src/runtime/uf_stdlib.c`, `src/runtime/uf_value.c` |
 | Gradual Type Annotations (`let x: Number`) | **IMPLEMENTED** | `src/semantic/uf_semantic.c` |
-| Generic Types (`Array<T>`, `Result<T, E>`) | **NOT IMPLEMENTED** | Deferred to Phase 9 |
 
 ---
 
 ## 2. Currently Implemented Type Model
 
-Unfish currently implements a strongly checked dynamic type model where types are properties of values:
+Unfish implements a strongly checked dynamic type model where types are properties of values, supplemented by static gradual type analysis (`unfish check --strict`):
 
 ### 2.1. Value Representation (`UfValue`) [IMPLEMENTED]
-All values fit into a 16-byte tagged union representing 17 distinct runtime kinds:
+All values fit into a 16-byte tagged union representing 24 distinct runtime kinds:
 ```c
 typedef enum {
     UF_VAL_NULL,
@@ -47,7 +50,14 @@ typedef enum {
     UF_VAL_CLOSURE,
     UF_VAL_FIBER,
     UF_VAL_CHANNEL,
-    UF_VAL_BUFFER
+    UF_VAL_BUFFER,
+    UF_VAL_BOUND_METHOD,
+    UF_VAL_ENUM_DEF,
+    UF_VAL_ENUM_VAL,
+    UF_VAL_TRAIT_DEF,
+    UF_VAL_REG_FN,
+    UF_VAL_REG_CLOSURE,
+    UF_VAL_PROMISE
 } UfValueKind;
 
 struct UfValue {
@@ -69,6 +79,13 @@ struct UfValue {
         UfFiber* fiber;
         UfChannel* channel;
         UfBufferObject* buffer;
+        UfBoundMethodObject* bound_method;
+        UfEnumDefObject* enum_def;
+        UfEnumValObject* enum_val;
+        UfTraitDefObject* trait_def;
+        UfRegFunction* reg_fn;
+        UfRegClosure* reg_closure;
+        UfPromiseObject* promise;
     } as;
 };
 ```

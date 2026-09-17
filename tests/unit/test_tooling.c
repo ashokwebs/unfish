@@ -15,6 +15,75 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+
+/* Regression: in a file that opens directly with a documented declaration --
+ * no separate module docstring -- the leading '##' block was consumed as the
+ * file's description, so the first documented function in the file silently
+ * lost its documentation. The generator computed whether the block was
+ * attached to a declaration and then discarded the answer. */
+static void test_doc_first_declaration_keeps_its_docstring(void) {
+    const char* sample_code =
+        "## Adds two numbers together.\n"
+        "function add(a, b):\n"
+        "    return a + b\n"
+        "\n"
+        "## Subtracts two numbers.\n"
+        "function sub(a, b):\n"
+        "    return a - b\n";
+
+    char tmp_src[] = "/tmp/uf_doc_first_XXXXXX.unfish";
+    int fd = mkstemps(tmp_src, 7);
+    assert(fd >= 0);
+    write(fd, sample_code, strlen(sample_code));
+    close(fd);
+
+    char tmp_out[] = "/tmp/uf_doc_first_out_XXXXXX.md";
+    int out_fd = mkstemps(tmp_out, 3);
+    assert(out_fd >= 0);
+    close(out_fd);
+
+    UfDocOptions opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.output_path = tmp_out;
+    opts.title = "First Decl";
+    opts.format = UF_DOC_FORMAT_MARKDOWN;
+
+    int rc = uf_doc_generate(tmp_src, &opts);
+    assert(rc == 0);
+
+    FILE* f = fopen(tmp_out, "r");
+    assert(f != NULL);
+    char buf[8192];
+    size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[len] = '\0';
+    fclose(f);
+
+    /* Both docstrings must survive, each attached to its own function. */
+    const char* add_entry = strstr(buf, "function add(");
+    assert(add_entry != NULL);
+    assert(strstr(add_entry, "Adds two numbers together.") != NULL);
+
+    const char* sub_entry = strstr(buf, "function sub(");
+    assert(sub_entry != NULL);
+    assert(strstr(sub_entry, "Subtracts two numbers.") != NULL);
+
+    /* And the first one must not have been hoisted above the contents list
+     * as if it were the module's own description. */
+    const char* toc = strstr(buf, "Table of Contents");
+    if (toc != NULL) {
+        size_t head_len = (size_t)(toc - buf);
+        char head[4096];
+        if (head_len >= sizeof(head)) head_len = sizeof(head) - 1;
+        memcpy(head, buf, head_len);
+        head[head_len] = '\0';
+        assert(strstr(head, "Adds two numbers together.") == NULL);
+    }
+
+    remove(tmp_src);
+    remove(tmp_out);
+    printf("test_doc_first_declaration_keeps_its_docstring passed!\n");
+}
+
 static void test_doc_generation(void) {
     const char* sample_code =
         "## Sample Math Library\n"
@@ -157,6 +226,16 @@ static void test_pkg_manager(void) {
     rc = uf_pkg_check();
     assert(rc == 0);
 
+    /* The scaffold has to actually pass its own test command. It previously
+     * did not: the generated test imported the testing module as
+     * `from "testing" import ...`, but a module name is a bare identifier and
+     * the quoted form is a syntax error -- so every freshly created package
+     * failed `unfish pkg test` on the very first run. Running the real thing
+     * here also covers stdlib module resolution from a directory that is not
+     * the Unfish source tree. */
+    rc = uf_pkg_test();
+    assert(rc == 0);
+
     /* Second init in same dir should fail */
     rc = uf_pkg_init("duplicate");
     assert(rc == 1);
@@ -272,6 +351,7 @@ static void test_playground_server(void) {
 int main(void) {
     printf("Running tooling unit tests...\n");
     test_doc_generation();
+    test_doc_first_declaration_keeps_its_docstring();
     test_test_runner();
     test_pkg_manager();
     test_learn_tutorial();

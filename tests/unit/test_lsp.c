@@ -10,6 +10,46 @@ static void send_lsp_msg(FILE* out, const char* json) {
     fflush(out);
 }
 
+
+/* Regression: dispatch used to match the literal substring "\"method\":\"x\"",
+ * so a client that pretty-printed its JSON -- `"method": "initialize"`, which
+ * is the same document as far as JSON is concerned -- matched no arm at all.
+ * The server answered every request with a null result and never published a
+ * diagnostic, while appearing to run normally. */
+static void test_lsp_tolerates_json_whitespace(void) {
+    FILE* in_file = tmpfile();
+    FILE* out_file = tmpfile();
+    assert(in_file != NULL && out_file != NULL);
+
+    send_lsp_msg(in_file,
+        "{ \"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"initialize\", \"params\": {} }");
+    send_lsp_msg(in_file,
+        "{ \"jsonrpc\": \"2.0\", \"method\": \"textDocument/didOpen\", \"params\": "
+        "{ \"textDocument\": { \"uri\": \"file:///ws.unfish\", \"languageId\": \"unfish\", "
+        "\"version\": 1, \"text\": \"say(undefined_var)\\n\" } } }");
+    send_lsp_msg(in_file, "{ \"jsonrpc\": \"2.0\", \"method\": \"exit\", \"params\": {} }");
+    rewind(in_file);
+
+    int rc = uf_lsp_run(in_file, out_file);
+    assert(rc == 0);
+
+    rewind(out_file);
+    char buf[8192];
+    size_t len = fread(buf, 1, sizeof(buf) - 1, out_file);
+    buf[len] = '\0';
+
+    /* Capabilities must be advertised, not a bare null result. */
+    assert(strstr(buf, "\"hoverProvider\":true") != NULL);
+    assert(strstr(buf, "\"documentFormattingProvider\":true") != NULL);
+    /* And the opened document must still be analysed. */
+    assert(strstr(buf, "publishDiagnostics") != NULL);
+    assert(strstr(buf, "undefined_var") != NULL);
+
+    fclose(in_file);
+    fclose(out_file);
+    printf("test_lsp_tolerates_json_whitespace passed!\n");
+}
+
 static void test_lsp_handshake(void) {
     FILE* in_file = tmpfile();
     FILE* out_file = tmpfile();
@@ -141,6 +181,7 @@ static void test_lsp_formatting(void) {
 int main(void) {
     printf("Running Language Server Protocol (LSP) tests...\n");
     test_lsp_handshake();
+    test_lsp_tolerates_json_whitespace();
     test_lsp_diagnostics();
     test_lsp_hover_and_completion();
     test_lsp_formatting();

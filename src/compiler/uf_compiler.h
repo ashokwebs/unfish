@@ -66,6 +66,9 @@ typedef struct UfCompiler {
     UfRuntime* rt;
     UfDiagnosticReporter* reporter;
     bool had_error;
+    /* Line of the statement/expression currently being compiled, so that
+     * internal-limit errors raised deep in helpers still point somewhere useful. */
+    int current_line;
 } UfCompiler;
 
 /* Compile an AST Program into a top-level bytecode function.

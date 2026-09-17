@@ -3,8 +3,31 @@
 #include "../runtime/uf_module.h"
 #include "../runtime/uf_env.h"
 #include "../vm/uf_vm.h"
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Report a compile-time failure (an internal limit, or a construct the
+ * compiler cannot lower) as a real diagnostic instead of silently emitting
+ * broken bytecode. Only the first error per compiler is reported; later ones
+ * are almost always cascades of the first. */
+static void compile_error(UfCompiler* c, int line, const char* fmt, ...) {
+    if (c->had_error) return;
+    c->had_error = true;
+    if (!c->reporter) return;
+
+    char message[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    if (line <= 0) line = c->current_line;
+    const char* file = c->reporter->file_name;
+    SourceLoc loc = source_loc_make(file, (uint32_t)(line > 0 ? line : 1), 1, 0);
+    uf_report_error(c->reporter, UF_DIAG_SYNTAX_ERROR, source_span_make(loc, loc), "%s", message);
+}
 
 static void compiler_init(UfCompiler* compiler, UfCompiler* enclosing, FunctionType type,
                           const char* fn_name, size_t arity, size_t min_arity, bool has_rest, UfRuntime* rt, UfDiagnosticReporter* reporter) {
@@ -21,6 +44,7 @@ static void compiler_init(UfCompiler* compiler, UfCompiler* enclosing, FunctionT
     compiler->scope_depth = 0;
     compiler->upvalue_count = 0;
     compiler->current_loop = NULL;
+    compiler->current_line = enclosing ? enclosing->current_line : 0;
 
     compiler->function = uf_bytecode_fn_new(rt, fn_name, arity, min_arity, has_rest);
     compiler->chunk = &compiler->function->chunk;
@@ -61,7 +85,9 @@ static int emit_jump(UfCompiler* c, uint8_t instruction, int line) {
 static void patch_jump(UfCompiler* c, int offset) {
     int jump = (int)c->chunk->code_count - offset - 2;
     if (jump < 0 || jump > 65535) {
-        c->had_error = true;
+        compile_error(c, c->current_line,
+                      "Jump distance too large (limit is 65535 bytes of bytecode); "
+                      "split this block into smaller functions");
         return;
     }
     c->chunk->code[offset] = (uint8_t)((jump >> 8) & 0xFF);
@@ -72,7 +98,9 @@ static void emit_loop(UfCompiler* c, int loop_start, int line) {
     emit_byte(c, (uint8_t)OP_LOOP, line);
     int offset = (int)c->chunk->code_count - loop_start + 2;
     if (offset > 65535) {
-        c->had_error = true;
+        compile_error(c, line,
+                      "Loop body too large (limit is 65535 bytes of bytecode); "
+                      "split it into smaller functions");
         return;
     }
     emit_u16(c, (uint16_t)offset, line);
@@ -113,7 +141,10 @@ static void end_scope(UfCompiler* c, int line) {
 
 static int add_local(UfCompiler* c, const char* name, int line) {
     if (c->local_count >= 256) {
-        c->had_error = true;
+        compile_error(c, line,
+                      "Too many local variables in function '%s' (limit is 255); "
+                      "split it into smaller functions",
+                      c->fn_name ? c->fn_name : "<script>");
         return -1;
     }
     UfLocal* local = &c->locals[c->local_count++];
@@ -145,7 +176,9 @@ static int add_upvalue(UfCompiler* c, uint8_t index, bool is_local) {
         }
     }
     if (c->upvalue_count >= 256) {
-        c->had_error = true;
+        compile_error(c, c->current_line,
+                      "Too many captured variables in function '%s' (limit is 256)",
+                      c->fn_name ? c->fn_name : "<script>");
         return 0;
     }
     c->upvalues[c->upvalue_count].index = index;
@@ -182,6 +215,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt);
 static void compile_expr(UfCompiler* c, const UfExpr* expr) {
     if (!expr || c->had_error) return;
     int line = (int)expr->span.start.line;
+    c->current_line = line;
 
     switch (expr->kind) {
         case UF_EXPR_LITERAL_NULL:
@@ -406,6 +440,14 @@ static void compile_expr(UfCompiler* c, const UfExpr* expr) {
 
             fn_compiler.function->upvalue_count = fn_compiler.upvalue_count;
 
+            /* A failure inside the nested function invalidates the whole
+             * compilation: without this the enclosing compiler would happily
+             * emit a closure over half-built bytecode and the VM would run it. */
+            if (fn_compiler.had_error) {
+                c->had_error = true;
+                return;
+            }
+
             size_t fn_idx = make_constant(c, uf_val_bytecode_fn(c->rt, fn_compiler.function));
             emit_byte(c, (uint8_t)OP_CLOSURE, line);
             emit_u16(c, (uint16_t)fn_idx, line);
@@ -463,6 +505,13 @@ static UfBytecodeFunction* compile_method_helper(UfCompiler* c, UfStmt* method, 
     emit_byte(&fn_compiler, (uint8_t)OP_RETURN, line);
 
     fn_compiler.function->upvalue_count = fn_compiler.upvalue_count;
+    /* Surface a failure in the method body to the enclosing compiler so the
+     * whole compile aborts. The (incomplete) function is still returned:
+     * callers wire it into a struct definition unconditionally, and nothing
+     * ever runs it because uf_compile() now bails out on had_error. */
+    if (fn_compiler.had_error) {
+        c->had_error = true;
+    }
     return fn_compiler.function;
 }
 
@@ -735,6 +784,7 @@ static void compile_destructure_pattern(UfCompiler* c, const UfPattern* pat, int
 static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
     if (!stmt || c->had_error) return;
     int line = (int)stmt->span.start.line;
+    c->current_line = line;
 
     switch (stmt->kind) {
         case UF_STMT_LET: {
@@ -1018,7 +1068,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
         }
         case UF_STMT_BREAK: {
             if (!c->current_loop) {
-                c->had_error = true;
+                compile_error(c, line, "'break' outside of a loop");
                 return;
             }
             /* Pop any locals inside current loop */
@@ -1042,7 +1092,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
         }
         case UF_STMT_CONTINUE: {
             if (!c->current_loop) {
-                c->had_error = true;
+                compile_error(c, line, "'continue' outside of a loop");
                 return;
             }
             for (int i = c->local_count - 1; i >= 0; --i) {
@@ -1099,6 +1149,14 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             emit_byte(&fn_compiler, (uint8_t)OP_RETURN, line);
 
             fn_compiler.function->upvalue_count = fn_compiler.upvalue_count;
+
+            /* A failure inside the nested function invalidates the whole
+             * compilation: without this the enclosing compiler would happily
+             * emit a closure over half-built bytecode and the VM would run it. */
+            if (fn_compiler.had_error) {
+                c->had_error = true;
+                return;
+            }
 
             size_t fn_idx = make_constant(c, uf_val_bytecode_fn(c->rt, fn_compiler.function));
             emit_byte(c, (uint8_t)OP_CLOSURE, line);
@@ -1386,7 +1444,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     if (fail_jump_count < 256) {
                         fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                     } else {
-                        c->had_error = true;
+                        compile_error(c, line,
+                                      "Match arm has too many pattern tests (limit is 256); "
+                                      "simplify the pattern or split the match");
                     }
                     emit_byte(c, (uint8_t)OP_POP, line);
                 } else if (arm->pattern->kind == UF_PAT_VARIABLE) {
@@ -1402,7 +1462,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         if (fail_jump_count < 256) {
                             fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                         } else {
-                            c->had_error = true;
+                            compile_error(c, line,
+                                          "Match arm has too many pattern tests (limit is 256); "
+                                          "simplify the pattern or split the match");
                         }
                         emit_byte(c, (uint8_t)OP_POP, line);
                     } else {
@@ -1422,7 +1484,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     if (fail_jump_count < 256) {
                         fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                     } else {
-                        c->had_error = true;
+                        compile_error(c, line,
+                                      "Match arm has too many pattern tests (limit is 256); "
+                                      "simplify the pattern or split the match");
                     }
                     emit_byte(c, (uint8_t)OP_POP, line);
 
@@ -1463,7 +1527,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                             if (fail_jump_count < 256) {
                                 fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                             } else {
-                                c->had_error = true;
+                                compile_error(c, line,
+                                              "Match arm has too many pattern tests (limit is 256); "
+                                              "simplify the pattern or split the match");
                             }
                             emit_byte(c, (uint8_t)OP_POP, line);
                         }
@@ -1486,7 +1552,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                             if (fail_jump_count < 256) {
                                 fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                             } else {
-                                c->had_error = true;
+                                compile_error(c, line,
+                                              "Match arm has too many pattern tests (limit is 256); "
+                                              "simplify the pattern or split the match");
                             }
                             emit_byte(c, (uint8_t)OP_POP, line);
                         } else if (ep->kind == UF_PAT_WILDCARD) {
@@ -1522,7 +1590,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                             if (fail_jump_count < 256) {
                                 fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                             } else {
-                                c->had_error = true;
+                                compile_error(c, line,
+                                              "Match arm has too many pattern tests (limit is 256); "
+                                              "simplify the pattern or split the match");
                             }
                             emit_byte(c, (uint8_t)OP_POP, line);
                         } else if (vp->kind == UF_PAT_WILDCARD) {
@@ -1536,7 +1606,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     if (fail_jump_count < 256) {
                         fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
                     } else {
-                        c->had_error = true;
+                        compile_error(c, line,
+                                      "Match arm has too many pattern tests (limit is 256); "
+                                      "simplify the pattern or split the match");
                     }
                     emit_byte(c, (uint8_t)OP_POP, line);
                 }

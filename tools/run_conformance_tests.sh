@@ -30,12 +30,12 @@ for test_file in "$TESTS_DIR"/*.unfish; do
 
     expected_exit=0
     if grep -q "^# expect-exit:" "$test_file"; then
-        expected_exit=$(grep "^# expect-exit:" "$test_file" | head -n1 | awk '{print $3}')
+        expected_exit=$(grep "^# expect-exit:" "$test_file" | head -n1 | tr -d '\r' | awk '{print $3}')
     fi
 
     flags=""
     if grep -q "^# flags:" "$test_file"; then
-        flags=$(grep "^# flags:" "$test_file" | head -n1 | sed 's/^# flags:[ ]*//')
+        flags=$(grep "^# flags:" "$test_file" | head -n1 | tr -d '\r' | sed 's/^# flags:[ ]*//')
     fi
 
     # Run unfish
@@ -55,12 +55,22 @@ for test_file in "$TESTS_DIR"/*.unfish; do
     # 2. If positive test, verify stdout matches all '# expect: ...'
     if [ "$expected_exit" -eq 0 ]; then
         expected_output=""
+        first_expect=1
         while IFS= read -r line; do
-            if [[ "$line" =~ ^#\ expect:\ (.*) ]]; then
-                if [ -z "$expected_output" ]; then
-                    expected_output="${BASH_REMATCH[1]}"
+            # Test files may be stored with CRLF endings; drop the trailing CR
+            # so it does not end up inside the expected-output string.
+            line="${line%$'\r'}"
+            # Accept a bare '# expect:' (no trailing space) as an expectation
+            # of an empty output line, so tests can assert that a builtin
+            # returns "" rather than having to avoid printing it at all.
+            if [[ "$line" =~ ^#\ expect:(.*) ]]; then
+                exp_line="${BASH_REMATCH[1]}"
+                exp_line="${exp_line# }"
+                if [ -z "$expected_output" ] && [ "$first_expect" = "1" ]; then
+                    expected_output="$exp_line"
+                    first_expect=0
                 else
-                    expected_output="${expected_output}"$'\n'"${BASH_REMATCH[1]}"
+                    expected_output="${expected_output}"$'\n'"${exp_line}"
                 fi
             fi
         done < "$test_file"
@@ -79,6 +89,7 @@ for test_file in "$TESTS_DIR"/*.unfish; do
     # 3. If negative test, verify stderr contains '# expect-error: ...'
     if [ "$expected_exit" -ne 0 ]; then
         while IFS= read -r line; do
+            line="${line%$'\r'}"
             if [[ "$line" =~ ^#\ expect-error:\ (.*) ]]; then
                 expected_err="${BASH_REMATCH[1]}"
                 if ! grep -q "$expected_err" "$TMP_ERR"; then

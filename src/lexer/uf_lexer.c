@@ -108,10 +108,16 @@ static UfToken error_token(UfLexer* lexer, const char* message, const char* hint
 static void skip_horizontal_whitespace_and_comments(UfLexer* lexer) {
     for (;;) {
         char c = peek(lexer);
-        if (c == ' ' || c == '\t' || c == '\r') {
+        /* '\r' is deliberately NOT skipped here. advance() treats a lone '\r'
+         * or a "\r\n" pair as one line break, so consuming it as if it were
+         * horizontal whitespace would swallow the end of the line entirely and
+         * no NEWLINE token would ever be emitted -- every CRLF (Windows) file
+         * then failed to parse. Leave it for the main scanner. */
+        if (c == ' ' || c == '\t') {
             advance(lexer);
         } else if (c == '#') {
-            while (peek(lexer) != '\n' && !is_at_end(lexer)) {
+            /* Stop at either line terminator, for the same reason. */
+            while (peek(lexer) != '\n' && peek(lexer) != '\r' && !is_at_end(lexer)) {
                 advance(lexer);
             }
         } else {
@@ -503,7 +509,10 @@ UfToken uf_lexer_next_token(UfLexer* lexer) {
             if (*p == '\r' || *p == '\n' || *p == '#') {
                 lexer->current = p;
                 if (*p == '#') {
-                    while (*lexer->current != '\n' && !is_at_end(lexer)) {
+                    /* Stop at either line terminator: advance() consumes a
+                     * "\r\n" pair whole, so testing only for '\n' would run
+                     * this loop past the end of the comment line. */
+                    while (*lexer->current != '\n' && *lexer->current != '\r' && !is_at_end(lexer)) {
                         advance(lexer);
                     }
                 }

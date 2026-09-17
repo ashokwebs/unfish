@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 
 static char* format_code(const char* src) {
     UfArena arena;
@@ -98,35 +99,58 @@ static void test_struct_and_match_formatting(void) {
 }
 
 static void test_roundtrip_conformance_files(void) {
-    const char* files[] = {
-        "tests/conformance/01_hello.unfish",
-        "tests/conformance/05_functions.unfish",
-        "tests/conformance/34_structs.unfish",
-        "tests/conformance/35_pattern_matching.unfish",
-        NULL
-    };
+    /* Walk the whole conformance corpus rather than a handful of hand-picked
+     * files. Every formatter bug found so far lived in a construct none of the
+     * four original files contained: a single-line lambda passed as a call
+     * argument, an impl block nested in a struct body, and a `...rest` pattern
+     * in a map destructure. Two of those made the formatter emit source that
+     * no longer parsed -- caught here because format_code() asserts the parse
+     * succeeds, so re-formatting invalid output aborts. */
+    DIR* dir = opendir("tests/conformance");
+    assert(dir != NULL);
 
-    for (int i = 0; files[i]; ++i) {
-        FILE* f = fopen(files[i], "rb");
+    int checked = 0;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        const char* name = entry->d_name;
+        size_t len = strlen(name);
+        if (len < 8 || strcmp(name + len - 7, ".unfish") != 0) continue;
+        /* err_* files are deliberately malformed and are not expected to parse. */
+        if (strncmp(name, "err_", 4) == 0) continue;
+
+        char path[512];
+        snprintf(path, sizeof(path), "tests/conformance/%s", name);
+
+        FILE* f = fopen(path, "rb");
         assert(f != NULL);
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);
-        char* buf = (char*)malloc(sz + 1);
-        size_t rd = fread(buf, 1, sz, f);
+        char* buf = (char*)malloc((size_t)sz + 1);
+        size_t rd = fread(buf, 1, (size_t)sz, f);
         buf[rd] = '\0';
         fclose(f);
 
+        /* Pass 1 must produce source that still parses (asserted inside
+         * format_code), and pass 2 must reproduce it byte for byte. */
         char* f1 = format_code(buf);
         char* f2 = format_code(f1);
-        assert(strcmp(f1, f2) == 0);
+        if (strcmp(f1, f2) != 0) {
+            fprintf(stderr, "formatter is not idempotent for %s\n", path);
+            assert(strcmp(f1, f2) == 0);
+        }
 
         free(buf);
         free(f1);
         free(f2);
+        checked++;
     }
+    closedir(dir);
 
-    printf("test_roundtrip_conformance_files passed!\n");
+    /* Guard against the walk silently finding nothing (e.g. wrong cwd). */
+    assert(checked > 30);
+
+    printf("test_roundtrip_conformance_files passed! (%d files)\n", checked);
 }
 
 int main(void) {

@@ -85,3 +85,17 @@ This roadmap defines the engineering progression of Unfish from initial architec
 - [x] Interactive terminal tutorial (`unfish learn`) with 10 progressive lessons.
 - [x] Interactive Web Playground (`unfish playground`) with embedded server and visual blocks.
 
+## Phase 12: High-Performance Execution & WebAssembly Target (v1.9.0)
+- [x] 3-address register virtual machine (`unfish run --regvm`) with 256 virtual registers and computed-goto dispatch.
+- [x] Persistent bytecode caching (`.ufc` and `.ufrc`) with cryptographic source hashing and version validation.
+- [x] WebAssembly backend (`unfish build --wasm`) targeting modern browsers and Node.js.
+- [x] 5-way differential parity across all five execution targets.
+
+## Phase 13: Unfish 2.0 Modern Systems & Tooling (v2.0.0)
+- [x] Interfaces and traits (`trait`, `impl Trait for Struct`, dynamic dispatch vtables).
+- [x] Parametric generics (`<T: Bound>`, compile-time monomorphization).
+- [x] Asynchronous concurrency (`async`, `await`, `Promise` built upon fibers and scheduler).
+- [x] Interactive Visual Block Studio (`unfish playground` GUI with live palette, block hierarchy manipulation, and real-time bidirectional sync).
+- [x] Embedded ARM Runtime Profile (`--embedded`, `--arm`, bare-metal freestanding profile for ARM Cortex-M).
+
+

@@ -1,0 +1,24 @@
+# expect: small
+# expect: big
+# expect: 3
+# expect: ok
+
+# This file is stored with CRLF (Windows) line endings on purpose. The lexer
+# treats a lone CR and a CR LF pair as one line break; if CR were skipped as
+# ordinary horizontal whitespace instead, the line break would be swallowed
+# and no NEWLINE token emitted, so the whole file would fail to parse.
+
+fn classify(n):
+    # a comment inside an indented block
+    if n > 10:
+        return "big"
+    else:
+        return "small"
+
+say(classify(1))
+say(classify(50))
+
+let xs = [1, 2, 3]   # trailing comment
+say(len(xs))
+
+say("ok")

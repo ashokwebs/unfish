@@ -1,0 +1,20 @@
+# expect-exit: 3
+# expect-error: Runtime Error: Division by zero
+
+# Regression: the VMs keep their own try-handler stack alongside the
+# runtime's, and PUSH_TRY pushes onto both. An error detected by the VM
+# itself (division by zero here) was caught directly off the VM's stack
+# rather than through a longjmp, which popped only the VM's copy and left
+# the runtime's behind. The next uncaught error found that stale handler
+# still live and longjmped into it while the VM's handler stack was empty,
+# reading handlers[-1] and jumping to the garbage instruction pointer there.
+# Before the fix this segfaulted (exit 139) instead of reporting the error.
+
+let z = 0
+
+try:
+    say(1 / z)
+catch err:
+    say("caught " + err.kind)
+
+say(1 / z)

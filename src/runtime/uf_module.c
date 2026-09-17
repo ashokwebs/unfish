@@ -101,6 +101,38 @@ void uf_module_cache_remove(UfRuntime* rt, const char* name) {
     }
 }
 
+/* Directory containing the running executable, or NULL if it cannot be
+ * determined. Used to locate the bundled stdlib modules (e.g. `testing`)
+ * relative to the binary rather than the current working directory, so that
+ * `import testing` works from a user's own package directory and not only
+ * from inside the Unfish source tree. */
+static const char* executable_dir(void) {
+    static char dir[1024];
+    static int resolved = 0;
+
+    if (resolved) return dir[0] ? dir : NULL;
+    resolved = 1;
+    dir[0] = '\0';
+
+#if defined(__linux__)
+    char buf[1024];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        char* last_slash = strrchr(buf, '/');
+        if (last_slash) {
+            size_t len = (size_t)(last_slash - buf);
+            if (len < sizeof(dir)) {
+                memcpy(dir, buf, len);
+                dir[len] = '\0';
+            }
+        }
+    }
+#endif
+
+    return dir[0] ? dir : NULL;
+}
+
 static char* resolve_module_path(const char* name, SourceSpan span) {
     char path[1024];
 
@@ -140,7 +172,24 @@ static char* resolve_module_path(const char* name, SourceSpan span) {
         free(copy);
     }
 
-    /* 4. Built-in stdlib Unfish modules (e.g. testing) */
+    /* 4. Built-in stdlib Unfish modules (e.g. testing), located relative to
+     *    the executable so they resolve wherever the binary is run from. */
+    const char* exe_dir = executable_dir();
+    if (exe_dir) {
+        /* Running from the source tree: <repo>/bin/unfish -> <repo>/src/stdlib */
+        snprintf(path, sizeof(path), "%s/../src/stdlib/%s.unfish", exe_dir, name);
+        if (access(path, R_OK) == 0) return strdup(path);
+
+        /* Installed layouts: <prefix>/bin/unfish -> <prefix>/lib/unfish/stdlib
+         * or a stdlib directory sitting beside the binary. */
+        snprintf(path, sizeof(path), "%s/../lib/unfish/stdlib/%s.unfish", exe_dir, name);
+        if (access(path, R_OK) == 0) return strdup(path);
+
+        snprintf(path, sizeof(path), "%s/stdlib/%s.unfish", exe_dir, name);
+        if (access(path, R_OK) == 0) return strdup(path);
+    }
+
+    /* 5. Finally the historical working-directory-relative location. */
     snprintf(path, sizeof(path), "src/stdlib/%s.unfish", name);
     if (access(path, R_OK) == 0) return strdup(path);
 

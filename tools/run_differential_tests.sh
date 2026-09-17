@@ -50,7 +50,7 @@ for test_file in "$TESTS_DIR"/*.unfish; do
 
     flags=""
     if grep -q "^# flags:" "$test_file"; then
-        flags=$(grep "^# flags:" "$test_file" | head -n1 | sed 's/^# flags:[ ]*//')
+        flags=$(grep "^# flags:" "$test_file" | head -n1 | tr -d '\r' | sed 's/^# flags:[ ]*//')
     fi
 
     # 1. Run AST interpreter

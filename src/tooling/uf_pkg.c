@@ -129,7 +129,10 @@ int uf_pkg_init(const char* name) {
         FILE* tf = fopen("tests/main_test.unfish", "w");
         if (tf) {
             fprintf(tf, "## Test suite for %s\n\n", pkg_name);
-            fprintf(tf, "from \"testing\" import assert_equal\n\n");
+            /* Module names in a from-import are bare identifiers, not string
+             * literals; the quoted form is a syntax error, which meant every
+             * freshly scaffolded package failed `unfish pkg test` immediately. */
+            fprintf(tf, "from testing import assert_equal\n\n");
             fprintf(tf, "function test_basic():\n");
             fprintf(tf, "    assert_equal(1 + 1, 2, \"Basic arithmetic works\")\n\n");
             fprintf(tf, "test_basic()\n");
