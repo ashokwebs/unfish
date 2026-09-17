@@ -334,8 +334,10 @@ static bool is_builtin_name(const char* name) {
         "map", "filter", "reduce", "sort", "reverse", "find", "every", "some",
         "clock", "assert", "error",
         "abs", "floor", "ceil", "round", "sqrt", "pow", "min", "max", "log", "sin", "cos", "tan", "random", "random_int",
-        "trim", "to_upper", "to_lower", "contains", "starts_with", "ends_with", "char_at", "to_number", "to_string",
+        "trim", "trim_start", "trim_end", "to_upper", "to_lower", "contains", "starts_with", "ends_with", "char_at", "to_number", "to_string",
         "repeat_string", "substring", "index_of", "split", "join", "replace",
+        "pad_start", "pad_end", "chars", "count",
+        "concat", "flatten", "fill", "zip",
         "buffer", "buffer_from_string", "buffer_to_string", "buffer_size", "buffer_get", "buffer_set",
         "buffer_fill", "buffer_slice", "buffer_read_u16_le", "buffer_write_u16_le",
         "buffer_read_u32_le", "buffer_write_u32_le", "buffer_read_i32_le", "buffer_write_i32_le",
@@ -1139,6 +1141,22 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
                     fputs("uf_array_some(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out);
                     return;
                 }
+                if (strcmp(fn_name, "concat") == 0) {
+                    fputs("uf_array_concat(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out);
+                    return;
+                }
+                if (strcmp(fn_name, "flatten") == 0) {
+                    fputs("uf_array_flatten(", out); UF_ARG(0); fputc(')', out);
+                    return;
+                }
+                if (strcmp(fn_name, "fill") == 0) {
+                    fputs("uf_array_fill(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out);
+                    return;
+                }
+                if (strcmp(fn_name, "zip") == 0) {
+                    fputs("uf_array_zip(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out);
+                    return;
+                }
                 if (strcmp(fn_name, "clock") == 0) {
                     fputs("uf_sys_clock()", out);
                     return;
@@ -1194,6 +1212,12 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
                 if (strcmp(fn_name, "split") == 0) { fputs("uf_str_split(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out); return; }
                 if (strcmp(fn_name, "join") == 0) { fputs("uf_str_join(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out); return; }
                 if (strcmp(fn_name, "replace") == 0) { fputs("uf_str_replace(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputs(", ", out); UF_ARG(2); fputc(')', out); return; }
+                if (strcmp(fn_name, "pad_start") == 0) { fputs("uf_str_pad_start(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputs(", ", out); UF_ARG(2); fputc(')', out); return; }
+                if (strcmp(fn_name, "pad_end") == 0) { fputs("uf_str_pad_end(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputs(", ", out); UF_ARG(2); fputc(')', out); return; }
+                if (strcmp(fn_name, "trim_start") == 0) { fputs("uf_str_trim_start(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "trim_end") == 0) { fputs("uf_str_trim_end(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "chars") == 0) { fputs("uf_str_chars(", out); UF_ARG(0); fputc(')', out); return; }
+                if (strcmp(fn_name, "count") == 0) { fputs("uf_str_count(", out); UF_ARG(0); fputs(", ", out); UF_ARG(1); fputc(')', out); return; }
 
                 /* Buffer and Systems builtins */
                 if (strcmp(fn_name, "buffer") == 0) { fputs("uf_buffer_new(", out); UF_ARG(0); fputc(')', out); return; }

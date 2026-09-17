@@ -90,7 +90,7 @@ make
 ### Running Tests & Benchmarks
 
 ```bash
-# Run all unit tests, stress tests, and 90/90 differential tests
+# Run all unit tests, stress tests, and 91/91 differential tests
 make test
 
 # Run full test suite under AddressSanitizer and UndefinedBehaviorSanitizer

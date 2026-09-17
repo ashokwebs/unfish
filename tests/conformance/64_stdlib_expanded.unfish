@@ -1,0 +1,87 @@
+# expect: stdlib expanded conformance passed
+
+import fs
+import sys
+import time
+from testing import assert_equal, assert_not_equal, assert_true, assert_false, assert_null, assert_not_null
+
+# 1. File system expanded
+let test_dir = "tests/conformance/tmp_expanded_dir"
+let test_file = test_dir + "/sample.txt"
+
+assert(fs.mkdir(test_dir))
+assert(fs.is_dir(test_dir))
+assert(not fs.is_file(test_dir))
+
+assert(fs.write_text(test_file, "Line 1\n"))
+assert(fs.is_file(test_file))
+assert(not fs.is_dir(test_file))
+assert(fs.file_size(test_file) == 7)
+
+assert(fs.append_text(test_file, "Line 2\n"))
+assert(fs.file_size(test_file) == 14)
+assert(fs.read_text(test_file) == "Line 1\nLine 2\n")
+
+let entries = fs.list_dir(test_dir)
+assert(len(entries) == 1)
+assert(entries[0] == "sample.txt")
+
+assert(fs.delete_file(test_file))
+assert(fs.remove_dir(test_dir))
+assert(not fs.exists(test_dir))
+
+# 2. System expanded
+let cwd = sys.cwd()
+assert(cwd != null)
+
+# 3. Time expanded
+let ts = 1700000000
+let iso_str = time.iso(ts)
+assert(iso_str == "2023-11-14T22:13:20Z")
+
+let fmt_year = time.format(ts, "%Y")
+assert(fmt_year == "2023")
+
+# 4. String builtins expanded
+assert(pad_start("42", 5, "0") == "00042")
+assert(pad_start("hello", 3, " ") == "hello")
+assert(pad_end("42", 5, ".") == "42...")
+assert(pad_end("test", 4, ".") == "test")
+assert(trim_start("   abc  ") == "abc  ")
+assert(trim_end("   abc  ") == "   abc")
+let chs = chars("unfish")
+assert(len(chs) == 6)
+assert(chs[0] == "u" and chs[1] == "n" and chs[2] == "f")
+assert(count("banana", "an") == 2)
+assert(count("aaaa", "aa") == 2)
+assert(count("world", "xyz") == 0)
+
+# 5. Array builtins expanded
+let merged = concat([1, 2], [3, 4])
+assert(len(merged) == 4)
+assert(merged[0] == 1 and merged[3] == 4)
+
+let nested = [[1, 2], 3, [4, 5]]
+let flat = flatten(nested)
+assert(len(flat) == 5)
+assert(flat[0] == 1 and flat[1] == 2 and flat[2] == 3 and flat[3] == 4 and flat[4] == 5)
+
+let to_fill = [1, 2, 3]
+let filled = fill(to_fill, 7)
+assert(filled[0] == 7 and filled[1] == 7 and filled[2] == 7)
+assert(to_fill[0] == 7)
+
+let z = zip(["a", "b"], [10, 20])
+assert(len(z) == 2)
+assert(z[0][0] == "a" and z[0][1] == 10)
+assert(z[1][0] == "b" and z[1][1] == 20)
+
+# 6. Testing framework assertions
+assert_equal(100, 100, null)
+assert_not_equal(100, 200, null)
+assert_true(true, null)
+assert_false(false, null)
+assert_null(null, null)
+assert_not_null("valid", null)
+
+say "stdlib expanded conformance passed"

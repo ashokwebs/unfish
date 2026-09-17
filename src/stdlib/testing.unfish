@@ -19,6 +19,42 @@ function assert_true(condition, message):
             msg = message + " (" + msg + ")"
         error(msg, "AssertionError")
 
+## Asserts that condition evaluates to false. Raises AssertionError if true.
+## Parameters: condition, message (required; string or null)
+function assert_false(condition, message):
+    if condition:
+        let msg = "Assertion failed: expected false"
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
+## Compares actual != expected. Raises AssertionError if they are equal.
+## Parameters: actual, expected, message (required; string or null)
+function assert_not_equal(actual, expected, message):
+    if actual == expected:
+        let msg = "Assertion failed: expected values to differ, but both are " + actual
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
+## Asserts that val is null. Raises AssertionError if non-null.
+## Parameters: val, message (required; string or null)
+function assert_null(val, message):
+    if val != null:
+        let msg = "Assertion failed: expected null, got " + val
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
+## Asserts that val is not null. Raises AssertionError if null.
+## Parameters: val, message (required; string or null)
+function assert_not_null(val, message):
+    if val == null:
+        let msg = "Assertion failed: expected non-null value, got null"
+        if message != null:
+            msg = message + " (" + msg + ")"
+        error(msg, "AssertionError")
+
 ## Asserts that invoking fn() throws an error. Raises AssertionError if fn() succeeds.
 ## Parameters: fn, message (required; string or null)
 function assert_throws(fn, message):
@@ -32,6 +68,7 @@ function assert_throws(fn, message):
         if message != null:
             msg = message + " (" + msg + ")"
         error(msg, "AssertionError")
+
 
 function run_tests(suite):
     let passed = 0

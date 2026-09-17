@@ -572,3 +572,22 @@
   2. **In-Tree UTF-8 Hex Decoder**: Added portable `\uXXXX` 1-to-4 byte UTF-8 encoding/decoding in `uf_mod_json.c`, `unfish_runtime.h`, and `uf_blocks_import.c`.
 * **Consequences**: Eliminates undefined behavior traps under Clang/GCC sanitizers and ensures RFC 8259 JSON conformance without third-party libraries.
 
+## ADR 037: Standard Library Expansion & Global Builtin Shadowing
+* **Date**: Post-v2.0 Standard Library Maturity
+* **Status**: Accepted
+* **Context**: Real-world programming tasks require richer string and array transformations (padding, non-overlapping substring counting, character breakdown, array concatenation, flattening, in-place fill, and element pairing) alongside full POSIX filesystem and system operations (`list_dir`, `mkdir`, `remove_dir`, `append_text`, `is_file`, `is_dir`, `file_size`, `cwd`, `set_env`, `exec`, `strftime`-compatible `format`, and ISO 8601 timestamps). Additionally, adding common utility names as builtins (such as `count`) created conflicts in user code (`let count = 0`), which the semantic analyzer previously rejected as duplicate declaration errors in global scope.
+* **Decision**:
+  1. **Global Builtin Shadowing**: Updated the semantic analyzer `analyze_stmt_let` to inspect `existing->kind != UF_SYM_BUILTIN`. User variables declared with `let` can cleanly shadow built-in functions in any scope without triggering duplicate declaration errors.
+  2. **Expanded String & Array Builtins**:
+     - String: `pad_start`, `pad_end`, `trim_start`, `trim_end`, `chars`, `count`.
+     - Array: `concat`, `flatten`, `fill`, `zip`.
+     - Implemented identically across the interpreter/VM runtime (`src/runtime/uf_stdlib.c`), native C transpiler (`src/codegen/uf_emit_c.c`), and standalone C runtime (`src/codegen/unfish_runtime.h`).
+  3. **Module System Expansions**:
+     - Filesystem: `fs.list_dir`, `fs.mkdir`, `fs.remove_dir`, `fs.append_text`, `fs.is_file`, `fs.is_dir`, `fs.file_size`.
+     - System: `sys.cwd`, `sys.set_env`, `sys.exec`.
+     - Time: `time.format`, `time.iso`.
+     - Testing: `assert_not_equal`, `assert_false`, `assert_null`, `assert_not_null`.
+  4. **Target Portability & WebAssembly / Embedded Guards**:
+     - Sandboxed targets (`__wasm__`, `__wasi__`, `UF_EMBEDDED`) safely guard `sys.exec` (returning `-1`) and `sys.set_env` (returning `false`) to avoid WASI link errors.
+* **Consequences**: Unfish provides a comprehensive, production-ready standard library with 100% 5-way differential parity across all five runtime engines.
+

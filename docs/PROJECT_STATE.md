@@ -1,7 +1,7 @@
 # UNFISH — PROJECT STATE INVENTORY
 
-**Last Updated:** v2.0.0 Complete (Phase 4 High-Performance Register VM + Phase 5 Unfish 2.0: WebAssembly, Modern Type System, Async/Await, Visual Block Studio GUI, and Embedded ARM Runtime Profile)  
-**Project Health:** Flawless — 100% Tests Passing under AddressSanitizer & UndefinedBehaviorSanitizer (20 Unit Test Suites, Comprehensive Stress Suite, 90 Conformance Tests, 90 5-Way Differential Parity Tests [Interpreter == Stack VM == Register VM == Native C99 == WebAssembly], 13 Multi-Tier Benchmarks)  
+**Last Updated:** v2.0.0 Complete (Standard Library Expansion, Phase 4 High-Performance Register VM + Phase 5 Unfish 2.0: WebAssembly, Modern Type System, Async/Await, Visual Block Studio GUI, and Embedded ARM Runtime Profile)  
+**Project Health:** Flawless — 100% Tests Passing under AddressSanitizer & UndefinedBehaviorSanitizer (20 Unit Test Suites, Comprehensive Stress Suite, 91 Conformance Tests, 91 5-Way Differential Parity Tests [Interpreter == Stack VM == Register VM == Native C99 == WebAssembly], 13 Multi-Tier Benchmarks)  
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### COMPLETE (100% Implemented & Verified)
 * **Formal Language Specification & Grammar**: EBNF, lexical rules, off-side indentation, operator precedence table (`docs/LANGUAGE_SPEC.md`).
-* **Complete Documentation Architecture**: 36 Architectural Decision Records (ADRs 001 through 036) in `docs/DECISIONS.md`.
+* **Complete Documentation Architecture**: 37 Architectural Decision Records (ADRs 001 through 037) in `docs/DECISIONS.md`.
 * **Lexer**: UTF-8 scanner emitting typed tokens (`UfToken`) with source spans, indentation stack (`INDENT`, `DEDENT`, `NEWLINE`), string escapes, number scanning, brackets (`[`, `]`), braces (`{`, `}`), dot (`.`), type symbols (`:`, `->`), match syntax (`match`, `case`, `_`), and diagnostics.
 * **AST Data Structures**: Strongly typed AST nodes with source span preservation (`UfExpr`, `UfStmt`, `UfProgram`), supporting functions, closures, structs, patterns, and type annotations.
 * **AST Pretty Printer**: S-expression tree printer (`uf_ast_print`) supporting all expression/statement kinds.
@@ -93,9 +93,9 @@
   - `test_wasm`: WebAssembly compiler backend and runtime generation.
   - `test_stress`: Deep closures, mutual recursion, variable shadowing, GC stress cycles, try/catch unwinding, JSON stress, fuzzing input resilience.
 * **Language Conformance Suite**:
-  - 90 test scripts covering the full language grammar, positive execution, and negative error assertions (100% pass).
+  - 91 test scripts covering the full language grammar, positive execution, and negative error assertions (100% pass).
 * **5-Way Differential Parity Suite**:
-  - 90 test scripts comparing AST interpreter vs Stack VM vs Register VM vs Native C99 binary vs WebAssembly with 100% identical outputs and exit codes (63 positive tests verified across all five execution backends; 27 negative tests verified between interpreter and VMs).
+  - 91 test scripts comparing AST interpreter vs Stack VM vs Register VM vs Native C99 binary vs WebAssembly with 100% identical outputs and exit codes (64 positive tests verified across all five execution backends; 27 negative tests verified between interpreter and VMs).
 * **Multi-Tier Performance Suite (13 Benchmarks)**:
   - Comparing AST interpreter vs Stack VM vs Register VM (up to 11x faster than AST Interp) vs Native C99 (up to 200x speedup).
 

@@ -2,6 +2,11 @@
 #include "../runtime/uf_runtime.h"
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32) && !defined(UF_EMBEDDED)
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <direct.h>
+#endif
 
 static UfValue sys_exit(UfRuntime* rt, int argc, UfValue* args) {
     int code = 0;
@@ -52,6 +57,44 @@ static UfValue sys_env(UfRuntime* rt, int argc, UfValue* args) {
     return uf_val_string_cstr(rt, val);
 }
 
+static UfValue sys_cwd(UfRuntime* rt, int argc, UfValue* args) {
+    UF_UNUSED(rt);
+    UF_UNUSED(argc);
+    UF_UNUSED(args);
+    char buf[1024];
+    if (getcwd(buf, sizeof(buf))) {
+        return uf_val_string_cstr(rt, buf);
+    }
+    return uf_val_null();
+}
+
+static UfValue sys_set_env(UfRuntime* rt, int argc, UfValue* args) {
+    UF_UNUSED(rt);
+    if (argc < 2 || args[0].kind != UF_VAL_STRING || args[1].kind != UF_VAL_STRING) {
+        return uf_val_bool(false);
+    }
+#if defined(_WIN32)
+    return uf_val_bool(_putenv_s(args[0].as.string->chars, args[1].as.string->chars) == 0);
+#elif defined(UF_EMBEDDED)
+    return uf_val_bool(false);
+#else
+    return uf_val_bool(setenv(args[0].as.string->chars, args[1].as.string->chars, 1) == 0);
+#endif
+}
+
+static UfValue sys_exec(UfRuntime* rt, int argc, UfValue* args) {
+    UF_UNUSED(rt);
+    if (argc < 1 || args[0].kind != UF_VAL_STRING) {
+        return uf_val_number(-1);
+    }
+#if defined(UF_EMBEDDED)
+    return uf_val_number(-1);
+#else
+    int res = system(args[0].as.string->chars);
+    return uf_val_number((double)res);
+#endif
+}
+
 UfModuleObject* uf_mod_sys_create(UfRuntime* rt) {
     UfModuleObject* mod = uf_module_create(rt, "sys", "<builtin:sys>");
     uf_runtime_push_temp_root(rt, uf_val_module(rt, mod));
@@ -64,7 +107,10 @@ UfModuleObject* uf_mod_sys_create(UfRuntime* rt) {
         { "exit", sys_exit, 1 },
         { "args", sys_args, 0 },
         { "platform", sys_platform, 0 },
-        { "env", sys_env, 1 }
+        { "env", sys_env, 1 },
+        { "cwd", sys_cwd, 0 },
+        { "set_env", sys_set_env, 2 },
+        { "exec", sys_exec, 1 }
     };
 
     for (size_t i = 0; i < sizeof(fns) / sizeof(fns[0]); ++i) {

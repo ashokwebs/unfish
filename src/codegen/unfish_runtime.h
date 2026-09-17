@@ -15,6 +15,9 @@
 #include <ctype.h>
 #if !defined(UF_EMBEDDED)
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #endif
 
 #ifndef HUGE_VAL
@@ -619,13 +622,16 @@ static inline UfVal uf_num(double n) {
     UfVal v; v.kind = UF_RT_NUMBER; v.as.number = n; return v;
 }
 
-static inline UfVal uf_str(const char* s) {
-    size_t len = s ? strlen(s) : 0;
+static inline UfVal uf_str_l(const char* s, size_t len) {
     UfRtString* str = (UfRtString*)uf_rt_alloc(UF_RT_STRING, sizeof(UfRtString) + len + 1);
     str->length = len;
-    if (len > 0) memcpy(str->chars, s, len);
+    if (len > 0 && s) memcpy(str->chars, s, len);
     str->chars[len] = '\0';
     UfVal v; v.kind = UF_RT_STRING; v.as.string = str; return v;
+}
+
+static inline UfVal uf_str(const char* s) {
+    return uf_str_l(s, s ? strlen(s) : 0);
 }
 
 static inline UfVal uf_val_error(UfVal message, UfVal kind) {
@@ -2492,6 +2498,98 @@ static inline UfVal uf_str_replace(UfVal s, UfVal target, UfVal repl) {
     return v;
 }
 
+static inline UfVal uf_str_trim_start(UfVal s) {
+    if (s.kind != UF_RT_STRING) return uf_str("");
+    const char* str = s.as.string->chars;
+    while (*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r') str++;
+    return uf_str(str);
+}
+
+static inline UfVal uf_str_trim_end(UfVal s) {
+    if (s.kind != UF_RT_STRING) return uf_str("");
+    if (s.as.string->length == 0) return s;
+    const char* start = s.as.string->chars;
+    const char* end = start + s.as.string->length - 1;
+    while (end >= start && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
+    if (end < start) return uf_str("");
+    size_t len = (size_t)(end - start + 1);
+    return uf_str_l(start, len);
+}
+
+static inline UfVal uf_str_pad_start(UfVal s, UfVal target_len_v, UfVal pad_char_v) {
+    if (s.kind != UF_RT_STRING || target_len_v.kind != UF_RT_NUMBER) return s;
+    long target = (long)target_len_v.as.number;
+    if (target <= 0 || (size_t)target <= s.as.string->length) return s;
+    const char* pad_chars = " ";
+    size_t pad_len = 1;
+    if (pad_char_v.kind == UF_RT_STRING && pad_char_v.as.string->length > 0) {
+        pad_chars = pad_char_v.as.string->chars;
+        pad_len = pad_char_v.as.string->length;
+    }
+    size_t total = (size_t)target;
+    size_t str_len = s.as.string->length;
+    size_t pad_needed = total - str_len;
+    char* buf = (char*)malloc(total + 1);
+    for (size_t i = 0; i < pad_needed; ++i) {
+        buf[i] = pad_chars[i % pad_len];
+    }
+    memcpy(buf + pad_needed, s.as.string->chars, str_len);
+    buf[total] = '\0';
+    UfVal res = uf_str_l(buf, total);
+    free(buf);
+    return res;
+}
+
+static inline UfVal uf_str_pad_end(UfVal s, UfVal target_len_v, UfVal pad_char_v) {
+    if (s.kind != UF_RT_STRING || target_len_v.kind != UF_RT_NUMBER) return s;
+    long target = (long)target_len_v.as.number;
+    if (target <= 0 || (size_t)target <= s.as.string->length) return s;
+    const char* pad_chars = " ";
+    size_t pad_len = 1;
+    if (pad_char_v.kind == UF_RT_STRING && pad_char_v.as.string->length > 0) {
+        pad_chars = pad_char_v.as.string->chars;
+        pad_len = pad_char_v.as.string->length;
+    }
+    size_t total = (size_t)target;
+    size_t str_len = s.as.string->length;
+    size_t pad_needed = total - str_len;
+    char* buf = (char*)malloc(total + 1);
+    memcpy(buf, s.as.string->chars, str_len);
+    for (size_t i = 0; i < pad_needed; ++i) {
+        buf[str_len + i] = pad_chars[i % pad_len];
+    }
+    buf[total] = '\0';
+    UfVal res = uf_str_l(buf, total);
+    free(buf);
+    return res;
+}
+
+static inline UfVal uf_str_chars(UfVal s) {
+    if (s.kind != UF_RT_STRING) return uf_make_array(0);
+    UfVal res = uf_array_new(s.as.string->length > 0 ? s.as.string->length : 1);
+    for (size_t i = 0; i < s.as.string->length; ++i) {
+        char ch[2] = { s.as.string->chars[i], '\0' };
+        uf_array_push(res, uf_str(ch));
+    }
+    return res;
+}
+
+static inline UfVal uf_str_count(UfVal s, UfVal sub) {
+    if (s.kind != UF_RT_STRING || sub.kind != UF_RT_STRING) return uf_num(0);
+    if (sub.as.string->length == 0 || s.as.string->length < sub.as.string->length) return uf_num(0);
+    size_t cnt = 0;
+    const char* p = s.as.string->chars;
+    const char* end = p + s.as.string->length;
+    size_t sub_len = sub.as.string->length;
+    while (p < end) {
+        const char* m = strstr(p, sub.as.string->chars);
+        if (!m) break;
+        cnt++;
+        p = m + sub_len;
+    }
+    return uf_num((double)cnt);
+}
+
 /* Collection and Array Builtins */
 static inline UfVal uf_array_pop(UfVal arr) {
     if (arr.kind != UF_RT_ARRAY) {
@@ -2803,6 +2901,69 @@ static inline UfVal uf_array_some(UfVal arr, UfVal fn) {
     return uf_bool(false);
 }
 
+static inline UfVal uf_array_concat(UfVal a1, UfVal a2) {
+    if (a1.kind != UF_RT_ARRAY || a2.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'concat()' expects two arrays\n");
+        exit(3);
+    }
+    UfRtArray* arr1 = a1.as.array;
+    UfRtArray* arr2 = a2.as.array;
+    UfVal res = uf_array_new(arr1->count + arr2->count);
+    for (size_t i = 0; i < arr1->count; ++i) uf_array_push(res, arr1->elements[i]);
+    for (size_t i = 0; i < arr2->count; ++i) uf_array_push(res, arr2->elements[i]);
+    return res;
+}
+
+static inline UfVal uf_array_flatten(UfVal a) {
+    if (a.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'flatten()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* arr = a.as.array;
+    UfVal res = uf_array_new(arr->count);
+    for (size_t i = 0; i < arr->count; ++i) {
+        if (arr->elements[i].kind == UF_RT_ARRAY) {
+            UfRtArray* inner = arr->elements[i].as.array;
+            for (size_t j = 0; j < inner->count; ++j) {
+                uf_array_push(res, inner->elements[j]);
+            }
+        } else {
+            uf_array_push(res, arr->elements[i]);
+        }
+    }
+    return res;
+}
+
+static inline UfVal uf_array_fill(UfVal a, UfVal val) {
+    if (a.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'fill()' expects an array\n");
+        exit(3);
+    }
+    UfRtArray* arr = a.as.array;
+    for (size_t i = 0; i < arr->count; ++i) {
+        arr->elements[i] = val;
+    }
+    return a;
+}
+
+static inline UfVal uf_array_zip(UfVal a1, UfVal a2) {
+    if (a1.kind != UF_RT_ARRAY || a2.kind != UF_RT_ARRAY) {
+        fprintf(stderr, "Runtime Error: 'zip()' expects two arrays\n");
+        exit(3);
+    }
+    UfRtArray* arr1 = a1.as.array;
+    UfRtArray* arr2 = a2.as.array;
+    size_t n = arr1->count < arr2->count ? arr1->count : arr2->count;
+    UfVal res = uf_array_new(n);
+    for (size_t i = 0; i < n; ++i) {
+        UfVal pair = uf_array_new(2);
+        uf_array_push(pair, arr1->elements[i]);
+        uf_array_push(pair, arr2->elements[i]);
+        uf_array_push(res, pair);
+    }
+    return res;
+}
+
 static inline UfVal uf_sys_clock(void) {
 #if defined(UF_EMBEDDED)
     static double g_embedded_tick = 0.0;
@@ -2880,6 +3041,12 @@ static inline UfVal uf_mod_math(void) {
 static inline UfVal _wrap_str_split(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_split(a[0], a[1]) : uf_null(); }
 static inline UfVal _wrap_str_join(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_join(a[0], a[1]) : uf_null(); }
 static inline UfVal _wrap_str_trim(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_trim(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_trim_start(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_trim_start(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_trim_end(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_trim_end(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_pad_start(void* e, size_t n, UfVal* a) { (void)e; return n > 2 ? uf_str_pad_start(a[0], a[1], a[2]) : (n > 1 ? uf_str_pad_start(a[0], a[1], uf_null()) : uf_null()); }
+static inline UfVal _wrap_str_pad_end(void* e, size_t n, UfVal* a) { (void)e; return n > 2 ? uf_str_pad_end(a[0], a[1], a[2]) : (n > 1 ? uf_str_pad_end(a[0], a[1], uf_null()) : uf_null()); }
+static inline UfVal _wrap_str_chars(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_chars(a[0]) : uf_null(); }
+static inline UfVal _wrap_str_count(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_count(a[0], a[1]) : uf_null(); }
 static inline UfVal _wrap_str_replace(void* e, size_t n, UfVal* a) { (void)e; return n > 2 ? uf_str_replace(a[0], a[1], a[2]) : uf_null(); }
 static inline UfVal _wrap_str_to_upper(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_to_upper(a[0]) : uf_null(); }
 static inline UfVal _wrap_str_to_lower(void* e, size_t n, UfVal* a) { (void)e; return n > 0 ? uf_str_to_lower(a[0]) : uf_null(); }
@@ -2894,10 +3061,16 @@ static inline UfVal _wrap_str_substring(void* e, size_t n, UfVal* a) { (void)e; 
 static inline UfVal _wrap_str_index_of(void* e, size_t n, UfVal* a) { (void)e; return n > 1 ? uf_str_index_of(a[0], a[1]) : uf_null(); }
 
 static inline UfVal uf_mod_strings(void) {
-    UfVal m = uf_map_new(20);
+    UfVal m = uf_map_new(32);
     uf_set(m, uf_str("split"), uf_closure_new(_wrap_str_split, NULL, 0));
     uf_set(m, uf_str("join"), uf_closure_new(_wrap_str_join, NULL, 0));
     uf_set(m, uf_str("trim"), uf_closure_new(_wrap_str_trim, NULL, 0));
+    uf_set(m, uf_str("trim_start"), uf_closure_new(_wrap_str_trim_start, NULL, 0));
+    uf_set(m, uf_str("trim_end"), uf_closure_new(_wrap_str_trim_end, NULL, 0));
+    uf_set(m, uf_str("pad_start"), uf_closure_new(_wrap_str_pad_start, NULL, 0));
+    uf_set(m, uf_str("pad_end"), uf_closure_new(_wrap_str_pad_end, NULL, 0));
+    uf_set(m, uf_str("chars"), uf_closure_new(_wrap_str_chars, NULL, 0));
+    uf_set(m, uf_str("count"), uf_closure_new(_wrap_str_count, NULL, 0));
     uf_set(m, uf_str("replace"), uf_closure_new(_wrap_str_replace, NULL, 0));
     uf_set(m, uf_str("to_upper"), uf_closure_new(_wrap_str_to_upper, NULL, 0));
     uf_set(m, uf_str("to_lower"), uf_closure_new(_wrap_str_to_lower, NULL, 0));
@@ -2956,12 +3129,49 @@ static inline UfVal _wrap_sys_exit(void* e, size_t n, UfVal* a) {
     return uf_null();
 }
 
+static inline UfVal _wrap_sys_cwd(void* e, size_t n, UfVal* a) {
+    (void)e; (void)n; (void)a;
+#if defined(UF_EMBEDDED)
+    return uf_null();
+#else
+    char buf[1024];
+    if (getcwd(buf, sizeof(buf))) return uf_str(buf);
+    return uf_null();
+#endif
+}
+
+static inline UfVal _wrap_sys_set_env(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 2 || a[0].kind != UF_RT_STRING || a[1].kind != UF_RT_STRING) return uf_bool(false);
+#if defined(_WIN32)
+    return uf_bool(_putenv_s(a[0].as.string->chars, a[1].as.string->chars) == 0);
+#elif defined(UF_EMBEDDED) || defined(__wasm__) || defined(__wasi__)
+    return uf_bool(false);
+#else
+    return uf_bool(setenv(a[0].as.string->chars, a[1].as.string->chars, 1) == 0);
+#endif
+}
+
+static inline UfVal _wrap_sys_exec(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_num(-1);
+#if defined(UF_EMBEDDED) || defined(__wasm__) || defined(__wasi__)
+    return uf_num(-1);
+#else
+    int res = system(a[0].as.string->chars);
+    return uf_num((double)res);
+#endif
+}
+
 static inline UfVal uf_mod_sys(void) {
-    UfVal m = uf_map_new(8);
+    UfVal m = uf_map_new(16);
     uf_set(m, uf_str("platform"), uf_closure_new(_wrap_sys_platform, NULL, 0));
     uf_set(m, uf_str("args"), uf_closure_new(_wrap_sys_args, NULL, 0));
     uf_set(m, uf_str("env"), uf_closure_new(_wrap_sys_env, NULL, 0));
     uf_set(m, uf_str("exit"), uf_closure_new(_wrap_sys_exit, NULL, 0));
+    uf_set(m, uf_str("cwd"), uf_closure_new(_wrap_sys_cwd, NULL, 0));
+    uf_set(m, uf_str("set_env"), uf_closure_new(_wrap_sys_set_env, NULL, 0));
+    uf_set(m, uf_str("exec"), uf_closure_new(_wrap_sys_exec, NULL, 0));
     return m;
 }
 
@@ -2969,6 +3179,17 @@ static inline UfVal _wrap_fs_write_text(void* e, size_t n, UfVal* a) {
     (void)e;
     if (n < 2 || a[0].kind != UF_RT_STRING || a[1].kind != UF_RT_STRING) return uf_bool(false);
     FILE* f = fopen(a[0].as.string->chars, "wb");
+    if (!f) return uf_bool(false);
+    size_t len = a[1].as.string->length;
+    size_t written = fwrite(a[1].as.string->chars, 1, len, f);
+    fclose(f);
+    return uf_bool(written == len);
+}
+
+static inline UfVal _wrap_fs_append_text(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 2 || a[0].kind != UF_RT_STRING || a[1].kind != UF_RT_STRING) return uf_bool(false);
+    FILE* f = fopen(a[0].as.string->chars, "ab");
     if (!f) return uf_bool(false);
     size_t len = a[1].as.string->length;
     size_t written = fwrite(a[1].as.string->chars, 1, len, f);
@@ -3013,12 +3234,101 @@ static inline UfVal _wrap_fs_delete_file(void* e, size_t n, UfVal* a) {
     return uf_bool(remove(a[0].as.string->chars) == 0);
 }
 
+static inline UfVal _wrap_fs_list_dir(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_null();
+#if defined(UF_EMBEDDED)
+    return uf_null();
+#else
+    DIR* d = opendir(a[0].as.string->chars);
+    if (!d) return uf_null();
+    UfVal arr = uf_array_new(8);
+    struct dirent* ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        uf_array_push(arr, uf_str(ent->d_name));
+    }
+    closedir(d);
+    return arr;
+#endif
+}
+
+static inline UfVal _wrap_fs_mkdir(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+#if defined(UF_EMBEDDED)
+    return uf_bool(false);
+#else
+    return uf_bool(mkdir(a[0].as.string->chars, 0755) == 0);
+#endif
+}
+
+static inline UfVal _wrap_fs_remove_dir(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+#if defined(UF_EMBEDDED)
+    return uf_bool(false);
+#else
+    return uf_bool(rmdir(a[0].as.string->chars) == 0);
+#endif
+}
+
+static inline UfVal _wrap_fs_is_file(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+#if defined(UF_EMBEDDED)
+    FILE* f = fopen(a[0].as.string->chars, "rb");
+    if (f) { fclose(f); return uf_bool(true); }
+    return uf_bool(false);
+#else
+    struct stat st;
+    if (stat(a[0].as.string->chars, &st) != 0) return uf_bool(false);
+    return uf_bool(S_ISREG(st.st_mode));
+#endif
+}
+
+static inline UfVal _wrap_fs_is_dir(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_bool(false);
+#if defined(UF_EMBEDDED)
+    return uf_bool(false);
+#else
+    struct stat st;
+    if (stat(a[0].as.string->chars, &st) != 0) return uf_bool(false);
+    return uf_bool(S_ISDIR(st.st_mode));
+#endif
+}
+
+static inline UfVal _wrap_fs_file_size(void* e, size_t n, UfVal* a) {
+    (void)e;
+    if (n < 1 || a[0].kind != UF_RT_STRING) return uf_null();
+#if defined(UF_EMBEDDED)
+    FILE* f = fopen(a[0].as.string->chars, "rb");
+    if (!f) return uf_null();
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fclose(f);
+    return sz >= 0 ? uf_num((double)sz) : uf_null();
+#else
+    struct stat st;
+    if (stat(a[0].as.string->chars, &st) != 0) return uf_null();
+    return uf_num((double)st.st_size);
+#endif
+}
+
 static inline UfVal uf_mod_fs(void) {
-    UfVal m = uf_map_new(8);
+    UfVal m = uf_map_new(16);
     uf_set(m, uf_str("write_text"), uf_closure_new(_wrap_fs_write_text, NULL, 0));
+    uf_set(m, uf_str("append_text"), uf_closure_new(_wrap_fs_append_text, NULL, 0));
     uf_set(m, uf_str("read_text"), uf_closure_new(_wrap_fs_read_text, NULL, 0));
     uf_set(m, uf_str("exists"), uf_closure_new(_wrap_fs_exists, NULL, 0));
     uf_set(m, uf_str("delete_file"), uf_closure_new(_wrap_fs_delete_file, NULL, 0));
+    uf_set(m, uf_str("list_dir"), uf_closure_new(_wrap_fs_list_dir, NULL, 0));
+    uf_set(m, uf_str("mkdir"), uf_closure_new(_wrap_fs_mkdir, NULL, 0));
+    uf_set(m, uf_str("remove_dir"), uf_closure_new(_wrap_fs_remove_dir, NULL, 0));
+    uf_set(m, uf_str("is_file"), uf_closure_new(_wrap_fs_is_file, NULL, 0));
+    uf_set(m, uf_str("is_dir"), uf_closure_new(_wrap_fs_is_dir, NULL, 0));
+    uf_set(m, uf_str("file_size"), uf_closure_new(_wrap_fs_file_size, NULL, 0));
     return m;
 }
 
@@ -3087,11 +3397,34 @@ static inline UfVal _wrap_time_timestamp(void* e, size_t n, UfVal* a) {
 #endif
 }
 
+static inline UfVal _wrap_time_format(void* e, size_t n, UfVal* a) {
+    (void)e;
+    time_t t = (n > 0 && a[0].kind == UF_RT_NUMBER) ? (time_t)a[0].as.number : time(NULL);
+    const char* fmt = (n > 1 && a[1].kind == UF_RT_STRING) ? a[1].as.string->chars : "%Y-%m-%d %H:%M:%S";
+    struct tm* tm_info = localtime(&t);
+    if (!tm_info) return uf_str("");
+    char buf[128];
+    size_t len = strftime(buf, sizeof(buf), fmt, tm_info);
+    return uf_str_l(buf, len);
+}
+
+static inline UfVal _wrap_time_iso(void* e, size_t n, UfVal* a) {
+    (void)e;
+    time_t t = (n > 0 && a[0].kind == UF_RT_NUMBER) ? (time_t)a[0].as.number : time(NULL);
+    struct tm* tm_info = gmtime(&t);
+    if (!tm_info) return uf_str("");
+    char buf[64];
+    size_t len = strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+    return uf_str_l(buf, len);
+}
+
 static inline UfVal uf_mod_time(void) {
-    UfVal m = uf_map_new(8);
+    UfVal m = uf_map_new(16);
     uf_set(m, uf_str("clock"), uf_closure_new(_wrap_time_clock, NULL, 0));
     uf_set(m, uf_str("sleep"), uf_closure_new(_wrap_time_sleep, NULL, 0));
     uf_set(m, uf_str("timestamp"), uf_closure_new(_wrap_time_timestamp, NULL, 0));
+    uf_set(m, uf_str("format"), uf_closure_new(_wrap_time_format, NULL, 0));
+    uf_set(m, uf_str("iso"), uf_closure_new(_wrap_time_iso, NULL, 0));
     return m;
 }
 

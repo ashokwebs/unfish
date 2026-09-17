@@ -260,7 +260,8 @@ UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span)
         const char* str_symbols[] = {
             "split", "join", "trim", "replace", "to_upper", "to_lower",
             "contains", "starts_with", "ends_with", "char_at", "to_number",
-            "to_string", "repeat_string", "substring", "index_of"
+            "to_string", "repeat_string", "substring", "index_of",
+            "pad_start", "pad_end", "trim_start", "trim_end", "chars", "count"
         };
         for (size_t i = 0; i < sizeof(str_symbols) / sizeof(str_symbols[0]); ++i) {
             UfValue val;

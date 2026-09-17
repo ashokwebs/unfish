@@ -258,6 +258,16 @@ static const char* get_hover_doc(const char* word) {
     if (strcmp(word, "min") == 0) return "**function** `min(a: Number, b: Number): Number`\\n\\nReturns minimum of two numbers.";
     if (strcmp(word, "max") == 0) return "**function** `max(a: Number, b: Number): Number`\\n\\nReturns maximum of two numbers.";
     if (strcmp(word, "pow") == 0) return "**function** `pow(base: Number, exp: Number): Number`\\n\\nCalculates exponential power.";
+    if (strcmp(word, "pad_start") == 0) return "**function** `pad_start(str: String, len: Number, pad: String = \" \"): String`\\n\\nPads string at start to reach specified length.";
+    if (strcmp(word, "pad_end") == 0) return "**function** `pad_end(str: String, len: Number, pad: String = \" \"): String`\\n\\nPads string at end to reach specified length.";
+    if (strcmp(word, "trim_start") == 0) return "**function** `trim_start(str: String): String`\\n\\nRemoves leading whitespace from string.";
+    if (strcmp(word, "trim_end") == 0) return "**function** `trim_end(str: String): String`\\n\\nRemoves trailing whitespace from string.";
+    if (strcmp(word, "chars") == 0) return "**function** `chars(str: String): Array`\\n\\nReturns array of single-character strings.";
+    if (strcmp(word, "count") == 0) return "**function** `count(str: String, substr: String): Number`\\n\\nCounts non-overlapping occurrences of substr in str.";
+    if (strcmp(word, "concat") == 0) return "**function** `concat(arr1: Array, arr2: Array): Array`\\n\\nConcatenates two arrays into a new array.";
+    if (strcmp(word, "flatten") == 0) return "**function** `flatten(arr: Array): Array`\\n\\nFlattens array by one level.";
+    if (strcmp(word, "fill") == 0) return "**function** `fill(arr: Array, val: Any): Array`\\n\\nFills array in-place with val and returns it.";
+    if (strcmp(word, "zip") == 0) return "**function** `zip(arr1: Array, arr2: Array): Array`\\n\\nCombines two arrays into pairs [[a, b], ...].";
 
     /* Keywords */
     if (strcmp(word, "let") == 0) return "**keyword** `let`\\n\\nDeclares a local or global variable with optional type annotation.";

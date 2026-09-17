@@ -87,6 +87,22 @@
 * **Description**: Returns `true` if `function(element)` evaluates to truthy for at least one element in `array`, or `false` otherwise.
 * **Returns**: `Boolean`.
 
+### `concat(array1, array2)`
+* **Description**: Merges two arrays non-destructively, returning a new combined array.
+* **Returns**: `Array`.
+
+### `flatten(array)`
+* **Description**: Flattens one level of nested array elements non-destructively, returning a new array.
+* **Returns**: `Array`.
+
+### `fill(array, value)`
+* **Description**: Replaces all elements in `array` in-place with `value` and returns the array.
+* **Returns**: `Array`.
+
+### `zip(array1, array2)`
+* **Description**: Combines two arrays element-wise into pairs `[[a0, b0], [a1, b1], ...]`, truncated to the length of the shorter array.
+* **Returns**: `Array`.
+
 ### `clock()`
 * **Description**: Returns elapsed wall-clock time in seconds as a high-resolution `Number`. Useful for benchmarking student algorithms.
 * **Returns**: `Number`.
@@ -122,6 +138,12 @@
 | `repeat_string(str, n)` | `(String, Number) -> String` | Repeats `str` `n` times. |
 | `substring(str, start, [end])` | `(String, Number, [Number]) -> String` | Slices string from `start` to `end` with negative indexing support. |
 | `index_of(str, sub)` | `(String, String) -> Number` | 0-based index of first occurrence, or `-1` if not found. |
+| `pad_start(str, len, [pad])` | `(String, Number, [String]) -> String` | Pads string on the left until reaching target length (default pad `" "`). |
+| `pad_end(str, len, [pad])` | `(String, Number, [String]) -> String` | Pads string on the right until reaching target length (default pad `" "`). |
+| `trim_start(str)` | `(String) -> String` | Removes leading whitespace from string. |
+| `trim_end(str)` | `(String) -> String` | Removes trailing whitespace from string. |
+| `chars(str)` | `(String) -> Array` | Returns array of single-character strings. |
+| `count(str, substr)` | `(String, String) -> Number` | Returns count of non-overlapping occurrences of `substr` in `str`. |
 
 ## 4. Math Standard Library
 
@@ -151,20 +173,30 @@
 ## 5. Built-in Standard Library Modules (Milestone 9)
 
 ### 5.1. `sys` Module
-* **Import**: `import sys` or `from sys import exit, args, platform, env`
+* **Import**: `import sys` or `from sys import exit, args, platform, env, cwd, set_env, exec`
 * **Functions**:
   - `sys.exit(code)`: Immediately terminates program execution with integer exit code `code`.
   - `sys.args()`: Returns an array of strings representing command line arguments passed to the Unfish script.
   - `sys.platform()`: Returns the host operating system identifier string: `"linux"`, `"darwin"`, `"windows"`, or `"unknown"`.
   - `sys.env(name)`: Returns the string value of the environment variable `name`, or `null` if unset.
+  - `sys.cwd()`: Returns the current working directory path string, or `null` if unavailable.
+  - `sys.set_env(key, value)`: Sets the host environment variable `key` to `value`. Returns `true` on success, `false` on failure (or unsupported targets like WebAssembly).
+  - `sys.exec(command)`: Executes host shell command string via `system()` and returns its integer exit status code (or `-1` on sandboxed targets).
 
 ### 5.2. `fs` Module (Sandboxed Filesystem)
-* **Import**: `import fs` or `from fs import read_text, write_text, exists, delete_file`
+* **Import**: `import fs` or `from fs import read_text, write_text, append_text, exists, delete_file, list_dir, mkdir, remove_dir, is_file, is_dir, file_size`
 * **Functions**:
   - `fs.read_text(path)`: Reads the entire contents of file at `path` as a UTF-8 string. Returns `null` if the file cannot be opened or read.
-  - `fs.write_text(path, content)`: Writes `content` string to file at `path`. Returns `true` on success, `false` on failure.
+  - `fs.write_text(path, content)`: Writes `content` string to file at `path` (overwriting). Returns `true` on success, `false` on failure.
+  - `fs.append_text(path, content)`: Appends `content` string to the end of file at `path`. Returns `true` on success, `false` on failure.
   - `fs.exists(path)`: Returns `true` if a file or directory exists at `path`, `false` otherwise.
   - `fs.delete_file(path)`: Deletes the file at `path`. Returns `true` on success, `false` on failure.
+  - `fs.list_dir(path)`: Returns an array of entry filename strings in the directory at `path` (excluding `.` and `..`). Returns `null` if unable to open.
+  - `fs.mkdir(path)`: Creates a new directory at `path`. Returns `true` on success, `false` on failure.
+  - `fs.remove_dir(path)`: Removes an empty directory at `path`. Returns `true` on success, `false` on failure.
+  - `fs.is_file(path)`: Returns `true` if `path` points to an existing regular file, `false` otherwise.
+  - `fs.is_dir(path)`: Returns `true` if `path` points to an existing directory, `false` otherwise.
+  - `fs.file_size(path)`: Returns the size of the file at `path` in bytes as a `Number`, or `null` if the file cannot be accessed.
 
 ### 5.3. `random` Module
 * **Import**: `import random` or `from random import random, random_int, choice, shuffle`
@@ -175,11 +207,13 @@
   - `random.shuffle(array)`: Returns a new array with elements of `array` randomly permuted (Fisher-Yates shuffle).
 
 ### 5.4. `time` Module
-* **Import**: `import time` or `from time import clock, sleep, timestamp`
+* **Import**: `import time` or `from time import clock, sleep, timestamp, format, iso`
 * **Functions**:
   - `time.clock()`: Returns a high-resolution monotonic timer value in seconds as a `Number`.
   - `time.sleep(seconds)`: Pauses process execution for `seconds` floating-point seconds. Returns `null`.
   - `time.timestamp()`: Returns the current UNIX epoch timestamp in seconds as a `Number`.
+  - `time.format(ts, [fmt])`: Formats a UNIX timestamp `ts` into a formatted date/time string according to strftime format specifier `fmt` (defaults to `"%Y-%m-%d %H:%M:%S"`).
+  - `time.iso(ts)`: Formats a UNIX timestamp `ts` into an ISO 8601 UTC date/time string (`"%Y-%m-%dT%H:%M:%SZ"`).
 
 ### 5.5. `json` Module
 * **Import**: `import json` or `from json import parse, stringify`
@@ -188,11 +222,15 @@
   - `json.stringify(value)`: Serializes any Unfish value into a formatted JSON string.
 
 ### 5.6. `testing` Module
-* **Import**: `import testing` or `from testing import assert_equal, assert_true, assert_throws, run_tests`
+* **Import**: `import testing` or `from testing import assert_equal, assert_not_equal, assert_true, assert_false, assert_null, assert_not_null, assert_throws, run_tests`
 * **Location**: `src/stdlib/testing.unfish`
 * **Functions**:
   - `assert_equal(actual, expected, [message])`: Raises `AssertionError` if `actual != expected`.
+  - `assert_not_equal(actual, expected, [message])`: Raises `AssertionError` if `actual == expected`.
   - `assert_true(condition, [message])`: Raises `AssertionError` if `condition` is falsy.
+  - `assert_false(condition, [message])`: Raises `AssertionError` if `condition` is truthy.
+  - `assert_null(val, [message])`: Raises `AssertionError` if `val` is not `null`.
+  - `assert_not_null(val, [message])`: Raises `AssertionError` if `val` is `null`.
   - `assert_throws(fn, [message])`: Executes `fn()` inside a `try/catch` block and asserts that an exception was raised.
   - `run_tests(suite_map)`: Takes a map of test names to nullary functions, executes each with error isolation, prints per-test PASS/FAIL logs, and returns `true` if all passed.
 

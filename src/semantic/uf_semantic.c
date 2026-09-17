@@ -514,11 +514,13 @@ static const char* infer_expr_type(UfSemanticAnalyzer* analyzer, const UfExpr* e
                     strcmp(name, "max") == 0 || strcmp(name, "log") == 0 ||
                     strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 ||
                     strcmp(name, "tan") == 0 || strcmp(name, "random") == 0 ||
-                    strcmp(name, "random_int") == 0) {
+                    strcmp(name, "random_int") == 0 || strcmp(name, "count") == 0) {
                     return "Number";
                 }
                 if (strcmp(name, "to_string") == 0 || strcmp(name, "to_upper") == 0 ||
                     strcmp(name, "to_lower") == 0 || strcmp(name, "trim") == 0 ||
+                    strcmp(name, "trim_start") == 0 || strcmp(name, "trim_end") == 0 ||
+                    strcmp(name, "pad_start") == 0 || strcmp(name, "pad_end") == 0 ||
                     strcmp(name, "replace") == 0 || strcmp(name, "char_at") == 0 ||
                     strcmp(name, "repeat_string") == 0 || strcmp(name, "substring") == 0 ||
                     strcmp(name, "type_of") == 0) {
@@ -532,7 +534,9 @@ static const char* infer_expr_type(UfSemanticAnalyzer* analyzer, const UfExpr* e
                 if (strcmp(name, "split") == 0 || strcmp(name, "keys") == 0 ||
                     strcmp(name, "values") == 0 || strcmp(name, "map") == 0 ||
                     strcmp(name, "filter") == 0 || strcmp(name, "sort") == 0 ||
-                    strcmp(name, "reverse") == 0) {
+                    strcmp(name, "reverse") == 0 || strcmp(name, "chars") == 0 ||
+                    strcmp(name, "concat") == 0 || strcmp(name, "flatten") == 0 ||
+                    strcmp(name, "fill") == 0 || strcmp(name, "zip") == 0) {
                     return "Array";
                 }
             }
@@ -997,7 +1001,7 @@ static void analyze_stmt(UfSemanticAnalyzer* analyzer, UfStmt* stmt) {
 
             /* Check if duplicate declaration in current scope */
             UfSymbol* existing = find_symbol_in_scope(analyzer->current_scope, name);
-            if (existing) {
+            if (existing && existing->kind != UF_SYM_BUILTIN) {
                 analyzer->had_error = true;
                 char msg[256];
                 snprintf(msg, sizeof(msg), "Identifier '%s' has already been declared in this scope", name);
