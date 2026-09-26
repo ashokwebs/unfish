@@ -6,8 +6,6 @@ It is designed to provide an unbroken path of intellectual ascent: from visual b
 
 > *"Hide complexity until the learner is ready — never hide it forever."*
 > 
-> [!IMPORTANT]
-> **AI AGENTS**: A comprehensive roadmap and state audit has been compiled. Please read [unfish_master_plan.md](unfish_master_plan.md) before starting any work on the codebase.
 
 ---
 
@@ -17,7 +15,7 @@ Unfish features a unique **five-backend execution engine**, kept in lockstep by 
 1. **Tree-Walking AST Interpreter**: Fast startup, direct syntax tree interpretation, ideal for interactive exploration, REPL, and visual blocks.
 2. **Bytecode Virtual Machine (`--vm`)**: 36-opcode stack-based VM with lexical upvalue capture cells, exception unwinding, and a 2x–6x execution speedup over AST tree-walking with 100% behavioral differential parity.
 3. **Register-Based Bytecode VM (`--regvm`)**: 256-register, 3-address VM with computed-goto dispatch, typically the fastest of the two interpreted VM tiers.
-4. **Native C99 AOT Compiler (`build` / `emit-c`)**: Direct translation to standalone C99 with single-header runtime, delivering 30x–400x native execution speedups with zero interpreter dependencies.
+4. **Native C99 AOT Compiler (`build` / `emit-c`)**: Direct translation to standalone C99 with single-header runtime, measured at 25–60× faster than the interpreter with zero interpreter dependencies.
 5. **WebAssembly Backend (`build --wasm`)**: The same program compiled to run in a browser or under Node.
 
 ### Additional Highlights
