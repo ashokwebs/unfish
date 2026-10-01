@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐡 Unfish Play — The Aquatic Coding Experience</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐡</text></svg>">
+  <style>
+    :root {
+      --ocean-deep: #050b14;
+      --ocean-mid: #0a192f;
+      --ocean-surface: #112240;
+      --ocean-card: #1b2d4b;
+      --ocean-border: #233554;
+      --text-glow: #64ffda;
+      --text-main: #e6f1ff;
+      --text-muted: #8892b0;
+      --fish-orange: #ff7e47;
+      --fish-yellow: #ffd166;
+      --fish-blue: #00b4d8;
+      --coral-pink: #ff5e7e;
+      --seaweed-green: #06d6a0;
+      --font-code: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
+      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--ocean-deep);
+      color: var(--text-main);
+      font-family: var(--font-ui);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Ambient Ocean Bubbles Background */
+    .bubbles {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 0;
+    }
+    .bubble {
+      position: absolute;
+      bottom: -30px;
+      background: radial-gradient(circle at 30% 30%, rgba(100, 255, 218, 0.4), rgba(0, 180, 216, 0.1));
+      border: 1px solid rgba(100, 255, 218, 0.3);
+      border-radius: 50%;
+      animation: rise 12s infinite ease-in;
+    }
+    .bubble:nth-child(1) { left: 10%; width: 25px; height: 25px; animation-duration: 9s; animation-delay: 1s; }
+    .bubble:nth-child(2) { left: 25%; width: 15px; height: 15px; animation-duration: 14s; animation-delay: 3s; }
+    .bubble:nth-child(3) { left: 55%; width: 35px; height: 35px; animation-duration: 11s; animation-delay: 0s; }
+    .bubble:nth-child(4) { left: 75%; width: 18px; height: 18px; animation-duration: 13s; animation-delay: 5s; }
+    .bubble:nth-child(5) { left: 90%; width: 22px; height: 22px; animation-duration: 10s; animation-delay: 2s; }
+
+    @keyframes rise {
+      0% { transform: translateY(0) scale(0.8); opacity: 0; }
+      10% { opacity: 0.6; }
+      90% { opacity: 0.4; }
+      100% { transform: translateY(-110vh) scale(1.2); opacity: 0; }
+    }
+
+    /* Header */
+    header {
+      background: rgba(10, 25, 47, 0.95);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--ocean-border);
+      padding: 0.6rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .brand-logo {
+      font-size: 1.8rem;
+      animation: wiggle 3s ease-in-out infinite;
+      display: inline-block;
+    }
+    @keyframes wiggle {
+      0%, 100% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(-8deg) scale(1.08); }
+    }
+    .brand-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--text-glow), var(--fish-blue));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.02em;
+    }
+    .brand-tag {
+      font-size: 0.72rem;
+      background: rgba(100, 255, 218, 0.12);
+      color: var(--text-glow);
+      border: 1px solid rgba(100, 255, 218, 0.25);
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+
+    /* Controls */
+    .controls-group {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .select-ocean {
+      background-color: var(--ocean-surface);
+      color: var(--text-main);
+      border: 1px solid var(--ocean-border);
+      border-radius: 6px;
+      padding: 0.45rem 0.8rem;
+      font-size: 0.85rem;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .select-ocean:hover, .select-ocean:focus {
+      border-color: var(--text-glow);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.95rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+    .btn-run {
+      background: linear-gradient(135deg, var(--seaweed-green), #00b4d8);
+      color: #050b14;
+      box-shadow: 0 0 15px rgba(6, 214, 160, 0.35);
+    }
+    .btn-run:hover {
+      box-shadow: 0 0 22px rgba(6, 214, 160, 0.6);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: var(--ocean-surface);
+      color: var(--text-main);
+      border-color: var(--ocean-border);
+    }
+    .btn-secondary:hover {
+      background: var(--ocean-card);
+      border-color: var(--text-glow);
+      color: var(--text-glow);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+    }
+    .btn-ghost:hover {
+      color: var(--text-main);
+    }
+
+    /* Workspace */
+    .main-workspace {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 58px);
+      position: relative;
+      z-index: 1;
+    }
+
+    .pane {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+      background: rgba(10, 25, 47, 0.7);
+    }
+    .editor-pane {
+      border-right: 1px solid var(--ocean-border);
+    }
+
+    .pane-header {
+      background: var(--ocean-mid);
+      border-bottom: 1px solid var(--ocean-border);
+      padding: 0.5rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    .pane-title {
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* Editor */
+    .editor-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+    .line-numbers {
+      width: 3.2rem;
+      background: rgba(5, 11, 20, 0.85);
+      color: #3b506d;
+      font-family: var(--font-code);
+      font-size: 0.9rem;
+      line-height: 1.55;
+      padding: 1rem 0.5rem;
+      text-align: right;
+      user-select: none;
+      overflow-y: hidden;
+      border-right: 1px solid var(--ocean-border);
+    }
+    .code-textarea {
+      flex: 1;
+      background: transparent;
+      color: var(--text-main);
+      border: none;
+      outline: none;
+      padding: 1rem;
+      font-family: var(--font-code);
+      font-size: 0.9rem;
+      line-height: 1.55;
+      resize: none;
+      white-space: pre;
+      tab-size: 4;
+      caret-color: var(--text-glow);
+    }
+
+    /* Output Pane */
+    .tab-bar {
+      display: flex;
+      background: var(--ocean-mid);
+      border-bottom: 1px solid var(--ocean-border);
+    }
+    .tab-btn {
+      padding: 0.6rem 1.1rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { color: var(--text-main); }
+    .tab-btn.active {
+      color: var(--text-glow);
+      border-bottom-color: var(--text-glow);
+      background: rgba(100, 255, 218, 0.05);
+    }
+
+    .output-content {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      overflow: hidden;
+      background: rgba(5, 11, 20, 0.9);
+    }
+    .output-content.active { display: flex; }
+
+    .console-stats {
+      padding: 0.4rem 1rem;
+      background: rgba(17, 34, 64, 0.6);
+      border-bottom: 1px solid var(--ocean-border);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .status-pill {
+      font-size: 0.72rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+    .status-pill.success { background: rgba(6, 214, 160, 0.2); color: var(--seaweed-green); }
+    .status-pill.error { background: rgba(255, 94, 126, 0.2); color: var(--coral-pink); }
+
+    .terminal-body {
+      flex: 1;
+      padding: 1rem;
+      font-family: var(--font-code);
+      font-size: 0.88rem;
+      line-height: 1.5;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .term-line { display: block; margin-bottom: 0.25rem; }
+    .term-line.stdout { color: var(--text-main); }
+    .term-line.stderr { color: var(--coral-pink); }
+    .term-line.system { color: var(--text-glow); font-style: italic; }
+
+    /* Mascot Floating Footer Tip */
+    .mascot-tip {
+      position: absolute;
+      bottom: 15px;
+      right: 20px;
+      background: var(--ocean-card);
+      border: 1px solid var(--ocean-border);
+      padding: 0.6rem 1rem;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      z-index: 20;
+      animation: float 4s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    .mascot-icon { font-size: 1.5rem; }
+    .mascot-text { font-size: 0.8rem; color: var(--text-muted); max-width: 320px; line-height: 1.35; }
+    .mascot-text strong { color: var(--text-glow); }
+    .mascot-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <!-- Ambient Bubbles -->
+  <div class="bubbles">
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand-group">
+      <span class="brand-logo">🐡</span>
+      <div>
+        <span class="brand-title">Unfish Play</span>
+        <span class="brand-tag">Aquatic Code Runner</span>
+      </div>
+    </div>
+
+    <div class="controls-group">
+      <select id="fish-example-select" class="select-ocean">
+        <option value="school">🐠 01. School of Fish Simulation</option>
+        <option value="puffer">🐡 02. Pufferfish Inflation Algorithm</option>
+        <option value="pipelines">🌊 03. Ocean Current Pipelines</option>
+        <option value="concurrency">🎣 04. Fish Catcher (Fibers &amp; Channels)</option>
+        <option value="fibonacci">🧮 05. Recursive Fibonacci</option>
+        <option value="species">🏷️ 06. Marine Species (Pattern Matching)</option>
+      </select>
+
+      <select id="fish-engine-select" class="select-ocean">
+        <option value="ast">🌊 Tree-Walking Interpreter</option>
+        <option value="vm">⚡ 57-Opcode Stack VM</option>
+        <option value="regvm">🚀 256-Register VM</option>
+      </select>
+
+      <button id="btn-fish-run" class="btn btn-run" title="Execute script (Ctrl+Enter)">
+        ▶ Run Code
+      </button>
+
+      <button id="btn-fish-clear" class="btn btn-secondary" title="Clear console">
+        🧹 Clear
+      </button>
+
+      <button id="btn-fish-share" class="btn btn-secondary" title="Copy shareable link">
+        🔗 Share
+      </button>
+    </div>
+
+    <nav style="display:flex; align-items:center; gap:0.6rem;">
+      <a href="../docs/" class="btn btn-ghost">📖 Docs &amp; Downloads</a>
+      <a href="../studio.html" class="btn btn-ghost">💻 Studio IDE</a>
+      <a href="../index.html" class="btn btn-ghost">🏠 Portal</a>
+      <a href="https://github.com/ashokwebs/unfish" target="_blank" class="btn btn-secondary">⭐ GitHub</a>
+    </nav>
+  </header>
+
+  <!-- Split Main Workspace -->
+  <main class="main-workspace">
+    <!-- Left: Code Editor -->
+    <section class="pane editor-pane">
+      <div class="pane-header">
+        <span class="pane-title">📝 main.unfish</span>
+        <span>Press <kbd style="background:var(--ocean-card); padding:2px 5px; border-radius:4px; border:1px solid var(--ocean-border); color:var(--text-glow);">Ctrl+Enter</kbd> to run</span>
+      </div>
+
+      <div class="editor-container">
+        <pre id="fish-line-numbers" class="line-numbers">1</pre>
+        <textarea id="fish-code-editor" class="code-textarea" spellcheck="false" placeholder="Write Unfish code here..."></textarea>
+      </div>
+    </section>
+
+    <!-- Right: Output & Inspectors -->
+    <section class="pane">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="console">💬 Console Output</button>
+        <button class="tab-btn" data-tab="tokens">🔍 Lexer Tokens</button>
+        <button class="tab-btn" data-tab="ast">🌳 Syntax Tree (AST)</button>
+        <button class="tab-btn" data-tab="disasm">⚙️ VM Disassembly</button>
+      </div>
+
+      <!-- Tab: Console -->
+      <div id="tab-console" class="output-content active">
+        <div class="console-stats">
+          <span id="fish-status-info">Ready to dive in</span>
+          <span id="fish-status-pill" class="status-pill success">Idle</span>
+        </div>
+        <div id="fish-terminal-output" class="terminal-body">
+          <span class="term-line system">🐡 Welcome to Unfish Play! Click '▶ Run Code' to execute.</span>
+        </div>
+      </div>
+
+      <!-- Tab: Tokens -->
+      <div id="tab-tokens" class="output-content">
+        <div id="fish-tokens-output" class="terminal-body" style="color:var(--seaweed-green);"></div>
+      </div>
+
+      <!-- Tab: AST -->
+      <div id="tab-ast" class="output-content">
+        <div id="fish-ast-output" class="terminal-body" style="color:var(--fish-blue);"></div>
+      </div>
+
+      <!-- Tab: Disassembly -->
+      <div id="tab-disasm" class="output-content">
+        <div id="fish-disasm-output" class="terminal-body" style="color:var(--fish-yellow);"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Mascot Floating Tip -->
+  <div class="mascot-tip" id="mascot-tip">
+    <span class="mascot-icon">🐡</span>
+    <div class="mascot-text">
+      <strong>Unfish Tip:</strong> Unfish runs identically across all 5 backends: AST, Stack VM, Register VM, Native C99, and WebAssembly!
+    </div>
+    <button class="mascot-close" onclick="document.getElementById('mascot-tip').style.display='none'">✕</button>
+  </div>
+
+  <script src="../unfish_engine.js"></script>
+  <script>
+    const FISH_EXAMPLES = {
+      school: `## 🐠 School of Fish Simulation
+## Simulating fish movement, vectors and distance in the ocean!
+
+struct Fish:
+    id
+    x
+    y
+    speed
+
+    fn swim(self, dx, dy):
+        return Fish(self.id, self.x + dx * self.speed, self.y + dy * self.speed, self.speed)
+
+    fn distance_from_reef(self):
+        return (self.x^2 + self.y^2)^0.5
+
+let school = [
+    Fish(1, 10, 20, 1.5),
+    Fish(2, 14, 22, 1.2),
+    Fish(3, 8,  19, 1.8)
+]
+
+say "🌊 Initial Fish Positions in the Lagoon:"
+for f in school:
+    say f"Fish #{f.id}: pos=({f.x}, {f.y}) • distance to reef={round(f.distance_from_reef(), 2)}"
+
+say "\n🏊 A current pushes the school by (dx=5, dy=3):"
+let moved_school = map(school, fn(f): f.swim(5, 3))
+for f in moved_school:
+    say f"Fish #{f.id}: now at ({f.x}, {f.y}) • new distance={round(f.distance_from_reef(), 2)}"
+`,
+
+      puffer: `## 🐡 Pufferfish Inflation Algorithm
+## When threatened, a pufferfish scales its volume by cubic expansion!
+
+function calculate_inflated_volume(initial_radius, expansion_factor):
+    let new_radius = initial_radius * expansion_factor
+    let volume = (4.0 / 3.0) * 3.14159 * (new_radius^3)
+    return volume
+
+let initial_r = 3.0
+say f"🐡 Resting pufferfish radius: {initial_r} cm"
+
+for threat_level in [1, 2, 3]:
+    let factor = 1.0 + (threat_level * 0.8)
+    let vol = calculate_inflated_volume(initial_r, factor)
+    say f"Threat Level {threat_level}: Expansion={factor}x -> Inflated Volume={round(vol, 2)} cm³"
+`,
+
+      pipelines: `## 🌊 Ocean Current Pipelines
+## Composing data pipelines with higher-order functions!
+
+let ocean_temperatures_c = [24.5, 26.1, 21.0, 19.8, 27.4, 22.3]
+
+# Convert Celsius to Fahrenheit
+let to_fahrenheit = fn(c): (c * 9.0 / 5.0) + 32.0
+
+# Filter tropical waters (>= 24°C)
+let is_tropical = fn(c): c >= 24.0
+
+let tropical_c = filter(ocean_temperatures_c, is_tropical)
+let tropical_f = map(tropical_c, to_fahrenheit)
+
+say f"Ocean Samples (Celsius):    {ocean_temperatures_c}"
+say f"Filtered Tropical Waters:  {tropical_c}"
+say f"Converted to Fahrenheit:   {tropical_f}"
+say f"Warmest Reading:           {max(tropical_c)}°C"
+`,
+
+      concurrency: `## 🎣 Fish Catcher (Cooperative Fibers & Channels)
+## Asynchronous producers and consumers communicating via FIFO channels!
+
+let ch = channel(10)
+
+spawn(fn():
+    say "🎣 Fishing vessel deployed into deep waters..."
+    for i in [1, 2, 3]:
+        let catch_item = f"Tuna #{i}"
+        say f"  -> Caught {catch_item}! Sending to harbor channel."
+        send(ch, catch_item)
+    close_channel(ch)
+)
+
+spawn(fn():
+    say "⚓ Harbor processing plant ready for incoming shipments..."
+    let item = recv(ch)
+    while item != null:
+        say f"  ✓ Received at dock: {item} (inspected & stored)"
+        set item = recv(ch)
+    say "🚢 All catches processed successfully!"
+)
+
+# Run cooperative scheduler
+run_scheduler()
+`,
+
+      fibonacci: `## 🧮 Fast Fibonacci & Recursion
+
+function fib(n):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+say "Computing Fibonacci Sequence across 10 generations:"
+for i in range(0, 10):
+    say f"fib({i}) = {fib(i)}"
+`,
+
+      species: `## 🏷️ Marine Species Classification (Pattern Matching)
+
+enum MarineLife:
+    Fish(name, speed)
+    Crustacean(name, claws)
+    Cephalopod(name, tentacles)
+
+function describe_creature(creature):
+    match creature:
+        when Fish(n, s):
+            return f"{n} is a swift swimmer moving at {s} knots"
+        when Crustacean(n, c):
+            return f"{n} scuttles on the seabed with {c} sharp claws"
+        when Cephalopod(n, t):
+            return f"{n} maneuvers through the depths with {t} tentacles"
+
+let creatures = [
+    MarineLife.Fish("Barracuda", 27),
+    MarineLife.Crustacean("Lobster", 2),
+    MarineLife.Cephalopod("Octopus", 8)
+]
+
+for c in creatures:
+    say f"• {describe_creature(c)}"
+`
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const editor = document.getElementById('fish-code-editor');
+      const lineNumbers = document.getElementById('fish-line-numbers');
+      const exampleSelect = document.getElementById('fish-example-select');
+      const engineSelect = document.getElementById('fish-engine-select');
+      const btnRun = document.getElementById('btn-fish-run');
+      const btnClear = document.getElementById('btn-fish-clear');
+      const btnShare = document.getElementById('btn-fish-share');
+
+      const terminal = document.getElementById('fish-terminal-output');
+      const statusInfo = document.getElementById('fish-status-info');
+      const statusPill = document.getElementById('fish-status-pill');
+
+      const tokensOutput = document.getElementById('fish-tokens-output');
+      const astOutput = document.getElementById('fish-ast-output');
+      const disasmOutput = document.getElementById('fish-disasm-output');
+
+      const tabBtns = document.querySelectorAll('.tab-btn');
+      const tabContents = document.querySelectorAll('.output-content');
+
+      const engine = new window.UnfishEngine();
+
+      function updateLineNumbers() {
+        const count = editor.value.split('\n').length;
+        let str = '';
+        for (let i = 1; i <= count; i++) str += i + '\n';
+        lineNumbers.textContent = str;
+      }
+
+      editor.addEventListener('input', updateLineNumbers);
+      editor.addEventListener('scroll', () => {
+        lineNumbers.scrollTop = editor.scrollTop;
+      });
+
+      editor.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd;
+          editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
+          editor.selectionStart = editor.selectionEnd = start + 4;
+          updateLineNumbers();
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          runProgram();
+        }
+      });
+
+      // Tab switching
+      tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          tabBtns.forEach(b => b.classList.remove('active'));
+          tabContents.forEach(c => c.classList.remove('active'));
+          btn.classList.add('active');
+          const target = document.getElementById(`tab-${btn.dataset.tab}`);
+          if (target) target.classList.add('active');
+        });
+      });
+
+      // Example change
+      exampleSelect.addEventListener('change', () => {
+        const key = exampleSelect.value;
+        if (FISH_EXAMPLES[key]) {
+          editor.value = FISH_EXAMPLES[key];
+          updateLineNumbers();
+          runProgram();
+        }
+      });
+
+      // Clear
+      btnClear.addEventListener('click', () => {
+        terminal.innerHTML = '<span class="term-line system">Terminal cleared.</span>';
+      });
+
+      // Share
+      btnShare.addEventListener('click', () => {
+        const code = editor.value;
+        const b64 = btoa(encodeURIComponent(code));
+        window.location.hash = `code=${b64}`;
+        navigator.clipboard.writeText(window.location.href);
+        alert('🐡 Shareable link copied to clipboard!');
+      });
+
+      // Run
+      btnRun.addEventListener('click', runProgram);
+
+      function runProgram() {
+        const code = editor.value;
+        const mode = engineSelect.value;
+        statusInfo.textContent = `Swimming through code with ${mode.toUpperCase()}...`;
+
+        const t0 = performance.now();
+        const res = engine.run(code);
+        const elapsed = (performance.now() - t0).toFixed(2);
+
+        terminal.innerHTML = '';
+        if (res.stdout) {
+          const lines = res.stdout.split('\n');
+          lines.forEach(l => {
+            if (!l && lines[lines.length - 1] === l) return;
+            const span = document.createElement('span');
+            span.className = 'term-line stdout';
+            span.textContent = l;
+            terminal.appendChild(span);
+          });
+        }
+        if (res.stderr) {
+          const lines = res.stderr.split('\n');
+          lines.forEach(l => {
+            const span = document.createElement('span');
+            span.className = 'term-line stderr';
+            span.textContent = l;
+            terminal.appendChild(span);
+          });
+        }
+
+        if (res.exit_code === 0) {
+          statusPill.className = 'status-pill success';
+          statusPill.textContent = `Exit 0 (${elapsed} ms)`;
+          statusInfo.textContent = `Execution finished in ${elapsed} ms`;
+        } else {
+          statusPill.className = 'status-pill error';
+          statusPill.textContent = `Exit ${res.exit_code} (${elapsed} ms)`;
+          statusInfo.textContent = `Execution failed`;
+        }
+
+        // Update Inspectors
+        try {
+          const tokRes = engine.tokenize(code);
+          tokensOutput.textContent = tokRes.tokens.map(t => t.toString()).join('\n');
+        } catch(e) { tokensOutput.textContent = e.message; }
+
+        try {
+          const ast = engine.parse(code);
+          astOutput.textContent = engine.formatAst(ast);
+        } catch(e) { astOutput.textContent = e.message; }
+
+        try {
+          disasmOutput.textContent = engine.disassemble(code);
+        } catch(e) { disasmOutput.textContent = e.message; }
+      }
+
+      // Check hash or load default
+      if (window.location.hash && window.location.hash.startsWith('#code=')) {
+        try {
+          const code = decodeURIComponent(atob(window.location.hash.slice(6)));
+          editor.value = code;
+        } catch(e) {
+          editor.value = FISH_EXAMPLES.school;
+        }
+      } else {
+        editor.value = FISH_EXAMPLES.school;
+      }
+      updateLineNumbers();
+      runProgram();
+    });
+  </script>
+</body>
+</html>

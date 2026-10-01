@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📖 Unfish Documentation &amp; Downloads Hub</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐡</text></svg>">
+  <link rel="stylesheet" href="../learn.css">
+  <style>
+    /* Downloads Banner */
+    .download-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+      margin: 1.5rem 0 2.5rem 0;
+    }
+    .download-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.4rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.2s;
+    }
+    .download-card:hover {
+      border-color: var(--accent-cyan);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+    .dl-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .dl-icon { font-size: 2rem; }
+    .dl-title { font-size: 1.15rem; font-weight: 700; color: var(--text-title); }
+    .dl-badge {
+      font-size: 0.72rem;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent-cyan);
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      margin-left: auto;
+      font-weight: 600;
+    }
+    .dl-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin-bottom: 1.25rem;
+    }
+    .dl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      text-decoration: none;
+      transition: all 0.15s;
+    }
+    .dl-btn-primary {
+      background: var(--accent-cyan);
+      color: #030712;
+    }
+    .dl-btn-primary:hover {
+      background: var(--accent-cyan-hover);
+    }
+    .dl-btn-secondary {
+      background: var(--bg-surface);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+    }
+    .dl-btn-secondary:hover {
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .install-box {
+      background: #060911;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 1rem 0 2rem 0;
+      font-family: monospace;
+      font-size: 0.95rem;
+    }
+    .install-cmd { color: var(--accent-cyan); user-select: all; }
+    .copy-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="learn-header">
+    <a href="../index.html" class="header-brand">
+      <span class="logo">🐡</span>
+      <span class="brand-name">Unfish Docs &amp; Downloads</span>
+      <span class="brand-badge">Official Guide • v2.0.0</span>
+    </a>
+
+    <div class="search-container">
+      <input type="text" id="global-search-input" class="search-input" placeholder="Search documentation, builtins, downloads...">
+      <span class="search-shortcut">Ctrl+K</span>
+    </div>
+
+    <div class="header-actions">
+      <a href="../play/" class="btn btn-primary">
+        🐡 Unfish Play
+      </a>
+      <a href="../studio.html" class="btn">
+        💻 Studio IDE
+      </a>
+      <a href="../index.html" class="btn">
+        🏠 Portal
+      </a>
+      <a href="https://github.com/ashokwebs/unfish" target="_blank" class="btn">
+        ⭐ GitHub
+      </a>
+      <button id="btn-theme-toggle" class="btn" title="Toggle theme">
+        🌓
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="learn-container">
+    <!-- Sidebar Navigation -->
+    <nav class="learn-sidebar" id="learn-sidebar">
+      <div class="nav-section">
+        <div class="nav-section-title">Downloads &amp; Setup</div>
+        <a class="nav-item active" data-target="downloads">
+          <span class="nav-icon">📥</span> Official Downloads
+        </a>
+        <a class="nav-item" data-target="quickstart">
+          <span class="nav-icon">⚡</span> Quick Start &amp; CLI
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Getting Started</div>
+        <a class="nav-item" data-target="intro">
+          <span class="nav-icon">🐡</span> What is Unfish?
+        </a>
+        <a class="nav-item" data-target="first-program">
+          <span class="nav-icon">🚀</span> Your First Program
+        </a>
+        <a class="nav-item" data-target="learn-computer">
+          <span class="nav-icon">🔬</span> Learn the Computer
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Language Tour</div>
+        <a class="nav-item" data-target="tut-01">01. Hello &amp; Text Output</a>
+        <a class="nav-item" data-target="tut-02">02. Values &amp; Types</a>
+        <a class="nav-item" data-target="tut-03">03. Variables &amp; Scope</a>
+        <a class="nav-item" data-target="tut-04">04. Expressions &amp; Operators</a>
+        <a class="nav-item" data-target="tut-05">05. Conditions &amp; Logic</a>
+        <a class="nav-item" data-target="tut-06">06. Loops &amp; Iteration</a>
+        <a class="nav-item" data-target="tut-07">07. Functions &amp; Lambdas</a>
+        <a class="nav-item" data-target="tut-08">08. Closures &amp; Pipelines</a>
+        <a class="nav-item" data-target="tut-09">09. Arrays &amp; Maps</a>
+        <a class="nav-item" data-target="tut-10">10. Structs, Methods &amp; Traits</a>
+        <a class="nav-item" data-target="tut-11">11. Enums &amp; Pattern Matching</a>
+        <a class="nav-item" data-target="tut-12">12. Error Recovery (try/catch)</a>
+        <a class="nav-item" data-target="tut-13">13. Fibers &amp; Channels</a>
+        <a class="nav-item" data-target="tut-14">14. Systems &amp; Byte Buffers</a>
+        <a class="nav-item" data-target="tut-15">15. Memory Model &amp; GC</a>
+        <a class="nav-item" data-target="tut-16">16. VM &amp; Native Compilation</a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Standard Library</div>
+        <a class="nav-item" data-target="stdlib-core">Core Built-in Functions</a>
+        <a class="nav-item" data-target="stdlib-sys"><code>sys</code> System Interface</a>
+        <a class="nav-item" data-target="stdlib-fs"><code>fs</code> File System</a>
+        <a class="nav-item" data-target="stdlib-time"><code>time</code> Clock &amp; Timestamps</a>
+        <a class="nav-item" data-target="stdlib-random"><code>random</code> PRNG Engine</a>
+        <a class="nav-item" data-target="stdlib-json"><code>json</code> Serializer &amp; Parser</a>
+        <a class="nav-item" data-target="stdlib-testing"><code>testing</code> Test Framework</a>
+      </div>
+    </nav>
+
+    <!-- Content Area -->
+    <main class="learn-content" id="learn-content">
+      <!-- Section: Downloads -->
+      <article id="doc-downloads" class="doc-chapter active">
+        <h1>📥 Official Downloads &amp; Toolchain (v2.0.0)</h1>
+        <p>
+          Unfish is packaged with zero external dependencies. Everything you need — compiler, virtual machines, interactive debugger, formatter, and language server — is bundled in a single self-contained executable.
+        </p>
+
+        <!-- One-line install box -->
+        <h2>⚡ One-Line Universal Install</h2>
+        <p>Paste this command into your terminal to install the latest prebuilt Unfish binary to <code>~/.unfish/bin</code>:</p>
+        <div class="install-box">
+          <span class="install-cmd" id="install-cmd-text">curl -fsSL https://ashokwebs.github.io/unfish/install.sh | bash</span>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd-text').textContent); this.textContent='✓ Copied!'; setTimeout(()=>this.textContent='Copy', 2000);">Copy</button>
+        </div>
+
+        <h2>📦 Official Packages &amp; Artifacts</h2>
+        <div class="download-grid">
+          <!-- Card 1: CLI Binary -->
+          <div class="download-card">
+            <div>
+              <div class="dl-header">
+                <span class="dl-icon">🐧</span>
+                <div>
+                  <div class="dl-title">Unfish CLI Engine</div>
+                  <span style="font-size:0.75rem; color:var(--text-muted);">Linux x86_64 Standalone</span>
+                </div>
+                <span class="dl-badge">v2.0.0</span>
+              </div>
+              <div class="dl-desc">
+                The complete unified CLI toolchain containing the AST interpreter, 57-opcode stack VM, 256-register VM, C99 AOT compiler, WebAssembly emitter, LSP server, debugger, and standard library.
+              </div>
+            </div>
+            <a href="https://github.com/ashokwebs/unfish/releases/download/v2.0.0/unfish-v2.0.0-linux-x86_64.tar.gz" class="dl-btn dl-btn-primary">
+              ⬇️ Download Tarball (289 KB)
+            </a>
+          </div>
+
+          <!-- Card 2: VS Code Extension -->
+          <div class="download-card">
+            <div>
+              <div class="dl-header">
+                <span class="dl-icon">🧩</span>
+                <div>
+                  <div class="dl-title">VS Code Extension</div>
+                  <span style="font-size:0.75rem; color:var(--text-muted);">Visual Studio Code VSIX</span>
+                </div>
+                <span class="dl-badge">v2.0.0</span>
+              </div>
+              <div class="dl-desc">
+                Rich syntax highlighting, bracket matching, indentation rules, code formatting, and Language Server Protocol (LSP) client support for VS Code &amp; VSCodium.
+              </div>
+            </div>
+            <a href="https://github.com/ashokwebs/unfish/releases/download/v2.0.0/unfish-language-2.0.0.vsix" class="dl-btn dl-btn-primary">
+              ⬇️ Download Extension (.vsix)
+            </a>
+          </div>
+
+          <!-- Card 3: Single-Header C99 Runtime -->
+          <div class="download-card">
+            <div>
+              <div class="dl-header">
+                <span class="dl-icon">⚡</span>
+                <div>
+                  <div class="dl-title">Single-Header Runtime</div>
+                  <span style="font-size:0.75rem; color:var(--text-muted);">unfish_runtime.h (ANSI C99)</span>
+                </div>
+                <span class="dl-badge">C99</span>
+              </div>
+              <div class="dl-desc">
+                The standalone single-header C99 runtime with open-addressed hash tables, garbage-collected value types, and memory arenas. Embed Unfish AOT compiled code into any C project.
+              </div>
+            </div>
+            <a href="https://github.com/ashokwebs/unfish/releases/download/v2.0.0/unfish_runtime.h" class="dl-btn dl-btn-secondary">
+              ⬇️ Download Header (141 KB)
+            </a>
+          </div>
+
+          <!-- Card 4: GitHub Source Archive -->
+          <div class="download-card">
+            <div>
+              <div class="dl-header">
+                <span class="dl-icon">🏗️</span>
+                <div>
+                  <div class="dl-title">Complete Source Code</div>
+                  <span style="font-size:0.75rem; color:var(--text-muted);">Git Repository &amp; Tests</span>
+                </div>
+                <span class="dl-badge">MIT</span>
+              </div>
+              <div class="dl-desc">
+                Pure ANSI C99 source code with zero dependencies. Includes 21 unit test suites, stress suites, 91/91 5-way differential conformance tests, and 13 benchmarks. Builds with <code>make</code> in 2 seconds.
+              </div>
+            </div>
+            <a href="https://github.com/ashokwebs/unfish/archive/refs/tags/v2.0.0.tar.gz" class="dl-btn dl-btn-secondary">
+              ⬇️ Download Source (.tar.gz)
+            </a>
+          </div>
+        </div>
+
+        <h2>🛠️ Extension Installation Guide</h2>
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">Install VS Code Extension from Terminal</span>
+          </div>
+          <pre class="runner-editor" style="user-select:all;">code --install-extension unfish-language-2.0.0.vsix</pre>
+        </div>
+      </article>
+
+      <!-- Section: Quick Start -->
+      <article id="doc-quickstart" class="doc-chapter">
+        <h1>⚡ Quick Start &amp; CLI Reference</h1>
+        <p>
+          Once installed, the unified <code>unfish</code> binary provides commands across the entire software development lifecycle:
+        </p>
+
+        <table class="pipeline-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>unfish run &lt;file&gt;</code></td><td>Execute script via tree-walking AST interpreter</td></tr>
+            <tr><td><code>unfish run --vm &lt;file&gt;</code></td><td>Execute script via 57-opcode Stack Virtual Machine (2x–6x faster)</td></tr>
+            <tr><td><code>unfish run --regvm &lt;file&gt;</code></td><td>Execute script via 256-register computed-goto VM</td></tr>
+            <tr><td><code>unfish build [-o bin] &lt;file&gt;</code></td><td>Compile script directly into native standalone C99 binary (25–60x speedup)</td></tr>
+            <tr><td><code>unfish build --wasm &lt;file&gt;</code></td><td>Compile script into WebAssembly binary module</td></tr>
+            <tr><td><code>unfish format -i &lt;file&gt;</code></td><td>Format source code to canonical Unfish style</td></tr>
+            <tr><td><code>unfish debug &lt;file&gt;</code></td><td>Launch interactive step debugger with breakpoints and stack traces</td></tr>
+            <tr><td><code>unfish check [--strict] &lt;file&gt;</code></td><td>Validate syntax and gradual type annotations</td></tr>
+            <tr><td><code>unfish lsp</code></td><td>Start Language Server Protocol (JSON-RPC 2.0)</td></tr>
+            <tr><td><code>unfish repl</code></td><td>Start interactive read-eval-print loop</td></tr>
+            <tr><td><code>unfish playground [--port &lt;p&gt;]</code></td><td>Launch local web playground server</td></tr>
+            <tr><td><code>unfish studio [--port &lt;p&gt;]</code></td><td>Launch full local browser Studio IDE</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Section: Intro -->
+      <article id="doc-intro" class="doc-chapter">
+        <h1>🐡 What is Unfish?</h1>
+        <p>
+          <strong>Unfish</strong> is a real, general-purpose programming language, runtime, compiler, and educational computing environment written in clean ANSI C99 with zero external dependencies.
+        </p>
+        <p>
+          It is designed to provide an unbroken path of intellectual ascent: from visual block programming, into clean indentation-based text programming, to algorithms, data structures, runtime architecture, garbage collection, bytecode virtual machines, and low-level systems programming.
+        </p>
+        <blockquote>
+          <em>"Hide complexity until the learner is ready — never hide it forever."</em>
+        </blockquote>
+
+        <h2>Five Execution Engines in Lockstep</h2>
+        <p>
+          Unfish implements five distinct execution backends, kept in lockstep by a differential test suite that requires byte-identical output from every one of them:
+        </p>
+        <ol>
+          <li><strong>Tree-Walking AST Interpreter</strong>: Immediate startup, direct AST evaluation, ideal for REPL and visual block editing.</li>
+          <li><strong>Bytecode Virtual Machine (<code>--vm</code>)</strong>: 57-opcode stack VM with lexical upvalue capture cells, exception unwinding, and 2x–6x speedup over AST tree-walking.</li>
+          <li><strong>Register-Based Bytecode VM (<code>--regvm</code>)</strong>: 256-register, 3-address VM with computed-goto dispatch.</li>
+          <li><strong>Native C99 AOT Compiler (<code>build</code>)</strong>: Direct transpilation into standalone ANSI C99 with single-header runtime, measured at 25–60x faster than AST.</li>
+          <li><strong>WebAssembly Target (<code>build --wasm</code>)</strong>: Portable WASM binary running in browsers and edge runtimes.</li>
+        </ol>
+      </article>
+
+      <!-- Section: First Program -->
+      <article id="doc-first-program" class="doc-chapter">
+        <h1>🚀 Your First Program</h1>
+        <p>
+          Unfish source code uses the <code>.unfish</code> or <code>.uf</code> extension. Here is a program demonstrating string interpolation, structs, and list transformations:
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">first_program.unfish</span>
+            <div class="runner-actions">
+              <a href="../play/#code=bGV0IG5hbWUgPSAiT2NlYW4gRXhwbG9yZXIiCnNheSBmIkhlbGxvLCB7bmFtZX0hIgpzYXkgZCJWZXJzaW9uOiB7Mn0i" class="btn btn-primary btn-sm">▶ Open in Unfish Play ↗</a>
+            </div>
+          </div>
+          <pre class="runner-editor">## 01. Hello World and Variables
+let name = "Ocean Explorer"
+let speed = 42
+
+say f"Hello, {name}! Current cruising speed: {speed} knots."
+
+## 02. Functions and Data Transformations
+function calculate_heading(angle, offset):
+    return (angle + offset) % 360
+
+say f"New Heading: {calculate_heading(350, 25)} degrees"</pre>
+        </div>
+      </article>
+
+      <!-- Section: Learn the Computer -->
+      <article id="doc-learn-computer" class="doc-chapter">
+        <h1>🔬 Learn the Computer through Unfish</h1>
+        <p>
+          Unfish unrolls the layers of modern computing through an open 5-stage pipeline:
+        </p>
+        <table class="pipeline-table">
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>Component</th>
+              <th>How to Inspect</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Layer 1</strong></td>
+              <td>Lexical Scanning &amp; Tokens</td>
+              <td><code>unfish tokens &lt;file&gt;</code></td>
+            </tr>
+            <tr>
+              <td><strong>Layer 2</strong></td>
+              <td>Pratt Parser &amp; Syntax Tree</td>
+              <td><code>unfish ast &lt;file&gt;</code></td>
+            </tr>
+            <tr>
+              <td><strong>Layer 3</strong></td>
+              <td>Lexical Scoping &amp; Upvalue Captures</td>
+              <td><code>unfish compile &lt;file&gt;</code></td>
+            </tr>
+            <tr>
+              <td><strong>Layer 4</strong></td>
+              <td>Bytecode Virtual Machine ISA</td>
+              <td><code>unfish disasm &lt;file&gt;</code></td>
+            </tr>
+            <tr>
+              <td><strong>Layer 5</strong></td>
+              <td>Memory Arenas &amp; Mark-Sweep GC</td>
+              <td><code>unfish run --vm --debug &lt;file&gt;</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </main>
+  </div>
+
+  <script src="../learn.js"></script>
+  <script>
+    // Tab switching in sidebar
+    document.addEventListener('DOMContentLoaded', () => {
+      const navItems = document.querySelectorAll('.nav-item');
+      const chapters = document.querySelectorAll('.doc-chapter');
+
+      navItems.forEach(item => {
+        item.addEventListener('click', () => {
+          const target = item.dataset.target;
+          navItems.forEach(n => n.classList.remove('active'));
+          chapters.forEach(c => c.classList.remove('active'));
+
+          item.classList.add('active');
+          const targetChap = document.getElementById(`doc-${target}`);
+          if (targetChap) {
+            targetChap.classList.add('active');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

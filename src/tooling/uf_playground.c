@@ -267,6 +267,10 @@ static void handle_static_file(int client_fd, const char* web_root, const char* 
         snprintf(file_path, sizeof(file_path), "%s/learn.html", web_root);
     } else if (strcmp(url_path, "/playground") == 0 || strcmp(url_path, "/playground/") == 0 || strcmp(url_path, "/playground.html") == 0) {
         snprintf(file_path, sizeof(file_path), "%s/playground.html", web_root);
+    } else if (strcmp(url_path, "/play") == 0 || strcmp(url_path, "/play/") == 0 || strcmp(url_path, "/play/index.html") == 0) {
+        snprintf(file_path, sizeof(file_path), "%s/play/index.html", web_root);
+    } else if (strcmp(url_path, "/docs") == 0 || strcmp(url_path, "/docs/") == 0 || strcmp(url_path, "/docs/index.html") == 0) {
+        snprintf(file_path, sizeof(file_path), "%s/docs/index.html", web_root);
     } else {
         snprintf(file_path, sizeof(file_path), "%s%s", web_root, url_path);
     }

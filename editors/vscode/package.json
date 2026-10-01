@@ -4,6 +4,11 @@
   "description": "Rich language support and Language Server Protocol for Unfish",
   "version": "2.0.0",
   "publisher": "ashokwebs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashokwebs/unfish"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
