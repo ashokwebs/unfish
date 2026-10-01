@@ -265,7 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function runFallbackSimulation(code, modeName) {
     const startTime = performance.now();
-    const result = engine.simulate(code);
+    const result = engine.run(code);
     const elapsed = Math.round(performance.now() - startTime);
     handleExecutionResult(result, elapsed, `${modeName} (Browser Engine)`);
   }

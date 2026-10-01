@@ -5,7 +5,8 @@
 It is designed to provide an unbroken path of intellectual ascent: from visual block programming, into clean indentation-based text programming, to algorithms, data structures, runtime architecture, garbage collection, bytecode virtual machines, and low-level systems programming.
 
 > *"Hide complexity until the learner is ready — never hide it forever."*
-> 
+
+[**🚀 Try Online Compiler**](https://ashokwebs.github.io/unfish/playground.html) • [**📚 Documentation &amp; Tutorials**](https://ashokwebs.github.io/unfish/learn.html) • [**💻 Studio IDE**](https://ashokwebs.github.io/unfish/studio.html)
 
 ---
 

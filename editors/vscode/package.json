@@ -2,8 +2,8 @@
   "name": "unfish-language",
   "displayName": "Unfish Programming Language",
   "description": "Rich language support and Language Server Protocol for Unfish",
-  "version": "1.6.0",
-  "publisher": "unfish",
+  "version": "2.0.0",
+  "publisher": "ashokwebs",
   "engines": {
     "vscode": "^1.75.0"
   },

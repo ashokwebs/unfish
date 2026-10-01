@@ -265,6 +265,8 @@ static void handle_static_file(int client_fd, const char* web_root, const char* 
         snprintf(file_path, sizeof(file_path), "%s/studio.html", web_root);
     } else if (strcmp(url_path, "/learn") == 0 || strcmp(url_path, "/learn/") == 0 || strcmp(url_path, "/learn.html") == 0) {
         snprintf(file_path, sizeof(file_path), "%s/learn.html", web_root);
+    } else if (strcmp(url_path, "/playground") == 0 || strcmp(url_path, "/playground/") == 0 || strcmp(url_path, "/playground.html") == 0) {
+        snprintf(file_path, sizeof(file_path), "%s/playground.html", web_root);
     } else {
         snprintf(file_path, sizeof(file_path), "%s%s", web_root, url_path);
     }

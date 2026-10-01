@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐡 Unfish Online Compiler &amp; Playground</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐡</text></svg>">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Toolbar / Navigation -->
+    <header class="toolbar">
+      <div class="brand">
+        <a href="index.html" style="text-decoration:none; display:flex; align-items:center; gap:0.5rem;">
+          <span class="logo">🐡</span>
+          <span class="brand-title">Unfish Playground</span>
+        </a>
+        <span class="badge">Online Compiler</span>
+      </div>
+
+      <div class="controls">
+        <label for="example-select">Examples:</label>
+        <select id="example-select" class="select-input">
+          <option value="hello">01. Hello &amp; Interpolation</option>
+          <option value="enums">02. Enums &amp; Pattern Matching</option>
+          <option value="structs">03. Structs &amp; Methods</option>
+          <option value="destructure">04. Destructuring &amp; Rest</option>
+          <option value="closures">05. Closures &amp; Higher-Order</option>
+          <option value="fibonacci">06. Recursive Fibonacci</option>
+          <option value="sorting">07. Bubble Sort Algorithm</option>
+        </select>
+
+        <button id="btn-run" class="btn btn-primary" title="Execute script using the Tree-Walking AST Interpreter (Ctrl+Enter)">
+          ▶ Run
+        </button>
+
+        <button id="btn-vm" class="btn btn-secondary" title="Execute script using the Stack Bytecode Virtual Machine">
+          ⚡ VM
+        </button>
+
+        <button id="btn-format" class="btn btn-secondary" title="Format code to canonical style">
+          ✨ Format
+        </button>
+
+        <button id="btn-clear" class="btn btn-ghost" title="Clear console output">
+          🧹 Clear
+        </button>
+
+        <span id="backend-status" class="status-badge">Detecting...</span>
+      </div>
+
+      <nav style="display:flex; align-items:center; gap:0.75rem;">
+        <a href="index.html" class="btn btn-ghost" style="text-decoration:none;">Home</a>
+        <a href="learn.html" class="btn btn-ghost" style="text-decoration:none;">Docs &amp; Tutorials</a>
+        <a href="studio.html" class="btn btn-secondary" style="text-decoration:none;">Full Studio IDE ↗</a>
+        <a href="https://github.com/ashokwebs/unfish" target="_blank" class="btn btn-ghost" style="text-decoration:none;">GitHub ↗</a>
+      </nav>
+    </header>
+
+    <!-- Main Split Workspace -->
+    <main class="workspace">
+      <!-- Left Pane: Editor -->
+      <section class="pane editor-pane">
+        <div class="pane-header">
+          <span class="pane-title">📝 main.unfish</span>
+          <span class="shortcut-tip"><kbd>Ctrl+Enter</kbd> to Run • <kbd>Tab</kbd> to indent</span>
+        </div>
+
+        <div class="editor-wrapper">
+          <pre id="line-numbers" class="line-numbers">1</pre>
+          <textarea id="code-editor" class="code-editor" spellcheck="false" placeholder="Write Unfish code here..."></textarea>
+        </div>
+      </section>
+
+      <!-- Right Pane: Output & Inspectors -->
+      <section class="pane output-pane">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="console">💻 Console Output</button>
+          <button class="tab-btn" data-tab="blocks">🧩 Visual Blocks</button>
+          <button class="tab-btn" data-tab="ast">🌳 AST Syntax Tree</button>
+        </div>
+
+        <!-- Tab 1: Terminal Console -->
+        <div id="tab-console" class="tab-content active">
+          <div class="console-toolbar">
+            <span id="execution-stats">Ready to run</span>
+          </div>
+          <div id="console-output" class="terminal-view"></div>
+        </div>
+
+        <!-- Tab 2: Visual Blocks Studio -->
+        <div id="tab-blocks" class="tab-content">
+          <div class="blocks-toolbar" style="padding:0.4rem 0.8rem; background-color:var(--bg-panel); border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+              <span class="toolbar-label">Visual Blocks Palette</span>
+              <span id="blocks-sync-status" class="sync-status-pill">● Synced with Code</span>
+            </div>
+            <div class="blocks-toolbar-right">
+              <button id="btn-blocks-sync" class="btn btn-secondary btn-sm" title="Sync blocks to editor code">🔄 Sync Code</button>
+              <button id="btn-blocks-format" class="btn btn-secondary btn-sm" title="Sync and format code">✨ Sync &amp; Format</button>
+              <button id="btn-blocks-export" class="btn btn-secondary btn-sm" title="Export blocks JSON">📋 Export JSON</button>
+              <button id="btn-blocks-clear" class="btn btn-ghost btn-sm" title="Clear all blocks">🗑️ Clear</button>
+            </div>
+          </div>
+
+          <div class="blocks-workspace">
+            <!-- Palette / Toolbox -->
+            <div class="blocks-palette">
+              <div class="palette-header">Toolbox</div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Output</span>
+                <button class="palette-item item-say" data-kind="say">
+                  <span class="palette-icon">💬</span> say
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Variables</span>
+                <button class="palette-item item-let" data-kind="let">
+                  <span class="palette-icon">📦</span> let
+                </button>
+                <button class="palette-item item-set" data-kind="set">
+                  <span class="palette-icon">✏️</span> set
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Control Flow</span>
+                <button class="palette-item item-if" data-kind="if">
+                  <span class="palette-icon">❓</span> if
+                </button>
+                <button class="palette-item item-while" data-kind="while">
+                  <span class="palette-icon">🔁</span> while
+                </button>
+                <button class="palette-item item-for" data-kind="for">
+                  <span class="palette-icon">🔄</span> for
+                </button>
+                <button class="palette-item item-repeat" data-kind="repeat">
+                  <span class="palette-icon">🔢</span> repeat
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Functions</span>
+                <button class="palette-item item-function" data-kind="function">
+                  <span class="palette-icon">⚙️</span> function
+                </button>
+                <button class="palette-item item-return" data-kind="return">
+                  <span class="palette-icon">↩️</span> return
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Data &amp; Types</span>
+                <button class="palette-item item-struct" data-kind="struct">
+                  <span class="palette-icon">🏛️</span> struct
+                </button>
+                <button class="palette-item item-enum" data-kind="enum">
+                  <span class="palette-icon">🏷️</span> enum
+                </button>
+                <button class="palette-item item-match" data-kind="match">
+                  <span class="palette-icon">🎯</span> match
+                </button>
+                <button class="palette-item item-when" data-kind="when">
+                  <span class="palette-icon">👉</span> when
+                </button>
+              </div>
+
+              <div class="palette-group">
+                <span class="palette-group-title">Errors &amp; Fibers</span>
+                <button class="palette-item item-try" data-kind="try">
+                  <span class="palette-icon">🛡️</span> try
+                </button>
+                <button class="palette-item item-catch" data-kind="catch">
+                  <span class="palette-icon">🎣</span> catch
+                </button>
+                <button class="palette-item item-finally" data-kind="finally">
+                  <span class="palette-icon">🏁</span> finally
+                </button>
+                <button class="palette-item item-spawn" data-kind="spawn">
+                  <span class="palette-icon">🧵</span> spawn
+                </button>
+                <button class="palette-item item-yield" data-kind="yield">
+                  <span class="palette-icon">⏳</span> yield
+                </button>
+              </div>
+            </div>
+
+            <!-- Canvas Area -->
+            <div class="blocks-canvas-area">
+              <div id="blocks-container" class="blocks-canvas"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: AST Syntax Tree -->
+        <div id="tab-ast" class="tab-content">
+          <pre id="ast-output" class="terminal-view"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="unfish_engine.js"></script>
+  <script src="playground.js"></script>
+</body>
+</html>
