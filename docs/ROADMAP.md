@@ -56,7 +56,7 @@ This roadmap defines the engineering progression of Unfish from initial architec
 - [x] Execution visualizer data model (`unfish trace`).
 
 ## Phase 7: Bytecode Compiler & Virtual Machine (VM)
-- [x] Intermediate Representation (IR) / 36-opcode instruction set.
+- [x] Intermediate Representation (IR) / 57-opcode instruction set.
 - [x] AST-to-Bytecode compiler with backpatching and constant pooling.
 - [x] Stack-based virtual machine (`unfish run --vm`) in C99.
 - [x] VM call frames, operand stack, constant pool, upvalue closures.

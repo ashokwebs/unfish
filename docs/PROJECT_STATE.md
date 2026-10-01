@@ -101,5 +101,5 @@
 * **5-Way Differential Parity Suite**:
   - 91 test scripts comparing AST interpreter vs Stack VM vs Register VM vs Native C99 binary vs WebAssembly with 100% identical outputs and exit codes (64 positive tests verified across all five execution backends; 27 negative tests verified between interpreter and VMs).
 * **Multi-Tier Performance Suite (13 Benchmarks)**:
-  - Comparing AST interpreter vs Stack VM vs Register VM (up to 11x faster than AST Interp) vs Native C99 (up to 200x speedup).
+  - Comparing AST interpreter vs Stack VM vs Register VM (up to 11x faster than AST Interp) vs Native C99 (~25–60x speedup over AST tree-walker, ~10x over Register VM).
 

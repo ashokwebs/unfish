@@ -681,7 +681,7 @@ static void find_captures_expr(const UfExpr* expr, const char** locals, size_t l
             find_captures_expr(expr->as.binary.left, locals, local_count, params, param_count, info);
             find_captures_expr(expr->as.binary.right, locals, local_count, params, param_count, info);
             break;
-        case UF_EXPR_CALL:
+        case UF_EXPR_CALL: ;  /* empty statement: C99 forbids a declaration directly after a label */
             /* A call whose callee is a bare identifier matching a builtin
              * name is always builtin-dispatched by emit_expr (see the
              * UF_EXPR_CALL case there), regardless of any local/captured

@@ -13,7 +13,7 @@ It is designed to provide an unbroken path of intellectual ascent: from visual b
 
 Unfish features a unique **five-backend execution engine**, kept in lockstep by a differential test suite that requires byte-identical output from every one of them:
 1. **Tree-Walking AST Interpreter**: Fast startup, direct syntax tree interpretation, ideal for interactive exploration, REPL, and visual blocks.
-2. **Bytecode Virtual Machine (`--vm`)**: 36-opcode stack-based VM with lexical upvalue capture cells, exception unwinding, and a 2x–6x execution speedup over AST tree-walking with 100% behavioral differential parity.
+2. **Bytecode Virtual Machine (`--vm`)**: 57-opcode stack-based VM with lexical upvalue capture cells, exception unwinding, and a 2x–6x execution speedup over AST tree-walking with 100% behavioral differential parity.
 3. **Register-Based Bytecode VM (`--regvm`)**: 256-register, 3-address VM with computed-goto dispatch, typically the fastest of the two interpreted VM tiers.
 4. **Native C99 AOT Compiler (`build` / `emit-c`)**: Direct translation to standalone C99 with single-header runtime, measured at 25–60× faster than the interpreter with zero interpreter dependencies.
 5. **WebAssembly Backend (`build --wasm`)**: The same program compiled to run in a browser or under Node.
@@ -114,10 +114,9 @@ Exhaustive architectural specifications and design records are documented in [`d
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — Architectural Decision Records (ADRs 001 through 034).
 - [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — Living inventory of all language milestones and health metrics.
 - [`CHANGELOG.md`](CHANGELOG.md) — Version history and roadmap releases.
-- [`plan.md`](plan.md) — Complete roadmap and implementation milestones.
 
 ---
 
 ## 📄 License
 
-MIT License. See file headers for details.
+MIT License. See [LICENSE](LICENSE) for details.
