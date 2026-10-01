@@ -549,3 +549,119 @@ blockquote {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Chapter Bottom Navigation */
+.chapter-nav-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.btn-doc-nav {
+  display: inline-flex;
+  flex-direction: column;
+  padding: 0.85rem 1.25rem;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-title);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  max-width: 48%;
+}
+
+.btn-doc-nav:hover {
+  border-color: var(--accent-cyan);
+  background: var(--bg-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+.btn-doc-nav.next {
+  margin-left: auto;
+  text-align: right;
+  align-items: flex-end;
+}
+
+.btn-doc-nav.prev {
+  text-align: left;
+  align-items: flex-start;
+}
+
+.nav-direction-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.nav-chapter-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+/* Specification Tables & ISA */
+.isa-table, .comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0 2rem 0;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.isa-table th, .isa-table td,
+.comparison-table th, .comparison-table td {
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.isa-table th, .comparison-table th {
+  background: var(--bg-sidebar);
+  color: var(--text-title);
+  font-weight: 700;
+}
+
+.isa-table tr:hover, .comparison-table tr:hover {
+  background: rgba(56, 189, 248, 0.03);
+}
+
+.isa-opcode {
+  font-family: var(--font-mono);
+  color: var(--accent-amber);
+  font-weight: 700;
+}
+
+.isa-stack {
+  font-family: var(--font-mono);
+  color: var(--accent-purple);
+  font-size: 0.8rem;
+}
+
+.callout-box {
+  background: rgba(56, 189, 248, 0.08);
+  border-left: 4px solid var(--accent-cyan);
+  padding: 1rem 1.25rem;
+  border-radius: 0 8px 8px 0;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+}
+.callout-box.tip {
+  background: rgba(52, 211, 153, 0.08);
+  border-left-color: var(--accent-green);
+}
+.callout-box.warn {
+  background: rgba(251, 191, 36, 0.08);
+  border-left-color: var(--accent-amber);
+}
+

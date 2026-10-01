@@ -204,6 +204,25 @@
         <a class="nav-item" data-target="stdlib-json"><code>json</code> Serializer &amp; Parser</a>
         <a class="nav-item" data-target="stdlib-testing"><code>testing</code> Test Framework</a>
       </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Language &amp; Architecture Specs</div>
+        <a class="nav-item" data-target="spec-ebnf">
+          <span class="nav-icon">📜</span> Formal Grammar (EBNF)
+        </a>
+        <a class="nav-item" data-target="spec-vm-isa">
+          <span class="nav-icon">⚙️</span> 57-Opcode Stack VM ISA
+        </a>
+        <a class="nav-item" data-target="spec-regvm">
+          <span class="nav-icon">🚀</span> 256-Register VM Architecture
+        </a>
+        <a class="nav-item" data-target="spec-embed">
+          <span class="nav-icon">🔌</span> C99 AOT &amp; Embedding Guide
+        </a>
+        <a class="nav-item" data-target="spec-comparison">
+          <span class="nav-icon">⚖️</span> Language Comparison Matrix
+        </a>
+      </div>
     </nav>
 
     <!-- Content Area -->
@@ -1132,6 +1151,521 @@ say "Scheduler drained cleanly."</textarea>
             <tr><td><code>testing.assert(cond, [msg])</code></td><td><code>(Any, [String]) -&gt; null</code></td><td>Asserts truthy condition</td></tr>
             <tr><td><code>testing.assert_eq(a, b, [msg])</code></td><td><code>(Any, Any, [String]) -&gt; null</code></td><td>Asserts value equality</td></tr>
             <tr><td><code>testing.assert_throws(fn, [msg])</code></td><td><code>(Function, [String]) -&gt; null</code></td><td>Asserts function raises an error</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Specification: EBNF Grammar -->
+      <article id="doc-spec-ebnf" class="doc-chapter">
+        <h1>📜 Formal Grammar &amp; Language Specification</h1>
+        <p>
+          Unfish syntax is formally specified in Extended Backus-Naur Form (ISO/IEC 14977). The language utilizes lexical indentation (the off-side rule), structured expression pipelines, algebraic data types, and pattern matching.
+        </p>
+
+        <div class="callout-box">
+          <strong>Lexical Note:</strong> Indentation in Unfish is significant. The lexer tracks leading whitespace on non-blank lines using an internal indentation stack. An increase in indentation emits a virtual <code>TOKEN_INDENT</code>, while a decrease emits one or more <code>TOKEN_DEDENT</code> tokens. Newlines within parentheses <code>(...)</code>, brackets <code>[...]</code>, and braces <code>{...}</code> are ignored.
+        </div>
+
+        <h2>Syntactic Grammar in ISO/IEC 14977 EBNF</h2>
+        <pre><code>(* Unfish Formal Language Grammar *)
+
+Program
+    = { Statement | TopLevelDecl } ;
+
+TopLevelDecl
+    = StructDecl
+    | EnumDecl
+    | ImportStmt
+    | FunctionDecl ;
+
+StructDecl
+    = "struct" , Identifier , ":" , NEWLINE ,
+      INDENT , { StructField | StructMethod } , DEDENT ;
+
+StructField
+    = Identifier , [ "=" , Expression ] , NEWLINE ;
+
+StructMethod
+    = ( "fn" | "function" ) , Identifier , "(" , [ ParameterList ] , ")" , ":" , Block ;
+
+EnumDecl
+    = "enum" , Identifier , ":" , NEWLINE ,
+      INDENT , { VariantDecl } , DEDENT ;
+
+VariantDecl
+    = Identifier , [ "(" , IdentifierList , ")" ] , NEWLINE ;
+
+ImportStmt
+    = "import" , Identifier , [ "as" , Identifier ] , NEWLINE ;
+
+FunctionDecl
+    = ( "fn" | "function" ) , Identifier , "(" , [ ParameterList ] , ")" , ":" , Block ;
+
+ParameterList
+    = Parameter , { "," , Parameter } ;
+
+Parameter
+    = Identifier , [ "=" , Expression ] ;
+
+Block
+    = NEWLINE , INDENT , { Statement } , DEDENT ;
+
+Statement
+    = LetDecl
+    | Assignment
+    | IfStmt
+    | WhileStmt
+    | ForStmt
+    | MatchStmt
+    | TryCatchStmt
+    | SayStmt
+    | ReturnStmt
+    | BreakStmt
+    | ContinueStmt
+    | ExpressionStmt ;
+
+LetDecl
+    = "let" , ( Identifier | DestructuringPattern ) , [ "=" , Expression ] , NEWLINE ;
+
+DestructuringPattern
+    = "[" , [ PatternList ] , "]"
+    | "{" , [ MapPatternList ] , "}" ;
+
+Assignment
+    = PrimaryExpr , ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) , Expression , NEWLINE ;
+
+IfStmt
+    = "if" , Expression , ":" , Block ,
+      { "elif" , Expression , ":" , Block } ,
+      [ "else" , ":" , Block ] ;
+
+WhileStmt
+    = "while" , Expression , ":" , Block ;
+
+ForStmt
+    = "for" , Identifier , "in" , Expression , ":" , Block ;
+
+MatchStmt
+    = "match" , Expression , ":" , NEWLINE ,
+      INDENT , { MatchArm } , DEDENT ;
+
+MatchArm
+    = "when" , Pattern , ":" , Block ;
+
+Pattern
+    = Identifier , [ "(" , PatternList , ")" ]
+    | Literal
+    | "_" ;
+
+TryCatchStmt
+    = "try" , ":" , Block ,
+      "catch" , [ Identifier ] , ":" , Block ,
+      [ "finally" , ":" , Block ] ;
+
+SayStmt
+    = "say" , Expression , NEWLINE ;
+
+ReturnStmt
+    = "return" , [ Expression ] , NEWLINE ;
+
+ExpressionStmt
+    = Expression , NEWLINE ;
+
+(* Expression Hierarchy with Pratt Precedence Climbing *)
+
+Expression
+    = PipelineExpr ;
+
+PipelineExpr
+    = LogicalOrExpr , { "|>" , ( Identifier | CallExpr ) } ;
+
+LogicalOrExpr
+    = LogicalAndExpr , { ( "or" | "||" ) , LogicalAndExpr } ;
+
+LogicalAndExpr
+    = EqualityExpr , { ( "and" | "&&" ) , EqualityExpr } ;
+
+EqualityExpr
+    = RelationalExpr , { ( "==" | "!=" ) , RelationalExpr } ;
+
+RelationalExpr
+    = AdditiveExpr , { ( "<" | "<=" | ">" | ">=" ) , AdditiveExpr } ;
+
+AdditiveExpr
+    = MultiplicativeExpr , { ( "+" | "-" ) , MultiplicativeExpr } ;
+
+MultiplicativeExpr
+    = UnaryExpr , { ( "*" | "/" | "%" ) , UnaryExpr } ;
+
+UnaryExpr
+    = ( "-" | "!" | "not" ) , UnaryExpr
+    | PrimaryExpr ;
+
+PrimaryExpr
+    = Literal
+    | Identifier
+    | LambdaExpr
+    | "(" , Expression , ")"
+    | ArrayLiteral
+    | MapLiteral
+    | PrimaryExpr , "(" , [ ArgumentList ] , ")"
+    | PrimaryExpr , "[" , Expression , "]"
+    | PrimaryExpr , "." , Identifier ;
+
+LambdaExpr
+    = ( "fn" | "function" ) , "(" , [ ParameterList ] , ")" , ":" , ( Expression | Block ) ;
+
+ArrayLiteral
+    = "[" , [ Expression , { "," , Expression } ] , "]" ;
+
+MapLiteral
+    = "{" , [ MapEntry , { "," , MapEntry } ] , "}" ;
+
+MapEntry
+    = ( StringLiteral | Identifier ) , ":" , Expression ;</code></pre>
+
+        <h2>Pratt Operator Precedence &amp; Associativity Table</h2>
+        <table class="stdlib-table">
+          <thead>
+            <tr><th>Precedence</th><th>Operator Category</th><th>Operators</th><th>Associativity</th><th>Grammar Rule</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>1 (Lowest)</strong></td><td>Assignment</td><td><code>=</code>, <code>+=</code>, <code>-=</code>, <code>*=</code>, <code>/=</code>, <code>%=</code></td><td>Right</td><td>Assignment</td></tr>
+            <tr><td><strong>2</strong></td><td>Forward Pipeline</td><td><code>|&gt;</code></td><td>Left</td><td>PipelineExpr</td></tr>
+            <tr><td><strong>3</strong></td><td>Logical OR</td><td><code>or</code>, <code>||</code></td><td>Left</td><td>LogicalOrExpr</td></tr>
+            <tr><td><strong>4</strong></td><td>Logical AND</td><td><code>and</code>, <code>&amp;&amp;</code></td><td>Left</td><td>LogicalAndExpr</td></tr>
+            <tr><td><strong>5</strong></td><td>Equality</td><td><code>==</code>, <code>!=</code></td><td>Left</td><td>EqualityExpr</td></tr>
+            <tr><td><strong>6</strong></td><td>Relational</td><td><code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></td><td>Left</td><td>RelationalExpr</td></tr>
+            <tr><td><strong>7</strong></td><td>Additive</td><td><code>+</code>, <code>-</code></td><td>Left</td><td>AdditiveExpr</td></tr>
+            <tr><td><strong>8</strong></td><td>Multiplicative</td><td><code>*</code>, <code>/</code>, <code>%</code></td><td>Left</td><td>MultiplicativeExpr</td></tr>
+            <tr><td><strong>9</strong></td><td>Unary Prefix</td><td><code>-</code> (neg), <code>!</code>, <code>not</code></td><td>Right</td><td>UnaryExpr</td></tr>
+            <tr><td><strong>10</strong></td><td>Function Call &amp; Index</td><td><code>f(...)</code>, <code>arr[i]</code>, <code>obj.prop</code></td><td>Left</td><td>PrimaryExpr</td></tr>
+            <tr><td><strong>11 (Highest)</strong></td><td>Primary &amp; Grouping</td><td><code>(...)</code>, <code>[...]</code>, <code>{...}</code>, Literals</td><td>None</td><td>PrimaryExpr</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Specification: 57-Opcode Stack VM ISA -->
+      <article id="doc-spec-vm-isa" class="doc-chapter">
+        <h1>⚙️ 57-Opcode Stack VM ISA Specification</h1>
+        <p>
+          The Unfish Virtual Machine is a bytecode-interpreted stack machine implemented in pure ANSI C99. It evaluates 16-byte tagged values (<code>UfValue</code>) on an operand stack with dynamic bounds checking, lexical upvalues for closures, and frame-pointer call unwinding.
+        </p>
+
+        <h2>Binary Bytecode Container (.ufc Format)</h2>
+        <p>Precompiled Unfish bytecode modules are structured in a binary format with fixed endianness:</p>
+        <pre><code>+-----------------------------------------------------------------------+
+| Magic Bytes: 0x55 0x46 0x56 0x4D ("UFVM")               (4 bytes)     |
++-----------------------------------------------------------------------+
+| Version: Major (u8), Minor (u8), Patch (u8), Flags (u8) (4 bytes)     |
++-----------------------------------------------------------------------+
+| Constant Pool Count: uint32_t                           (4 bytes)     |
++-----------------------------------------------------------------------+
+| Constant Pool Entries: [Type: u8, Length: u32, Data: bytes ...]       |
++-----------------------------------------------------------------------+
+| Bytecode Instruction Stream: [Opcode: u8, Operands: var-length ...]   |
++-----------------------------------------------------------------------+
+| Source Line Debug Mapping Table: [Offset: u32, Line: u32 ...]         |
++-----------------------------------------------------------------------+</code></pre>
+
+        <h2>Complete 57-Opcode Instruction Table</h2>
+        <table class="isa-table">
+          <thead>
+            <tr>
+              <th>Hex</th>
+              <th>Mnemonic</th>
+              <th>Operands</th>
+              <th>Stack Transition</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="isa-opcode">0x00</td><td><code>OP_CONSTANT</code></td><td><code>u16 const_idx</code></td><td class="isa-stack">[] -&gt; [val]</td><td>Pushes constant from pool onto operand stack</td></tr>
+            <tr><td class="isa-opcode">0x01</td><td><code>OP_NULL</code></td><td>—</td><td class="isa-stack">[] -&gt; [null]</td><td>Pushes null literal</td></tr>
+            <tr><td class="isa-opcode">0x02</td><td><code>OP_TRUE</code></td><td>—</td><td class="isa-stack">[] -&gt; [true]</td><td>Pushes boolean true</td></tr>
+            <tr><td class="isa-opcode">0x03</td><td><code>OP_FALSE</code></td><td>—</td><td class="isa-stack">[] -&gt; [false]</td><td>Pushes boolean false</td></tr>
+            <tr><td class="isa-opcode">0x04</td><td><code>OP_POP</code></td><td>—</td><td class="isa-stack">[val] -&gt; []</td><td>Discards top stack value</td></tr>
+            <tr><td class="isa-opcode">0x05</td><td><code>OP_DUP</code></td><td>—</td><td class="isa-stack">[val] -&gt; [val, val]</td><td>Duplicates top stack value</td></tr>
+            <tr><td class="isa-opcode">0x06</td><td><code>OP_LOAD_LOCAL</code></td><td><code>u16 slot</code></td><td class="isa-stack">[] -&gt; [val]</td><td>Reads value from local stack frame slot</td></tr>
+            <tr><td class="isa-opcode">0x07</td><td><code>OP_STORE_LOCAL</code></td><td><code>u16 slot</code></td><td class="isa-stack">[val] -&gt; [val]</td><td>Writes top stack value into local slot</td></tr>
+            <tr><td class="isa-opcode">0x08</td><td><code>OP_LOAD_GLOBAL</code></td><td><code>u16 const_name</code></td><td class="isa-stack">[] -&gt; [val]</td><td>Resolves global symbol by constant string name</td></tr>
+            <tr><td class="isa-opcode">0x09</td><td><code>OP_STORE_GLOBAL</code></td><td><code>u16 const_name</code></td><td class="isa-stack">[val] -&gt; [val]</td><td>Updates existing global symbol value</td></tr>
+            <tr><td class="isa-opcode">0x0A</td><td><code>OP_DEFINE_GLOBAL</code></td><td><code>u16 const_name</code></td><td class="isa-stack">[val] -&gt; []</td><td>Defines new symbol in global environment table</td></tr>
+            <tr><td class="isa-opcode">0x0B</td><td><code>OP_GET_UPVALUE</code></td><td><code>u8 upval_idx</code></td><td class="isa-stack">[] -&gt; [val]</td><td>Loads closed variable from closure upvalues array</td></tr>
+            <tr><td class="isa-opcode">0x0C</td><td><code>OP_SET_UPVALUE</code></td><td><code>u8 upval_idx</code></td><td class="isa-stack">[val] -&gt; [val]</td><td>Assigns value to closure upvalue</td></tr>
+            <tr><td class="isa-opcode">0x0D</td><td><code>OP_CLOSURE</code></td><td><code>u16 fn_const</code></td><td class="isa-stack">[] -&gt; [closure]</td><td>Wraps function prototype with captured upvalues</td></tr>
+            <tr><td class="isa-opcode">0x0E</td><td><code>OP_CLOSE_UPVALUE</code></td><td>—</td><td class="isa-stack">[val] -&gt; []</td><td>Closes open upvalues pointing into exiting stack frame</td></tr>
+            <tr><td class="isa-opcode">0x0F</td><td><code>OP_ADD</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [a + b]</td><td>Numeric addition or string concatenation</td></tr>
+            <tr><td class="isa-opcode">0x10</td><td><code>OP_SUB</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [a - b]</td><td>Numeric subtraction</td></tr>
+            <tr><td class="isa-opcode">0x11</td><td><code>OP_MUL</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [a * b]</td><td>Numeric multiplication</td></tr>
+            <tr><td class="isa-opcode">0x12</td><td><code>OP_DIV</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [a / b]</td><td>Floating point division</td></tr>
+            <tr><td class="isa-opcode">0x13</td><td><code>OP_MOD</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [a % b]</td><td>Modulo division remainder</td></tr>
+            <tr><td class="isa-opcode">0x14</td><td><code>OP_NEG</code></td><td>—</td><td class="isa-stack">[a] -&gt; [-a]</td><td>Arithmetic negation</td></tr>
+            <tr><td class="isa-opcode">0x15</td><td><code>OP_NOT</code></td><td>—</td><td class="isa-stack">[a] -&gt; [!a]</td><td>Logical boolean inversion</td></tr>
+            <tr><td class="isa-opcode">0x16</td><td><code>OP_EQ</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [bool]</td><td>Value equality comparison</td></tr>
+            <tr><td class="isa-opcode">0x17</td><td><code>OP_NEQ</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [bool]</td><td>Value inequality comparison</td></tr>
+            <tr><td class="isa-opcode">0x18</td><td><code>OP_LT</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [bool]</td><td>Less than comparison</td></tr>
+            <tr><td class="isa-opcode">0x19</td><td><code>OP_LTE</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [bool]</td><td>Less than or equal comparison</td></tr>
+            <tr><td class="isa-opcode">0x1A</td><td><code>OP_GT</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [bool]</td><td>Greater than comparison</td></tr>
+            <tr><td class="isa-opcode">0x1B</td><td><code>OP_GTE</code></td><td>—</td><td class="isa-stack">[a, b] -&gt; [bool]</td><td>Greater than or equal comparison</td></tr>
+            <tr><td class="isa-opcode">0x1C</td><td><code>OP_JUMP</code></td><td><code>u16 offset</code></td><td class="isa-stack">[] -&gt; []</td><td>Unconditional forward instruction jump</td></tr>
+            <tr><td class="isa-opcode">0x1D</td><td><code>OP_JUMP_IF_FALSE</code></td><td><code>u16 offset</code></td><td class="isa-stack">[cond] -&gt; [cond]</td><td>Jumps if top value is falsey (keeps value on stack)</td></tr>
+            <tr><td class="isa-opcode">0x1E</td><td><code>OP_JUMP_IF_ARG</code></td><td><code>u8 idx, u16 off</code></td><td class="isa-stack">[] -&gt; []</td><td>Jumps if argument index was supplied at call site</td></tr>
+            <tr><td class="isa-opcode">0x1F</td><td><code>OP_LOOP</code></td><td><code>u16 offset</code></td><td class="isa-stack">[] -&gt; []</td><td>Unconditional backward jump for loops</td></tr>
+            <tr><td class="isa-opcode">0x20</td><td><code>OP_CALL</code></td><td><code>u8 argc</code></td><td class="isa-stack">[fn, a1..an] -&gt; [res]</td><td>Invokes function or closure with argc arguments</td></tr>
+            <tr><td class="isa-opcode">0x21</td><td><code>OP_CALL_SPREAD</code></td><td>—</td><td class="isa-stack">[fn, arr] -&gt; [res]</td><td>Invokes function with unpacked array arguments</td></tr>
+            <tr><td class="isa-opcode">0x22</td><td><code>OP_RETURN</code></td><td>—</td><td class="isa-stack">[res] -&gt; []</td><td>Pops call frame and yields result to caller</td></tr>
+            <tr><td class="isa-opcode">0x23</td><td><code>OP_BUILD_ARRAY</code></td><td><code>u16 count</code></td><td class="isa-stack">[i1..in] -&gt; [arr]</td><td>Constructs dynamic array with count elements</td></tr>
+            <tr><td class="isa-opcode">0x24</td><td><code>OP_ARRAY_PUSH</code></td><td>—</td><td class="isa-stack">[arr, item] -&gt; [arr]</td><td>Appends item to array</td></tr>
+            <tr><td class="isa-opcode">0x25</td><td><code>OP_ARRAY_EXTEND</code></td><td>—</td><td class="isa-stack">[arr1, arr2] -&gt; [arr1]</td><td>Extends array with elements of another array</td></tr>
+            <tr><td class="isa-opcode">0x26</td><td><code>OP_ARRAY_SLICE</code></td><td><code>u16 start</code></td><td class="isa-stack">[arr] -&gt; [slice]</td><td>Extracts subarray starting at given index</td></tr>
+            <tr><td class="isa-opcode">0x27</td><td><code>OP_ASSERT_ARRAY</code></td><td>—</td><td class="isa-stack">[val] -&gt; [val]</td><td>Throws error if top value is not an array</td></tr>
+            <tr><td class="isa-opcode">0x28</td><td><code>OP_ASSERT_MAP</code></td><td>—</td><td class="isa-stack">[val] -&gt; [val]</td><td>Throws error if top value is not a map</td></tr>
+            <tr><td class="isa-opcode">0x29</td><td><code>OP_ARRAY_GET_SAFE</code></td><td><code>u16 idx</code></td><td class="isa-stack">[arr] -&gt; [elem]</td><td>Reads array index without throwing; returns null if out of range</td></tr>
+            <tr><td class="isa-opcode">0x2A</td><td><code>OP_MAP_GET_SAFE</code></td><td>—</td><td class="isa-stack">[map, key] -&gt; [elem]</td><td>Reads map key without throwing; returns null if key missing</td></tr>
+            <tr><td class="isa-opcode">0x2B</td><td><code>OP_MAP_REST</code></td><td><code>u16 ex_cnt, ...</code></td><td class="isa-stack">[map] -&gt; [rest_map]</td><td>Destructuring map rest pattern (excludes specified keys)</td></tr>
+            <tr><td class="isa-opcode">0x2C</td><td><code>OP_BUILD_MAP</code></td><td><code>u16 pair_cnt</code></td><td class="isa-stack">[k1,v1..kn,vn] -&gt; [map]</td><td>Constructs hash map from key-value pairs</td></tr>
+            <tr><td class="isa-opcode">0x2D</td><td><code>OP_MAP_SET</code></td><td>—</td><td class="isa-stack">[map, k, v] -&gt; [map]</td><td>Inserts or updates key-value pair in map</td></tr>
+            <tr><td class="isa-opcode">0x2E</td><td><code>OP_MAP_EXTEND</code></td><td>—</td><td class="isa-stack">[m1, m2] -&gt; [m1]</td><td>Shallow merges keys from m2 into m1</td></tr>
+            <tr><td class="isa-opcode">0x2F</td><td><code>OP_INDEX_GET</code></td><td>—</td><td class="isa-stack">[coll, idx] -&gt; [val]</td><td>Generic subscript indexing (array index or map key)</td></tr>
+            <tr><td class="isa-opcode">0x30</td><td><code>OP_INDEX_SET</code></td><td>—</td><td class="isa-stack">[coll, idx, val] -&gt; [val]</td><td>Generic subscript mutation</td></tr>
+            <tr><td class="isa-opcode">0x31</td><td><code>OP_ITER_GET</code></td><td>—</td><td class="isa-stack">[coll, idx] -&gt; [val]</td><td>Fast indexed access for loop iterators</td></tr>
+            <tr><td class="isa-opcode">0x32</td><td><code>OP_SAY</code></td><td>—</td><td class="isa-stack">[val] -&gt; []</td><td>Converts value to string and outputs with newline</td></tr>
+            <tr><td class="isa-opcode">0x33</td><td><code>OP_STRUCT_DEF</code></td><td><code>u16 sdef_idx</code></td><td class="isa-stack">[] -&gt; [sdef]</td><td>Registers struct type definition schema</td></tr>
+            <tr><td class="isa-opcode">0x34</td><td><code>OP_INSTANCE</code></td><td><code>u16 sdef_idx</code></td><td class="isa-stack">[f1..fn] -&gt; [inst]</td><td>Instantiates struct with initialized field values</td></tr>
+            <tr><td class="isa-opcode">0x35</td><td><code>OP_PUSH_TRY</code></td><td><code>u16 catch_off</code></td><td class="isa-stack">[] -&gt; []</td><td>Pushes exception handler entry onto runtime catch stack</td></tr>
+            <tr><td class="isa-opcode">0x36</td><td><code>OP_POP_TRY</code></td><td>—</td><td class="isa-stack">[] -&gt; []</td><td>Removes top exception handler on try block success</td></tr>
+            <tr><td class="isa-opcode">0x37</td><td><code>OP_RETHROW</code></td><td>—</td><td class="isa-stack">[err] -&gt; []</td><td>Reraises caught exception to outer handler</td></tr>
+            <tr><td class="isa-opcode">0x38</td><td><code>OP_AWAIT</code></td><td>—</td><td class="isa-stack">[prom] -&gt; [res]</td><td>Suspends fiber until asynchronous promise resolves</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <!-- Specification: 256-Register VM -->
+      <article id="doc-spec-regvm" class="doc-chapter">
+        <h1>🚀 256-Register VM Architecture (RegVM)</h1>
+        <p>
+          While the stack VM provides a compact bytecode footprint, real-world interpretation often incurs high memory traffic due to constant operand pushes and pops. The Unfish <strong>RegVM</strong> provides a high-throughput alternative based on a 3-address register architecture.
+        </p>
+
+        <div class="callout-box tip">
+          <strong>Run RegVM:</strong> Execute any Unfish script directly using the Register VM by passing the <code>--regvm</code> flag:
+          <br><code>unfish run --regvm script.uf</code>
+        </div>
+
+        <h2>32-Bit Fixed Instruction Formats</h2>
+        <p>All RegVM instructions are encoded as 32-bit words for optimal cache line alignment and CPU branch prediction:</p>
+        <pre><code>Format ABC:  [ Opcode : 8b ] [ Reg A : 8b ] [ Reg B : 8b ] [ Reg C : 8b ]
+Format ABx:  [ Opcode : 8b ] [ Reg A : 8b ] [ Constant/Offset Bx : 16b  ]
+Format AsBx: [ Opcode : 8b ] [ Reg A : 8b ] [ Signed Offset sBx : 16b   ]</code></pre>
+
+        <h2>Stack VM vs. Register VM Trace Comparison</h2>
+        <p>Consider the arithmetic statement: <code>let result = (a * b) + (c - d)</code></p>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1.5rem; margin:1.5rem 0;">
+          <div>
+            <h4 style="color:var(--accent-amber); margin-bottom:0.5rem;">Stack VM (6 Instructions)</h4>
+            <pre><code>OP_LOAD_LOCAL  0    # push a
+OP_LOAD_LOCAL  1    # push b
+OP_MUL              # pop b, pop a, push (a*b)
+OP_LOAD_LOCAL  2    # push c
+OP_LOAD_LOCAL  3    # push d
+OP_SUB              # pop d, pop c, push (c-d)
+OP_ADD              # pop (c-d), pop (a*b), push sum
+OP_STORE_LOCAL 4    # store into result</code></pre>
+          </div>
+          <div>
+            <h4 style="color:var(--accent-green); margin-bottom:0.5rem;">Register VM (3 Instructions)</h4>
+            <pre><code>ROP_MUL  r4, r0, r1   # r4 = r0 * r1
+ROP_SUB  r5, r2, r3   # r5 = r2 - r3
+ROP_ADD  r4, r4, r5   # r4 = r4 + r5 (result)</code></pre>
+          </div>
+        </div>
+
+        <h2>Register Windowing &amp; Calling Convention</h2>
+        <p>
+          Each execution fiber maintains an activation register file of 256 registers. Upon invoking a function:
+        </p>
+        <ul>
+          <li>The caller places function arguments into consecutive registers starting at <code>r(A+1)</code>.</li>
+          <li>The call instruction <code>ROP_CALL A, B, C</code> shifts the callee's frame base pointer to <code>rA</code>.</li>
+          <li>Inside the callee, argument values map directly to <code>r0, r1, ...</code> without copying.</li>
+          <li>Upon return, <code>ROP_RETURN A</code> transfers the return value back to destination register <code>rC</code>.</li>
+        </ul>
+      </article>
+
+      <!-- Specification: C99 AOT & Embedding -->
+      <article id="doc-spec-embed" class="doc-chapter">
+        <h1>🔌 C99 AOT &amp; Host Embedding Guide</h1>
+        <p>
+          Unfish was engineered from line 1 to be embeddable into host C and C++ applications. The entire runtime is self-contained in <code>unfish_runtime.h</code> with zero external dependencies beyond standard C99.
+        </p>
+
+        <h2>Compiling to Native Standalone C99</h2>
+        <p>You can transpile any Unfish source code directly into portable ANSI C99 source code:</p>
+        <pre><code># Transpile Unfish to C99 source file
+unfish emit-c -o game_logic.c game_logic.uf
+
+# Compile directly to a native binary using GCC or Clang
+gcc -O3 game_logic.c -lm -o game_logic</code></pre>
+
+        <h2>Embedding Unfish in a C Host Application</h2>
+        <p>Here is a complete, working host program that embeds Unfish, executes scripts, and registers a custom C function callable from Unfish:</p>
+
+        <pre><code>/* host_application.c — Embedding Unfish in C */
+#include "unfish_runtime.h"
+
+/* Custom native function exposed to Unfish */
+static UfVal native_ocean_depth(void* env, size_t argc, UfVal* args) {
+    (void)env;
+    double trench_id = (argc &gt; 0 &amp;&amp; uf_is_num(args[0])) ? uf_to_num(args[0]) : 0.0;
+    printf("[Host C] Fetching bathymetric depth for trench #%.0f\n", trench_id);
+    return uf_num(10994.0); /* Mariana Trench depth in meters */
+}
+
+int main(void) {
+    printf("=== Starting Host Application with Embedded Unfish ===\n");
+
+    /* 1. Initialize host runtime context */
+    UfRuntime* rt = uf_runtime_new();
+
+    /* 2. Register native C function into Unfish globals */
+    uf_register_native(rt, "get_ocean_depth", native_ocean_depth);
+
+    /* 3. Execute Unfish script from string */
+    const char* script =
+        "let depth = get_ocean_depth(1)\n"
+        "say f'Submersible reached depth: {depth} meters!'\n"
+        "let pressure = (depth / 10.0) + 1.0\n"
+        "say f'Ambient pressure: {round(pressure)} atmospheres'\n";
+
+    UfValue result = uf_eval_string(rt, script);
+
+    /* 4. Cleanup runtime memory */
+    uf_runtime_free(rt);
+    printf("=== Unfish runtime cleanly terminated ===\n");
+    return 0;
+}</code></pre>
+
+        <h2>Bare-Metal &amp; Microcontroller Deployment (-DUF_EMBEDDED)</h2>
+        <p>
+          For microcontrollers (ARM Cortex-M, ESP32, RISC-V) without standard POSIX memory allocators, compile with <code>-DUF_EMBEDDED</code>. Unfish replaces dynamic <code>malloc</code> with a fixed static buffer and routes text output to a custom UART transmitter:
+        </p>
+        <pre><code>/* Direct serial output to UART hardware */
+void uart_send_char(char c) {
+    while (!(USART1-&gt;SR &amp; USART_SR_TXE));
+    USART1-&gt;DR = c;
+}
+
+int main(void) {
+    /* Route Unfish say statements to hardware UART */
+    uf_set_putchar(uart_send_char);
+
+    /* Runs fully within 256 KB static RAM buffer */
+    uf_run_compiled_embedded();
+    while (1);
+}</code></pre>
+      </article>
+
+      <!-- Specification: Comparison Matrix -->
+      <article id="doc-spec-comparison" class="doc-chapter">
+        <h1>⚖️ Language Comparison Matrix</h1>
+        <p>
+          Unfish combines the syntax elegance of Python, the lightweight embeddability of Lua, and the concurrency ergonomics of Go into a unified, zero-dependency C99 engine.
+        </p>
+
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Language Feature</th>
+              <th>Unfish (v2.0.0)</th>
+              <th>Python (3.12)</th>
+              <th>Lua (5.4)</th>
+              <th>Go (1.22)</th>
+              <th>Rust (1.77)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Primary Paradigm</strong></td>
+              <td>Multi-paradigm (Structs, Enums, Pattern Matching)</td>
+              <td>Object-Oriented, Dynamic</td>
+              <td>Prototype-based, Procedural</td>
+              <td>Compiled Procedural, Structural</td>
+              <td>Compiled Systems, Ownership</td>
+            </tr>
+            <tr>
+              <td><strong>Syntax Style</strong></td>
+              <td>Indentation-based (Off-side rule, colons)</td>
+              <td>Indentation-based (Off-side rule, colons)</td>
+              <td>Keyword-delimited (<code>do...end</code>)</td>
+              <td>C-style Curly braces <code>{}</code></td>
+              <td>C-style Curly braces <code>{}</code></td>
+            </tr>
+            <tr>
+              <td><strong>Value Representation</strong></td>
+              <td>16-byte Tagged Union (<code>UfValue</code>)</td>
+              <td>Heap-allocated <code>PyObject*</code> (28+ bytes)</td>
+              <td>16-byte Tagged <code>TValue</code></td>
+              <td>Typed struct / Interface fat pointer</td>
+              <td>Zero-cost statically typed enums/structs</td>
+            </tr>
+            <tr>
+              <td><strong>Memory Management</strong></td>
+              <td>Arenas + Generational Mark-and-Sweep GC</td>
+              <td>Reference Counting + Cycle GC</td>
+              <td>Incremental Mark-and-Sweep GC</td>
+              <td>Concurrent Tri-color Tracing GC</td>
+              <td>Compile-time Ownership &amp; Borrow Checker</td>
+            </tr>
+            <tr>
+              <td><strong>Concurrency Primitive</strong></td>
+              <td>Cooperative Fibers &amp; Typed Channels (CSP)</td>
+              <td>Async/Await Event Loop (GIL)</td>
+              <td>Coroutines (yield / resume)</td>
+              <td>Goroutines &amp; Channels (M:N Preemptive)</td>
+              <td>OS Threads / async runtimes (Tokio)</td>
+            </tr>
+            <tr>
+              <td><strong>Execution Backends</strong></td>
+              <td><strong>5 Backends:</strong> AST, Stack VM, RegVM, C99 AOT, WASM</td>
+              <td>Bytecode Interpreter (CPython)</td>
+              <td>Single Register VM</td>
+              <td>Native Machine Code AOT</td>
+              <td>Native Machine Code AOT (LLVM)</td>
+            </tr>
+            <tr>
+              <td><strong>C Embedding</strong></td>
+              <td>Single C99 Header (<code>unfish_runtime.h</code>)</td>
+              <td>Complex C API (<code>Python.h</code>, requires Lib)</td>
+              <td>Clean C API (<code>lua.h</code>)</td>
+              <td>Cgo (high context-switch overhead)</td>
+              <td>C FFI (extern "C")</td>
+            </tr>
+            <tr>
+              <td><strong>Standalone Binary Size</strong></td>
+              <td><strong>289 KB</strong> (CLI, VM, Debugger, LSP)</td>
+              <td>~30–50 MB (CPython + stdlib)</td>
+              <td>~280 KB (lua interpreter)</td>
+              <td>~2–10 MB (Go runtime binary)</td>
+              <td>~300 KB – 5 MB</td>
+            </tr>
+            <tr>
+              <td><strong>Startup Time</strong></td>
+              <td><strong>&lt; 2 ms</strong></td>
+              <td>~30–45 ms</td>
+              <td><strong>&lt; 2 ms</strong></td>
+              <td>~1–3 ms</td>
+              <td><strong>&lt; 1 ms</strong></td>
+            </tr>
+            <tr>
+              <td><strong>External Dependencies</strong></td>
+              <td><strong>Zero</strong> (Pure ANSI C99)</td>
+              <td>C runtime, libffi, openssl, zlib</td>
+              <td>Zero (ANSI C)</td>
+              <td>Zero (Self-contained Go runtime)</td>
+              <td>LLVM backend, libc</td>
+            </tr>
           </tbody>
         </table>
       </article>
