@@ -110,10 +110,11 @@
 
     tokenize() {
       let isLineStart = true;
+      let parenDepth = 0;
 
       while (this.cursor < this.length) {
         // Handle indentation at start of line
-        if (isLineStart) {
+        if (isLineStart && parenDepth === 0) {
           let indent = 0;
           let blankLine = false;
 
@@ -168,6 +169,7 @@
         }
 
         if (c === '\n') {
+          if (parenDepth > 0) continue;
           this.tokens.push(new Token('TOKEN_NEWLINE', '\\n', startLine, startCol));
           isLineStart = true;
           continue;
@@ -277,12 +279,12 @@
 
         // Operators & Punctuation
         switch (c) {
-          case '(': this.tokens.push(new Token('TOKEN_LPAREN', '(', startLine, startCol)); break;
-          case ')': this.tokens.push(new Token('TOKEN_RPAREN', ')', startLine, startCol)); break;
-          case '[': this.tokens.push(new Token('TOKEN_LBRACKET', '[', startLine, startCol)); break;
-          case ']': this.tokens.push(new Token('TOKEN_RBRACKET', ']', startLine, startCol)); break;
-          case '{': this.tokens.push(new Token('TOKEN_LBRACE', '{', startLine, startCol)); break;
-          case '}': this.tokens.push(new Token('TOKEN_RBRACE', '}', startLine, startCol)); break;
+          case '(': parenDepth++; this.tokens.push(new Token('TOKEN_LPAREN', '(', startLine, startCol)); break;
+          case ')': if (parenDepth > 0) parenDepth--; this.tokens.push(new Token('TOKEN_RPAREN', ')', startLine, startCol)); break;
+          case '[': parenDepth++; this.tokens.push(new Token('TOKEN_LBRACKET', '[', startLine, startCol)); break;
+          case ']': if (parenDepth > 0) parenDepth--; this.tokens.push(new Token('TOKEN_RBRACKET', ']', startLine, startCol)); break;
+          case '{': parenDepth++; this.tokens.push(new Token('TOKEN_LBRACE', '{', startLine, startCol)); break;
+          case '}': if (parenDepth > 0) parenDepth--; this.tokens.push(new Token('TOKEN_RBRACE', '}', startLine, startCol)); break;
           case ':': this.tokens.push(new Token('TOKEN_COLON', ':', startLine, startCol)); break;
           case ',': this.tokens.push(new Token('TOKEN_COMMA', ',', startLine, startCol)); break;
           case '.':
@@ -618,13 +620,6 @@
       if (this.match('TOKEN_CONTINUE')) return { type: 'ContinueStatement' };
       if (this.match('TOKEN_TRY')) return this.tryStatement();
       if (this.match('TOKEN_MATCH')) return this.matchStatement();
-      if (this.match('TOKEN_SPAWN')) {
-        const call = this.expression();
-        return { type: 'SpawnStatement', expr: call };
-      }
-      if (this.match('TOKEN_YIELD')) {
-        return { type: 'YieldStatement' };
-      }
 
       return this.expressionStatement();
     }
@@ -917,11 +912,11 @@
         return { type: 'InterpolatedString', raw: this.previous().value };
       }
 
-      if (this.match('TOKEN_IDENTIFIER')) {
+      if (this.match('TOKEN_IDENTIFIER') || this.match('TOKEN_SPAWN') || this.match('TOKEN_YIELD')) {
         return { type: 'Identifier', name: this.previous().value };
       }
 
-      // Anonymous function / Lambda: fn(x): x * 2
+      // Anonymous function / Lambda: fn(x): x * 2 or fn(x): return x * 2
       if (this.match('TOKEN_FN') || this.match('TOKEN_FUNCTION')) {
         this.consume('TOKEN_LPAREN', "Expected '(' after fn");
         const params = [];
@@ -932,9 +927,14 @@
         }
         this.consume('TOKEN_RPAREN', "Expected ')'");
         this.consume('TOKEN_COLON', "Expected ':' before lambda body");
+        this.skipNewlines();
         if (this.check('TOKEN_INDENT')) {
           const body = this.block();
           return { type: 'Lambda', params, body };
+        }
+        if (this.match('TOKEN_RETURN')) {
+          const retExpr = this.expression();
+          return { type: 'Lambda', params, bodyExpr: retExpr };
         }
         const bodyExpr = this.expression();
         return { type: 'Lambda', params, bodyExpr };
@@ -1223,6 +1223,8 @@
         if (val instanceof Uint8Array) return 'buffer';
         if (val && val.__struct) return 'instance';
         if (val && val.__enum) return 'enum_val';
+        if (val && val.__channel) return 'channel';
+        if (val && val.__fiber) return 'fiber';
         return 'map';
       });
 
@@ -1360,6 +1362,52 @@
           buf[off] = byte & 0xff;
         }
         return null;
+      });
+
+      // Concurrency: Fibers and Channels
+      const spawnedFibers = [];
+      env.define('channel', (cap = 16) => ({
+        __channel: true,
+        buffer: [],
+        closed: false,
+        capacity: Number(cap) || 16
+      }));
+      env.define('close_channel', (ch) => {
+        if (ch && ch.__channel) ch.closed = true;
+        return null;
+      });
+      env.define('send', (ch, val) => {
+        if (ch && ch.__channel && !ch.closed) {
+          ch.buffer.push(val);
+        }
+        return null;
+      });
+      env.define('recv', (ch) => {
+        if (ch && ch.__channel && ch.buffer.length > 0) {
+          return ch.buffer.shift();
+        }
+        return null;
+      });
+      env.define('spawn', (fn, ...args) => {
+        const fiber = {
+          __fiber: true,
+          fn: fn,
+          args: args
+        };
+        spawnedFibers.push(fiber);
+        return fiber;
+      });
+      env.define('yield', (val) => val);
+      env.define('run_scheduler', () => {
+        let count = 0;
+        while (spawnedFibers.length > 0) {
+          const fiber = spawnedFibers.shift();
+          if (typeof fiber.fn === 'function') {
+            fiber.fn(...fiber.args);
+            count++;
+          }
+        }
+        return count;
       });
 
       // System / Introspection

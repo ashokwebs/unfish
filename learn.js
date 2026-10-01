@@ -72,7 +72,8 @@
           'src/main.uf': code
         };
         const encoded = btoa(encodeURIComponent(JSON.stringify(proj)));
-        window.open(`studio.html#project=${encoded}`, '_blank');
+        const studioUrl = window.location.pathname.includes('/docs') ? '../studio.html' : 'studio.html';
+        window.open(`${studioUrl}#project=${encoded}`, '_blank');
       });
     }
   });
@@ -145,7 +146,9 @@
   const searchResultsList = document.getElementById('search-results-list');
 
   const SEARCH_INDEX = [
-    { target: 'intro', title: 'What is Unfish?', text: 'general-purpose programming language pure ANSI C99 zero dependencies philosophy' },
+    { target: 'downloads', title: 'Official Downloads (v2.0.0)', text: 'download linux binary tarball vscode vsix extension runtime unfish_runtime.h curl installer' },
+    { target: 'quickstart', title: 'Quick Start & CLI Reference', text: 'cli run vm regvm build wasm debug check test lsp repl studio playground' },
+    { target: 'intro', title: 'What is Unfish?', text: 'general-purpose programming language pure ANSI C99 zero dependencies philosophy 5 execution backends' },
     { target: 'install', title: 'Installation & Setup', text: 'make gcc clang build from source test-asan benchmarks' },
     { target: 'first-program', title: 'Your First Program', text: 'fibonacci recursion say print function let' },
     { target: 'repl-cli', title: 'REPL & Toolchain', text: 'unfish run vm regvm build wasm debug format studio lsp repl' },
@@ -157,13 +160,23 @@
     { target: 'tut-05', title: '05. Conditions & Logic', text: 'if else off-side rule indentation colon' },
     { target: 'tut-06', title: '06. Loops & Iteration', text: 'while for in repeat times break continue' },
     { target: 'tut-07', title: '07. Functions & Defaults', text: 'function fn return default parameters recursion' },
-    { target: 'tut-09', title: '09. Closures & Pipelines', text: 'lambda higher order functions map filter reduce first class' },
-    { target: 'tut-12', title: '12. Structs & Methods', text: 'struct fields methods self object oriented' },
-    { target: 'tut-13', title: '13. Enums & Matching', text: 'enum sum types pattern matching match when variants' },
-    { target: 'tut-17', title: '17. Fibers & Concurrency', text: 'cooperative concurrency spawn yield channel send recv scheduler csp' },
-    { target: 'stdlib-core', title: 'Core Builtins', text: 'len push pop range concat flatten zip pad_start pad_end trim clock assert' },
+    { target: 'tut-08', title: '08. Higher-Order Functions', text: 'map filter reduce find some every higher order functions' },
+    { target: 'tut-09', title: '09. Closures & Pipelines', text: 'lambda higher order functions map filter reduce first class pipe forward operator' },
+    { target: 'tut-10', title: '10. Arrays, Maps & Buffers', text: 'array push pop concat slice map dictionary key value buffer binary' },
+    { target: 'tut-11', title: '11. Destructuring', text: 'array destructure map destructure pattern let rest spread' },
+    { target: 'tut-12', title: '12. Structs & Methods', text: 'struct fields methods self object oriented OOP classes' },
+    { target: 'tut-13', title: '13. Enums & Matching', text: 'enum sum types pattern matching match when variants algebraic data types ADT' },
+    { target: 'tut-14', title: '14. Error Recovery', text: 'try catch finally error handling exceptions throw assertion' },
+    { target: 'tut-15', title: '15. Memory Model & GC', text: 'arenas mark sweep garbage collection memory layout heap tagged union' },
+    { target: 'tut-16', title: '16. VM & Native Compilation', text: 'stack vm register vm c99 transpiler standalone native executable wasm' },
+    { target: 'tut-17', title: '17. Fibers & Concurrency', text: 'cooperative concurrency spawn yield channel send recv scheduler csp green threads' },
+    { target: 'stdlib-core', title: 'Core Builtins', text: 'len push pop range concat flatten zip pad_start pad_end trim clock assert sqrt pow min max' },
     { target: 'stdlib-sys', title: 'Module: sys', text: 'platform exit args cwd set_env exec system' },
-    { target: 'stdlib-fs', title: 'Module: fs', text: 'read_text write_text append_text exists delete_file list_dir mkdir is_file' }
+    { target: 'stdlib-fs', title: 'Module: fs', text: 'read_text write_text append_text exists delete_file list_dir mkdir is_file' },
+    { target: 'stdlib-time', title: 'Module: time', text: 'clock sleep timestamp format iso time date' },
+    { target: 'stdlib-random', title: 'Module: random', text: 'random random_int prng seed shuffle' },
+    { target: 'stdlib-json', title: 'Module: json', text: 'json parse serialize stringify json_parse json_stringify' },
+    { target: 'stdlib-testing', title: 'Module: testing', text: 'testing assert assert_eq test suites unit testing' }
   ];
 
   function openSearch() {
