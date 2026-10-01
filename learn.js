@@ -176,7 +176,12 @@
     { target: 'stdlib-time', title: 'Module: time', text: 'clock sleep timestamp format iso time date' },
     { target: 'stdlib-random', title: 'Module: random', text: 'random random_int prng seed shuffle' },
     { target: 'stdlib-json', title: 'Module: json', text: 'json parse serialize stringify json_parse json_stringify' },
-    { target: 'stdlib-testing', title: 'Module: testing', text: 'testing assert assert_eq test suites unit testing' }
+    { target: 'stdlib-testing', title: 'Module: testing', text: 'testing assert assert_eq test suites unit testing' },
+    { target: 'spec-ebnf', title: 'Formal Grammar & EBNF Specification', text: 'ebnf grammar syntax parser pratt precedence associativity ast formal specification' },
+    { target: 'spec-vm-isa', title: '57-Opcode Stack VM ISA Specification', text: 'vm isa opcode stack instructions bytecode binary ufc container assembly disasm' },
+    { target: 'spec-regvm', title: '256-Register VM Architecture', text: 'register vm regvm 3-address code instructions register allocation windowing throughput' },
+    { target: 'spec-embed', title: 'C99 AOT & Embedding Guide', text: 'c99 aot compiler embedding unfish_runtime.h host integration native c api baremetal' },
+    { target: 'spec-comparison', title: 'Architectural Comparison Matrix', text: 'comparison benchmark python lua go rust javascript tradeoffs performance' }
   ];
 
   function openSearch() {
@@ -241,6 +246,66 @@
       searchResultsList.appendChild(el);
     });
   }
+
+  // Inject Next / Previous Chapter Navigation Footers
+  function injectChapterNavigation() {
+    const navItemEls = Array.from(document.querySelectorAll('.learn-sidebar .nav-item'));
+    const chaptersList = navItemEls.map(item => ({
+      target: item.dataset.target,
+      title: item.textContent.trim().replace(/^[\p{Emoji}\s]+/u, '') || item.textContent.trim()
+    })).filter(c => c.target);
+
+    chaptersList.forEach((chap, idx) => {
+      const art = document.getElementById(`doc-${chap.target}`);
+      if (!art) return;
+      if (art.querySelector('.chapter-nav-footer')) return;
+
+      const footer = document.createElement('div');
+      footer.className = 'chapter-nav-footer';
+
+      if (idx > 0) {
+        const prev = chaptersList[idx - 1];
+        const btnPrev = document.createElement('a');
+        btnPrev.className = 'btn-doc-nav prev';
+        btnPrev.href = `#${prev.target}`;
+        btnPrev.dataset.target = prev.target;
+        btnPrev.innerHTML = `
+          <span class="nav-direction-label">← Previous Chapter</span>
+          <span class="nav-chapter-title">${prev.title}</span>
+        `;
+        btnPrev.addEventListener('click', (e) => {
+          e.preventDefault();
+          switchChapter(prev.target);
+        });
+        footer.appendChild(btnPrev);
+      } else {
+        const spacer = document.createElement('div');
+        footer.appendChild(spacer);
+      }
+
+      if (idx < chaptersList.length - 1) {
+        const next = chaptersList[idx + 1];
+        const btnNext = document.createElement('a');
+        btnNext.className = 'btn-doc-nav next';
+        btnNext.href = `#${next.target}`;
+        btnNext.dataset.target = next.target;
+        btnNext.innerHTML = `
+          <span class="nav-direction-label">Next Chapter →</span>
+          <span class="nav-chapter-title">${next.title}</span>
+        `;
+        btnNext.addEventListener('click', (e) => {
+          e.preventDefault();
+          switchChapter(next.target);
+        });
+        footer.appendChild(btnNext);
+      }
+
+      art.appendChild(footer);
+    });
+  }
+
+  // Run on load
+  injectChapterNavigation();
 
   // Theme toggle
   const btnThemeToggle = document.getElementById('btn-theme-toggle');

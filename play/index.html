@@ -22,6 +22,7 @@
       --seaweed-green: #06d6a0;
       --font-code: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
       --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --editor-font-size: 15px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -70,17 +71,19 @@
       background: rgba(10, 25, 47, 0.95);
       backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--ocean-border);
-      padding: 0.6rem 1.25rem;
+      padding: 0.5rem 1.25rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
       z-index: 10;
+      gap: 0.5rem;
     }
 
     .brand-group {
       display: flex;
       align-items: center;
       gap: 0.75rem;
+      flex-shrink: 0;
     }
     .brand-logo {
       font-size: 1.8rem;
@@ -113,14 +116,15 @@
     .controls-group {
       display: flex;
       align-items: center;
-      gap: 0.6rem;
+      gap: 0.5rem;
+      flex-wrap: wrap;
     }
     .select-ocean {
       background-color: var(--ocean-surface);
       color: var(--text-main);
       border: 1px solid var(--ocean-border);
       border-radius: 6px;
-      padding: 0.45rem 0.8rem;
+      padding: 0.45rem 0.75rem;
       font-size: 0.85rem;
       font-family: inherit;
       outline: none;
@@ -135,7 +139,7 @@
       display: inline-flex;
       align-items: center;
       gap: 0.4rem;
-      padding: 0.45rem 0.95rem;
+      padding: 0.45rem 0.9rem;
       border-radius: 6px;
       font-size: 0.85rem;
       font-weight: 700;
@@ -143,6 +147,7 @@
       border: 1px solid transparent;
       transition: all 0.2s;
       text-decoration: none;
+      user-select: none;
     }
     .btn-run {
       background: linear-gradient(135deg, var(--seaweed-green), #00b4d8);
@@ -194,16 +199,22 @@
     .pane-header {
       background: var(--ocean-mid);
       border-bottom: 1px solid var(--ocean-border);
-      padding: 0.5rem 1rem;
+      padding: 0.45rem 0.9rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 0.82rem;
       color: var(--text-muted);
+      gap: 0.5rem;
     }
     .pane-title {
       font-weight: 700;
       color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .header-actions-inline {
       display: flex;
       align-items: center;
       gap: 0.4rem;
@@ -217,17 +228,18 @@
       position: relative;
     }
     .line-numbers {
-      width: 3.2rem;
+      width: 3.4rem;
       background: rgba(5, 11, 20, 0.85);
       color: #3b506d;
       font-family: var(--font-code);
-      font-size: 0.9rem;
+      font-size: var(--editor-font-size);
       line-height: 1.55;
       padding: 1rem 0.5rem;
       text-align: right;
       user-select: none;
       overflow-y: hidden;
       border-right: 1px solid var(--ocean-border);
+      flex-shrink: 0;
     }
     .code-textarea {
       flex: 1;
@@ -237,7 +249,7 @@
       outline: none;
       padding: 1rem;
       font-family: var(--font-code);
-      font-size: 0.9rem;
+      font-size: var(--editor-font-size);
       line-height: 1.55;
       resize: none;
       white-space: pre;
@@ -248,8 +260,10 @@
     /* Output Pane */
     .tab-bar {
       display: flex;
+      align-items: center;
       background: var(--ocean-mid);
       border-bottom: 1px solid var(--ocean-border);
+      padding-right: 0.75rem;
     }
     .tab-btn {
       padding: 0.6rem 1.1rem;
@@ -335,6 +349,79 @@
     .mascot-text { font-size: 0.8rem; color: var(--text-muted); max-width: 320px; line-height: 1.35; }
     .mascot-text strong { color: var(--text-glow); }
     .mascot-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(50px);
+      background: rgba(10, 25, 47, 0.95);
+      border: 1px solid var(--text-glow);
+      color: var(--text-glow);
+      padding: 0.5rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    /* Shortcuts Modal */
+    .shortcuts-modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(5, 11, 20, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 99;
+    }
+    .shortcuts-modal-overlay.active { display: flex; }
+    .shortcuts-modal {
+      background: var(--ocean-mid);
+      border: 1px solid var(--ocean-border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      width: 440px;
+      max-width: 90vw;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+    }
+    .shortcuts-modal h3 {
+      font-size: 1.15rem;
+      color: var(--text-glow);
+      margin-bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .shortcut-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid rgba(35, 53, 84, 0.4);
+      font-size: 0.88rem;
+    }
+    .shortcut-row:last-child { border-bottom: none; }
+    kbd {
+      background: var(--ocean-surface);
+      border: 1px solid var(--ocean-border);
+      color: var(--text-glow);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-family: var(--font-code);
+      font-size: 0.78rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
   </style>
 </head>
 <body>
@@ -358,16 +445,20 @@
     </div>
 
     <div class="controls-group">
-      <select id="fish-example-select" class="select-ocean">
+      <select id="fish-example-select" class="select-ocean" title="Select Example">
         <option value="school">🐠 01. School of Fish Simulation</option>
         <option value="puffer">🐡 02. Pufferfish Inflation Algorithm</option>
         <option value="pipelines">🌊 03. Ocean Current Pipelines</option>
         <option value="concurrency">🎣 04. Fish Catcher (Fibers &amp; Channels)</option>
         <option value="fibonacci">🧮 05. Recursive Fibonacci</option>
         <option value="species">🏷️ 06. Marine Species (Pattern Matching)</option>
+        <option value="sonar">📡 07. Deep-Sea Sonar Pulse (Binary Search)</option>
+        <option value="bubblesort">🫧 08. Sediment Bubble Sort (In-Place)</option>
+        <option value="coraldna">🧬 09. Coral DNA Transcription (Maps)</option>
+        <option value="trench">🌊 10. Mariana Trench Hydrology (Mean &amp; σ)</option>
       </select>
 
-      <select id="fish-engine-select" class="select-ocean">
+      <select id="fish-engine-select" class="select-ocean" title="Select Backend Engine">
         <option value="ast">🌊 Tree-Walking Interpreter</option>
         <option value="vm">⚡ 57-Opcode Stack VM</option>
         <option value="regvm">🚀 256-Register VM</option>
@@ -377,7 +468,7 @@
         ▶ Run Code
       </button>
 
-      <button id="btn-fish-clear" class="btn btn-secondary" title="Clear console">
+      <button id="btn-fish-clear" class="btn btn-secondary" title="Clear console (Ctrl+L)">
         🧹 Clear
       </button>
 
@@ -399,8 +490,43 @@
     <!-- Left: Code Editor -->
     <section class="pane editor-pane">
       <div class="pane-header">
-        <span class="pane-title">📝 main.unfish</span>
-        <span>Press <kbd style="background:var(--ocean-card); padding:2px 5px; border-radius:4px; border:1px solid var(--ocean-border); color:var(--text-glow);">Ctrl+Enter</kbd> to run</span>
+        <div class="pane-title">
+          <span>📝 main.unfish</span>
+          <span id="editor-metrics" style="font-size:0.75rem; color:var(--text-muted); font-weight:normal; margin-left:0.5rem;">Lines: 1 | Chars: 0</span>
+        </div>
+
+        <div class="header-actions-inline">
+          <!-- Font Size Selector (Programiz Style) -->
+          <label style="font-size:0.75rem; color:var(--text-muted); display:flex; align-items:center; gap:0.25rem;">
+            Size:
+            <select id="editor-font-size-select" class="select-ocean" style="padding:0.2rem 0.5rem; font-size:0.75rem;">
+              <option value="13px">13px</option>
+              <option value="15px" selected>15px</option>
+              <option value="17px">17px</option>
+              <option value="19px">19px</option>
+            </select>
+          </label>
+
+          <!-- Copy Code Button -->
+          <button id="btn-copy-code" class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;" title="Copy code to clipboard">
+            📋 Copy
+          </button>
+
+          <!-- Reset Code Button -->
+          <button id="btn-reset-code" class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;" title="Reset to original preset">
+            🔄 Reset
+          </button>
+
+          <!-- Download .uf File -->
+          <button id="btn-download-code" class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;" title="Download main.unfish">
+            💾 .uf
+          </button>
+
+          <!-- Shortcuts Dialog Button -->
+          <button id="btn-open-shortcuts" class="btn btn-ghost" style="padding:0.25rem 0.5rem; font-size:0.78rem;" title="Keyboard shortcuts guide">
+            ⌨️
+          </button>
+        </div>
       </div>
 
       <div class="editor-container">
@@ -416,6 +542,9 @@
         <button class="tab-btn" data-tab="tokens">🔍 Lexer Tokens</button>
         <button class="tab-btn" data-tab="ast">🌳 Syntax Tree (AST)</button>
         <button class="tab-btn" data-tab="disasm">⚙️ VM Disassembly</button>
+        <button id="btn-copy-output" class="btn btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem; margin-left:auto;" title="Copy terminal output">
+          📋 Copy Output
+        </button>
       </div>
 
       <!-- Tab: Console -->
@@ -453,6 +582,39 @@
       <strong>Unfish Tip:</strong> Unfish runs identically across all 5 backends: AST, Stack VM, Register VM, Native C99, and WebAssembly!
     </div>
     <button class="mascot-close" onclick="document.getElementById('mascot-tip').style.display='none'">✕</button>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="fish-toast" class="toast">✓ Copied to clipboard!</div>
+
+  <!-- Keyboard Shortcuts Modal -->
+  <div id="fish-shortcuts-modal" class="shortcuts-modal-overlay">
+    <div class="shortcuts-modal">
+      <h3>
+        <span>⌨️ Keyboard Shortcuts</span>
+        <button id="btn-close-shortcuts" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.1rem;">✕</button>
+      </h3>
+      <div class="shortcut-row">
+        <span>Run Program</span>
+        <div><kbd>Ctrl</kbd> + <kbd>Enter</kbd> / <kbd>⌘</kbd> + <kbd>Enter</kbd></div>
+      </div>
+      <div class="shortcut-row">
+        <span>Clear Console</span>
+        <div><kbd>Ctrl</kbd> + <kbd>L</kbd></div>
+      </div>
+      <div class="shortcut-row">
+        <span>Indent (4 Spaces)</span>
+        <div><kbd>Tab</kbd></div>
+      </div>
+      <div class="shortcut-row">
+        <span>Save / Download Script</span>
+        <div><kbd>Ctrl</kbd> + <kbd>S</kbd></div>
+      </div>
+      <div class="shortcut-row">
+        <span>Close Modal</span>
+        <div><kbd>Esc</kbd></div>
+      </div>
+    </div>
   </div>
 
   <script src="../unfish_engine.js"></script>
@@ -589,17 +751,138 @@ let creatures = [
 
 for c in creatures:
     say f"• {describe_creature(c)}"
+`,
+
+      sonar: `## 📡 Deep-Sea Sonar Pulse (Binary Search Algorithm)
+## Locates an anomaly depth in an ordered sounding survey log!
+
+function binary_search_depth(soundings, target):
+    let low = 0
+    let high = len(soundings) - 1
+    while low <= high:
+        let mid = floor((low + high) / 2)
+        let probe = soundings[mid]
+        if probe == target:
+            return mid
+        if probe < target:
+            low = mid + 1
+        else:
+            high = mid - 1
+    return -1
+
+let depths = [120, 350, 680, 1050, 1420, 2100, 3850, 5200, 8400, 10994]
+say f"📡 Sounding Survey depths (meters): {depths}"
+
+let target_anomaly = 3850
+let index = binary_search_depth(depths, target_anomaly)
+say f"🔍 Searching for sonar ping {target_anomaly}m..."
+if index != -1:
+    say f"  ✓ Ping acquired at survey index #{index}! Oceanic trench shelf detected."
+else:
+    say "  ✗ Ping lost in benthic abyss."
+`,
+
+      bubblesort: `## 🫧 Seabed Sediment Sort (In-Place Bubble Sort)
+## Sorting mineral sample grain densities on the seafloor!
+
+function sediment_sort(samples):
+    let n = len(samples)
+    let swapped = true
+    while swapped:
+        swapped = false
+        for i in range(0, n - 1):
+            if samples[i] > samples[i + 1]:
+                let temp = samples[i]
+                samples[i] = samples[i + 1]
+                samples[i + 1] = temp
+                swapped = true
+    return samples
+
+let sediment_weights = [42.5, 12.8, 88.3, 5.1, 31.9, 19.4, 64.0]
+say f"🫧 Raw Benthic Sediment Samples (mg): {sediment_weights}"
+let sorted_sediments = sediment_sort(sediment_weights)
+say f"✓ Sorted by Specific Gravity (mg):    {sorted_sediments}"
+`,
+
+      coraldna: `## 🧬 Deep Reef Coral DNA Transcription
+## Translates DNA base sequences into messenger RNA transcripts!
+
+let dna_to_rna = {
+    "A": "U",
+    "T": "A",
+    "C": "G",
+    "G": "C"
+}
+
+function transcribe_strand(dna):
+    let rna_bases = []
+    for i in range(0, len(dna)):
+        let base = dna[i]
+        let mapped = dna_to_rna[base]
+        if mapped != null:
+            push(rna_bases, mapped)
+        else:
+            push(rna_bases, "?")
+    let result = ""
+    for b in rna_bases:
+        result = result + b
+    return result
+
+let reef_sample = "TACGCATGGAAT"
+let transcript = transcribe_strand(reef_sample)
+
+say "🧬 Bioluminescent Coral Genetic Core"
+say f"DNA Template: {reef_sample}"
+say f"mRNA Strand:  {transcript}"
+`,
+
+      trench: `## 🌊 Mariana Trench Hydrology Analysis
+## Computes arithmetic mean, variance, and standard deviation of bathymetric pressures!
+
+function mean(dataset):
+    let total = 0.0
+    for v in dataset:
+        total = total + v
+    return total / len(dataset)
+
+function variance(dataset, avg):
+    let sum_sq = 0.0
+    for v in dataset:
+        sum_sq = sum_sq + pow(v - avg, 2)
+    return sum_sq / len(dataset)
+
+let pressure_atm = [1050.2, 1072.5, 1098.1, 1084.6, 1102.3, 1065.8]
+let avg_pressure = mean(pressure_atm)
+let var_pressure = variance(pressure_atm, avg_pressure)
+let std_dev = sqrt(var_pressure)
+
+say "🌊 Challenger Deep Hydrological Telemetry"
+say f"Atmospheric Readings (atm): {pressure_atm}"
+say f"Average Hydrostatic Pressure: {round(avg_pressure)} atm"
+say f"Pressure Variance:            {round(var_pressure)}"
+say f"Standard Deviation (σ):       {round(std_dev)} atm"
 `
     };
 
     document.addEventListener('DOMContentLoaded', () => {
       const editor = document.getElementById('fish-code-editor');
       const lineNumbers = document.getElementById('fish-line-numbers');
+      const editorMetrics = document.getElementById('editor-metrics');
+      const fontSizeSelect = document.getElementById('editor-font-size-select');
       const exampleSelect = document.getElementById('fish-example-select');
       const engineSelect = document.getElementById('fish-engine-select');
+
       const btnRun = document.getElementById('btn-fish-run');
       const btnClear = document.getElementById('btn-fish-clear');
       const btnShare = document.getElementById('btn-fish-share');
+      const btnCopyCode = document.getElementById('btn-copy-code');
+      const btnResetCode = document.getElementById('btn-reset-code');
+      const btnDownloadCode = document.getElementById('btn-download-code');
+      const btnCopyOutput = document.getElementById('btn-copy-output');
+      const btnOpenShortcuts = document.getElementById('btn-open-shortcuts');
+      const btnCloseShortcuts = document.getElementById('btn-close-shortcuts');
+      const shortcutsModal = document.getElementById('fish-shortcuts-modal');
+      const toast = document.getElementById('fish-toast');
 
       const terminal = document.getElementById('fish-terminal-output');
       const statusInfo = document.getElementById('fish-status-info');
@@ -614,16 +897,95 @@ for c in creatures:
 
       const engine = new window.UnfishEngine();
 
-      function updateLineNumbers() {
-        const count = editor.value.split('\n').length;
-        let str = '';
-        for (let i = 1; i <= count; i++) str += i + '\n';
-        lineNumbers.textContent = str;
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2000);
       }
 
-      editor.addEventListener('input', updateLineNumbers);
+      function updateEditorStats() {
+        const text = editor.value;
+        const lines = text.split('\n');
+        let str = '';
+        for (let i = 1; i <= lines.length; i++) str += i + '\n';
+        lineNumbers.textContent = str;
+        editorMetrics.textContent = `Lines: ${lines.length} | Chars: ${text.length}`;
+      }
+
+      editor.addEventListener('input', updateEditorStats);
       editor.addEventListener('scroll', () => {
         lineNumbers.scrollTop = editor.scrollTop;
+      });
+
+      // Font size changer
+      fontSizeSelect.addEventListener('change', () => {
+        const sz = fontSizeSelect.value;
+        document.documentElement.style.setProperty('--editor-font-size', sz);
+      });
+
+      // Copy Code
+      btnCopyCode.addEventListener('click', () => {
+        navigator.clipboard.writeText(editor.value).then(() => {
+          showToast('✓ Code copied to clipboard!');
+        });
+      });
+
+      // Reset Code
+      btnResetCode.addEventListener('click', () => {
+        const key = exampleSelect.value;
+        if (FISH_EXAMPLES[key]) {
+          editor.value = FISH_EXAMPLES[key];
+          updateEditorStats();
+          runProgram();
+          showToast('🔄 Code reset to preset defaults!');
+        }
+      });
+
+      // Download .uf file
+      function downloadScript() {
+        const blob = new Blob([editor.value], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${exampleSelect.value || 'main'}.uf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('💾 Downloaded .uf script!');
+      }
+      btnDownloadCode.addEventListener('click', downloadScript);
+
+      // Copy Output
+      btnCopyOutput.addEventListener('click', () => {
+        const text = terminal.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+          showToast('✓ Terminal output copied!');
+        });
+      });
+
+      // Shortcuts Modal
+      btnOpenShortcuts.addEventListener('click', () => {
+        shortcutsModal.classList.add('active');
+      });
+      btnCloseShortcuts.addEventListener('click', () => {
+        shortcutsModal.classList.remove('active');
+      });
+      shortcutsModal.addEventListener('click', (e) => {
+        if (e.target === shortcutsModal) shortcutsModal.classList.remove('active');
+      });
+
+      // Keyboard shortcuts
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && shortcutsModal.classList.contains('active')) {
+          shortcutsModal.classList.remove('active');
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          downloadScript();
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+          e.preventDefault();
+          terminal.innerHTML = '<span class="term-line system">Terminal cleared.</span>';
+        }
       });
 
       editor.addEventListener('keydown', (e) => {
@@ -633,7 +995,7 @@ for c in creatures:
           const end = editor.selectionEnd;
           editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
           editor.selectionStart = editor.selectionEnd = start + 4;
-          updateLineNumbers();
+          updateEditorStats();
         } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
           e.preventDefault();
           runProgram();
@@ -656,7 +1018,7 @@ for c in creatures:
         const key = exampleSelect.value;
         if (FISH_EXAMPLES[key]) {
           editor.value = FISH_EXAMPLES[key];
-          updateLineNumbers();
+          updateEditorStats();
           runProgram();
         }
       });
@@ -672,7 +1034,7 @@ for c in creatures:
         const b64 = btoa(encodeURIComponent(code));
         window.location.hash = `code=${b64}`;
         navigator.clipboard.writeText(window.location.href);
-        alert('🐡 Shareable link copied to clipboard!');
+        showToast('🐡 Shareable playground URL copied!');
       });
 
       // Run
@@ -711,11 +1073,11 @@ for c in creatures:
         if (res.exit_code === 0) {
           statusPill.className = 'status-pill success';
           statusPill.textContent = `Exit 0 (${elapsed} ms)`;
-          statusInfo.textContent = `Execution finished in ${elapsed} ms`;
+          statusInfo.textContent = `Execution finished in ${elapsed} ms • Mode: ${mode.toUpperCase()}`;
         } else {
           statusPill.className = 'status-pill error';
           statusPill.textContent = `Exit ${res.exit_code} (${elapsed} ms)`;
-          statusInfo.textContent = `Execution failed`;
+          statusInfo.textContent = `Execution failed • Mode: ${mode.toUpperCase()}`;
         }
 
         // Update Inspectors
@@ -745,7 +1107,7 @@ for c in creatures:
       } else {
         editor.value = FISH_EXAMPLES.school;
       }
-      updateLineNumbers();
+      updateEditorStats();
       runProgram();
     });
   </script>
