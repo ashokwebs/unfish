@@ -20,7 +20,7 @@
     },
     structs: {
       'unfish.toml': `[package]\nname = "structs_demo"\nversion = "1.0.0"\nentry = "src/main.uf"`,
-      'src/main.uf': `## Structs and Object Methods\n\nstruct Vector2D:\n    x\n    y\n\n    fn magnitude(self):\n        return (self.x^2 + self.y^2)^0.5\n\n    fn scale(self, factor):\n        return Vector2D(self.x * factor, self.y * factor)\n\nlet v = Vector2D(3, 4)\nsay f"Original magnitude: {v.magnitude()}"\n\nlet v2 = v.scale(2)\nsay f"Scaled vector: ({v2.x}, {v2.y}) with magnitude: {v2.magnitude()}"\n`
+      'src/main.uf': `## Structs and Object Methods\n\nstruct Vector2D:\n    x\n    y\n\n    fn magnitude(self):\n        return sqrt(pow(self.x, 2) + pow(self.y, 2))\n\n    fn scale(self, factor):\n        return Vector2D(self.x * factor, self.y * factor)\n\nlet v = Vector2D(3, 4)\nsay f"Original magnitude: {v.magnitude()}"\n\nlet v2 = v.scale(2)\nsay f"Scaled vector: ({v2.x}, {v2.y}) with magnitude: {v2.magnitude()}"\n`
     },
     closures: {
       'unfish.toml': `[package]\nname = "closures_demo"\nversion = "1.0.0"\nentry = "src/main.uf"`,
@@ -32,7 +32,7 @@
     },
     concurrency: {
       'unfish.toml': `[package]\nname = "fibers_demo"\nversion = "1.0.0"\nentry = "src/main.uf"`,
-      'src/main.uf': `## Cooperative Fibers and CSP Channels\n\nlet ch = channel(10)\n\nspawn function():\n    say "Worker fiber started"\n    for i in range(1, 4):\n        send(ch, i * 10)\n        yield\n    close_channel(ch)\n    say "Worker fiber finished"\n\nsay "Main task waiting on channel..."\nwhile true:\n    let val = recv(ch)\n    if val == null:\n        break\n    say f"Received value: {val}"\n\nsay "All tasks complete!"\n`
+      'src/main.uf': `## Cooperative Fibers and CSP Channels\n\nlet ch = channel(10)\n\nfunction worker(ch):\n    say "Worker fiber started"\n    for i in range(1, 4):\n        send(ch, i * 10)\n        yield\n    close_channel(ch)\n    say "Worker fiber finished"\n\nspawn(worker, ch)\nrun_scheduler()\n\nsay "Main task reading from channel..."\nwhile true:\n    let val = recv(ch)\n    if val == null:\n        break\n    say f"Received value: {val}"\n\nsay "All tasks complete!"\n`
     },
     buffers: {
       'unfish.toml': `[package]\nname = "buffers_demo"\nversion = "1.0.0"\nentry = "src/main.uf"`,
