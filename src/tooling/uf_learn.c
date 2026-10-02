@@ -174,6 +174,87 @@ static const Lesson LESSONS[] = {
         "99\n",
         "let ch = channel(1)\nch.send(99)\nsay ch.recv()",
         "let ch = channel(1)\nch.send(99)\nsay ch.recv()"
+    },
+    {
+        11,
+        "Pipelines and Comprehensions",
+        "The pipe operator '|>' passes the left value as the first argument to the right function.\n"
+        "Comprehensions allow succinct transformations: '[x * 2 for x in nums if x > 2]'.",
+        "fn square(n):\n"
+        "    return n * n\n"
+        "\n"
+        "say 5 |> square",
+        "Define a function 'triple(n): return n * 3', then pipe 7 into it with '|>' and print the result with 'say'.",
+        "21\n",
+        "fn triple(n):\n    return n * 3\nsay 7 |> triple",
+        "fn triple(n):\n    return n * 3\nsay 7 |> triple"
+    },
+    {
+        12,
+        "Traits and Polymorphic Interfaces",
+        "Traits declare shared behavioral contracts with 'trait Name: fn method(self)'.\n"
+        "Structs implement traits with 'impl Trait for Struct:' blocks.",
+        "trait Describable:\n"
+        "    fn describe(self)\n"
+        "\n"
+        "struct Item:\n"
+        "    name\n"
+        "\n"
+        "impl Describable for Item:\n"
+        "    fn describe(self):\n"
+        "        return self.name\n"
+        "\n"
+        "let it = Item(\"Book\")\n"
+        "say it.describe()",
+        "Define trait 'Doubler' with method 'double(self)'. Implement it for struct 'Num' with field 'val' to return self.val * 2. Create Num(6) and print n.double().",
+        "12\n",
+        "trait Doubler:\n    fn double(self)\nstruct Num:\n    val\nimpl Doubler for Num:\n    fn double(self):\n        return self.val * 2\nlet n = Num(6)\nsay n.double()",
+        "trait Doubler:\n    fn double(self)\nstruct Num:\n    val\nimpl Doubler for Num:\n    fn double(self):\n        return self.val * 2\nlet n = Num(6)\nsay n.double()"
+    },
+    {
+        13,
+        "Systems Programming: Byte Buffers",
+        "Allocate fixed raw memory blocks with 'buffer(size)'.\n"
+        "Read and write endian-explicit integers with 'buffer_write_u16_le' and 'buffer_read_u16_le'.",
+        "let b = buffer(4)\n"
+        "buffer_set(b, 0, 65)\n"
+        "buffer_set(b, 1, 66)\n"
+        "say buffer_to_string(b)",
+        "Allocate a 2-byte buffer, write 258 into offset 0 as a little-endian u16 with buffer_write_u16_le, then read and print it.",
+        "258\n",
+        "let b = buffer(2)\nbuffer_write_u16_le(b, 0, 258)\nsay buffer_read_u16_le(b, 0)",
+        "let b = buffer(2)\nbuffer_write_u16_le(b, 0, 258)\nsay buffer_read_u16_le(b, 0)"
+    },
+    {
+        14,
+        "String Interpolation & Formatting",
+        "Format strings use 'f\"...\"' with expressions enclosed in curly braces '{expr}'.\n"
+        "Expressions inside braces are evaluated dynamically.",
+        "let item = \"compiler\"\n"
+        "let speed = 99\n"
+        "say f\"{item} runs at {speed}% efficiency\"",
+        "Declare 'city' = \"London\" and 'temp' = 18. Print 'Temperature in London: 18C' using an f-string.",
+        "Temperature in London: 18C\n",
+        "let city = \"London\"\nlet temp = 18\nsay f\"Temperature in {city}: {temp}C\"",
+        "let city = \"London\"\nlet temp = 18\nsay f\"Temperature in {city}: {temp}C\""
+    },
+    {
+        15,
+        "Asynchronous Functions & Futures",
+        "Declare asynchronous functions with 'async fn' and await futures with 'await'.\n"
+        "Top-level async tasks are scheduled with 'run_async(entry_fn)'.",
+        "async fn greet(name):\n"
+        "    return f\"Hello, {name}!\"\n"
+        "\n"
+        "async fn main_flow():\n"
+        "    let msg = await greet(\"World\")\n"
+        "    say msg\n"
+        "\n"
+        "run_async(main_flow)",
+        "Define 'async fn calc(x): return x * 10'. In an 'async fn run_prog(): let res = await calc(5); say res', run it via 'run_async(run_prog)'.",
+        "50\n",
+        "async fn calc(x):\n    return x * 10\nasync fn run_prog():\n    let res = await calc(5)\n    say res\nrun_async(run_prog)",
+        "async fn calc(x):\n    return x * 10\nasync fn run_prog():\n    let res = await calc(5)\n    say res\nrun_async(run_prog)"
     }
 };
 

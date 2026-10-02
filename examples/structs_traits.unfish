@@ -1,0 +1,63 @@
+## Unfish Object-Oriented Programming & Traits Example
+## Demonstrates user-defined structs, methods with 'self', method chaining, and trait interfaces.
+
+# 1. Define Traits (interfaces)
+trait Printable:
+    fn to_string() -> String
+
+trait Area:
+    fn area() -> Number
+
+# 2. Define Structs with direct methods and trait implementations
+struct Circle:
+    radius: Number
+
+    fn diameter(self):
+        return self.radius * 2
+
+    impl Printable:
+        fn to_string(self) -> String:
+            return f"Circle(radius={self.radius})"
+
+    impl Area:
+        fn area(self) -> Number:
+            return 3.14159265 * self.radius * self.radius
+
+struct Rectangle:
+    width: Number
+    height: Number
+
+    fn is_square(self):
+        return self.width == self.height
+
+impl Printable for Rectangle:
+    fn to_string(self) -> String:
+        return f"Rectangle({self.width} x {self.height})"
+
+impl Area for Rectangle:
+    fn area(self) -> Number:
+        return self.width * self.height
+
+# 3. Polymorphic display function using traits
+fn display_geometry(item: Printable, shape_area: Area):
+    say f"Shape: {item.to_string()}"
+    say f"Area:  {shape_area.area()}"
+
+let c = Circle(5)
+let r = Rectangle(4, 7)
+
+say "=== Circle ==="
+say f"Object:   {c.to_string()}"
+say f"Diameter: {c.diameter()}"
+say f"Area:     {c.area()}"
+
+say "\n=== Rectangle ==="
+say f"Object:   {r.to_string()}"
+say f"Square?   {r.is_square()}"
+say f"Area:     {r.area()}"
+
+say "\n=== Polymorphic Function Dispatch ==="
+display_geometry(c, c)
+display_geometry(r, r)
+
+say "Structs and traits demo complete!"

@@ -1,0 +1,144 @@
+# Unfish Text Dungeon Adventure Simulation
+# Demonstrates structs with methods, enums, pattern matching, maps, arrays, and game state loops
+
+enum Command:
+    North
+    South
+    East
+    West
+    Look
+    Take(item_name)
+    Inventory
+    Quit
+
+struct Room:
+    name: String
+    desc: String
+    exits: Map
+    items: Array
+
+struct Player:
+    location: String
+    inventory: Array
+    score: Number
+
+    fn has_item(self, item_name):
+        for it in self.inventory:
+            if it == item_name:
+                return true
+        return false
+
+    fn take_item(self, room, item_name):
+        let new_room_items = []
+        let found = false
+        for it in room.items:
+            if it == item_name and not found:
+                found = true
+                push(self.inventory, it)
+                self.score = self.score + 25
+                say f"  You picked up: {it} (+25 score)"
+            else:
+                push(new_room_items, it)
+        room.items = new_room_items
+        if not found:
+            say f"  There is no '{item_name}' here."
+
+    fn move_to(self, direction, world):
+        let current_room = world[self.location]
+        if has_key(current_room.exits, direction):
+            let next_room_key = current_room.exits[direction]
+            self.location = next_room_key
+            say f"  You walk {direction} into {world[next_room_key].name}."
+            return true
+        else:
+            say f"  You cannot go {direction} from here."
+            return false
+
+fn create_world():
+    let world = {}
+
+    world["entrance"] = Room(
+        "Grand Stone Archway",
+        "Cold wind howls behind you. Ahead lies a torchlit dungeon hall.",
+        {"north": "hallway"},
+        ["torch"]
+    )
+
+    world["hallway"] = Room(
+        "Vaulted Dungeon Corridor",
+        "Ancient runes line the walls. Paths lead south, east, and north.",
+        {"south": "entrance", "east": "armory", "north": "treasury"},
+        []
+    )
+
+    world["armory"] = Room(
+        "Abandoned Armory",
+        "Racks of rusted weapons lie scattered across the flagstones.",
+        {"west": "hallway"},
+        ["bronze_key", "shield"]
+    )
+
+    world["treasury"] = Room(
+        "Gilded Vault Treasury",
+        "A glittering chest rests atop a raised obsidian pedestal.",
+        {"south": "hallway"},
+        ["golden_goblet"]
+    )
+
+    return world
+
+fn execute_command(player, world, cmd):
+    let current_room = world[player.location]
+
+    match cmd:
+        when Command.Look:
+            say f"[{current_room.name}]"
+            say f"  {current_room.desc}"
+            if len(current_room.items) > 0:
+                say f"  Items visible: {current_room.items}"
+            say f"  Exits: {keys(current_room.exits)}"
+
+        when Command.North:
+            player.move_to("north", world)
+        when Command.South:
+            player.move_to("south", world)
+        when Command.East:
+            player.move_to("east", world)
+        when Command.West:
+            player.move_to("west", world)
+
+        when Command.Take(item_name):
+            player.take_item(current_room, item_name)
+
+        when Command.Inventory:
+            say f"  Carrying: {player.inventory} | Current Score: {player.score}"
+
+        when Command.Quit:
+            say "  Leaving dungeon..."
+
+# Run scripted walkthrough demonstration
+say "=== Unfish Dungeon Crawler Adventure Simulation ===\n"
+
+let world = create_world()
+let player = Player("entrance", [], 0)
+
+let script = [
+    Command.Look,
+    Command.Take("torch"),
+    Command.North,
+    Command.Look,
+    Command.East,
+    Command.Take("bronze_key"),
+    Command.Take("shield"),
+    Command.Inventory,
+    Command.West,
+    Command.North,
+    Command.Look,
+    Command.Take("golden_goblet"),
+    Command.Inventory
+]
+
+for cmd in script:
+    execute_command(player, world, cmd)
+
+say f"\n=== Quest Completed! Final Score: {player.score} points ==="

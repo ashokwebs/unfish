@@ -1,0 +1,54 @@
+## Unfish Systems Programming: Raw Byte Buffers & Bitwise Operations
+## Demonstrates contiguous binary memory, little-endian binary serialization, and bitwise arithmetic.
+
+say "=== 1. Buffer Allocation & Byte Access ==="
+let buf = buffer(16)
+say f"Allocated buffer of size: {buffer_size(buf)} bytes"
+
+# Write ASCII bytes into buffer
+buffer_set(buf, 0, 72)  # 'H'
+buffer_set(buf, 1, 101) # 'e'
+buffer_set(buf, 2, 108) # 'l'
+buffer_set(buf, 3, 108) # 'l'
+buffer_set(buf, 4, 111) # 'o'
+say f"Byte 0: {buffer_get(buf, 0)} ('H')"
+say f"Byte 1: {buffer_get(buf, 1)} ('e')"
+
+say "\n=== 2. Multi-Byte Little-Endian Binary Access ==="
+# Binary protocol header serialization:
+# Offset 0: Magic u16 (0x55AA = 21930)
+# Offset 2: Payload Length u32 (1024)
+# Offset 6: Status Code i32 (-42)
+let packet = buffer(16)
+buffer_write_u16_le(packet, 0, 21930)
+buffer_write_u32_le(packet, 2, 1024)
+buffer_write_i32_le(packet, 6, -42)
+
+let read_magic = buffer_read_u16_le(packet, 0)
+let read_length = buffer_read_u32_le(packet, 2)
+let read_status = buffer_read_i32_le(packet, 6)
+
+say f"Magic:   {to_hex(read_magic)} (Decimal: {read_magic})"
+say f"Length:  {read_length} bytes"
+say f"Status:  {read_status}"
+
+say "\n=== 3. String & Hexadecimal Conversions ==="
+let text_buf = buffer_from_string("Unfish Systems")
+let hex_repr = buffer_to_hex(text_buf)
+say f"Hex encoding: {hex_repr}"
+
+let restored_buf = buffer_from_hex(hex_repr)
+say f"Decoded text: {buffer_to_string(restored_buf)}"
+
+say "\n=== 4. Bitwise Arithmetic & Integer Casts ==="
+let a = 12 # 0b1100
+let b = 10 # 0b1010
+say f"12 AND 10: {band(a, b)} (Binary: 8)"
+say f"12 OR  10: {bor(a, b)}  (Binary: 14)"
+say f"12 XOR 10: {bxor(a, b)} (Binary: 6)"
+say f"1 SHL  4:  {shl(1, 4)}   (16)"
+say f"16 SHR 2:  {shr(16, 2)}  (4)"
+
+say "\n=== 5. Memory Introspection ==="
+say f"Buffer layout: {inspect(packet)}"
+say "Systems programming demo complete!"

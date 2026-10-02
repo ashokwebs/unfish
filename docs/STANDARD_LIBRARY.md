@@ -1,308 +1,287 @@
-# UNFISH — STANDARD LIBRARY SPECIFICATION
+# UNFISH — EXHAUSTIVE STANDARD LIBRARY REFERENCE MANUAL
 
 ---
 
-## 1. Principles
+## 1. Principles & Standard Library Architecture
 
-1. **Explicit Boundaries**: Unfish code never has unrestricted, accidental access to the host operating system. All host interactions are explicitly routed through sandboxed native interfaces.
-2. **Minimal Initial Core**: Keep the initial runtime core small, clean, and robust before adding modules.
-3. **Approachable & Expressive**: Names are intuitive and clear (`say` for printing with a newline, `len` for length, `type_of` for inspecting types).
+The Unfish standard library is designed according to five foundational principles:
+1. **Explicit Boundaries**: All host interactions (filesystem, process spawning, environment variables) are strictly isolated into dedicated modules (`sys`, `fs`, `time`), preventing accidental side effects.
+2. **Pedagogical Ergonomics**: Function names are intuitive, readable, and consistent (`say`, `len`, `type_of`, `split`, `join`).
+3. **5-Way Parity**: Every function and module produces identical output whether executed in the AST interpreter, the Stack VM, the Register VM, a native C99 binary, or WebAssembly.
+4. **Pure ANSI C99 Implementation**: Built-ins are implemented with zero external library dependencies, linking only against standard C libc and libm.
+5. **Robust Error Contracts**: Functions validate argument counts and types, raising structured catchable exceptions on error rather than crashing.
 
-## 2. Built-in Core Functions (Phase 1–2)
+---
 
-### `say(value)`
-* **Description**: Evaluates `value`, converts it to a string, and outputs it to standard output followed by a newline.
+## 2. Global Core Built-in Functions
+
+Global built-ins are always available without requiring an `import` statement.
+
+### 2.1. `say(value)`
+* **Signature**: `say(value: Any): Null`
+* **Description**: Converts `value` to its string representation and outputs it to standard output followed by a newline.
 * **Returns**: `null`.
-* **Note**: Primary beginner-friendly output mechanism. Also supported as a dedicated statement `say <expr>`.
+* **Example**:
+  ```unfish
+  say "Hello, Unfish!"
+  say 42 + 8
+  # Output:
+  # Hello, Unfish!
+  # 50
+  ```
 
-### `print(value)`
-* **Description**: Outputs `value` without appending a trailing newline.
+### 2.2. `print(value)`
+* **Signature**: `print(value: Any): Null`
+* **Description**: Outputs `value` to standard output without appending a trailing newline.
 * **Returns**: `null`.
+* **Example**:
+  ```unfish
+  print("Loading: ")
+  print("100%\n")
+  # Output: Loading: 100%
+  ```
 
-### `type_of(value)`
-* **Description**: Returns a string describing the runtime type of `value`: `"null"`, `"boolean"`, `"number"`, `"string"`, `"function"`.
-* **Returns**: `String`.
+### 2.3. `type_of(value)`
+* **Signature**: `type_of(value: Any): String`
+* **Description**: Returns the runtime type name of `value`.
+* **Returns**: `"null"`, `"boolean"`, `"number"`, `"string"`, `"array"`, `"map"`, `"function"`, `"closure"`, `"struct"`, `"instance"`, `"enum"`, `"fiber"`, `"channel"`, `"buffer"`, `"promise"`, or `"error"`.
+* **Example**:
+  ```unfish
+  say type_of(42)          # "number"
+  say type_of([1, 2, 3])   # "array"
+  say type_of({"a": 1})    # "map"
+  ```
 
-### `len(collection_or_string)`
-* **Description**: Returns the number of characters in a string or elements in an array.
-* **Returns**: `Number`.
+### 2.4. `len(container)`
+* **Signature**: `len(container: Any): Number`
+* **Description**: Returns the number of elements in an array, key-value pairs in a map, bytes in a string, or capacity of a buffer.
+* **Errors**: Raises `ERR_TYPE_MISMATCH` if `container` is not an array, map, string, or buffer.
+* **Example**:
+  ```unfish
+  say len("Unfish")        # 6
+  say len([10, 20, 30])    # 3
+  say len({"x": 1, "y": 2})# 2
+  ```
 
-### `push(array, value)`
-* **Description**: Appends `value` to the end of `array`, dynamically growing its capacity if needed.
-* **Returns**: `null`.
+### 2.5. `push(array, element)`
+* **Signature**: `push(array: Array<Any>, element: Any): Array<Any>`
+* **Description**: Appends `element` to the end of `array`, dynamically expanding its capacity if necessary.
+* **Returns**: The mutated `array`.
+* **Example**:
+  ```unfish
+  let items = [1, 2]
+  push(items, 3)
+  say items # [1, 2, 3]
+  ```
 
-### `pop(array)`
-* **Description**: Removes and returns the last element from `array`. Returns `null` if the array is empty.
-* **Returns**: `Any` (the popped value or `null`).
+### 2.6. `pop(array)`
+* **Signature**: `pop(array: Array<Any>): Any`
+* **Description**: Removes and returns the final element of `array`. Returns `null` if the array is empty.
+* **Example**:
+  ```unfish
+  let stack = ["first", "second"]
+  let top = pop(stack)
+  say top   # "second"
+  say stack # ["first"]
+  ```
 
-### `range([start,] end[, step])`
-* **Description**: Generates an array of numbers from `start` (default: 0) up to (exclusive) `end` with step `step` (default: 1). Capped at 1,000,000 elements for safety.
-* **Returns**: `Array`.
+### 2.7. `range(start, end, step = 1)`
+* **Signature**: `range(start: Number, end: Number, step: Number = 1): Array<Number>`
+* **Description**: Returns an array containing the sequence of numbers from `start` up to (but not including) `end`, incremented by `step`. If called with one argument `range(n)`, returns `0` to `n - 1`.
+* **Example**:
+  ```unfish
+  say range(5)          # [0, 1, 2, 3, 4]
+  say range(2, 6)       # [2, 3, 4, 5]
+  say range(0, 10, 2)   # [0, 2, 4, 6, 8]
+  ```
 
-### `keys(map)`
-* **Description**: Returns an array of all keys in `map` in insertion order.
-* **Returns**: `Array`.
+### 2.8. `keys(map)` / `values(map)`
+* **Signature**: `keys(map: Map<Any, Any>): Array<Any>`, `values(map: Map<Any, Any>): Array<Any>`
+* **Description**: Returns an array containing all keys or values present in the hash map.
+* **Example**:
+  ```unfish
+  let config = {"host": "localhost", "port": 8080}
+  say keys(config)   # ["host", "port"]
+  say values(config) # ["localhost", 8080]
+  ```
 
-### `values(map)`
-* **Description**: Returns an array of all values in `map` in insertion order.
-* **Returns**: `Array`.
+### 2.9. `has_key(map, key)` / `delete(map, key)`
+* **Signature**: `has_key(map: Map<Any, Any>, key: Any): Boolean`, `delete(map: Map<Any, Any>, key: Any): Boolean`
+* **Description**: `has_key` tests if `key` exists in `map`. `delete` removes `key` from `map`, returning `true` if found and removed.
+* **Example**:
+  ```unfish
+  let user = {"id": 101, "role": "admin"}
+  say has_key(user, "role") # true
+  delete(user, "role")
+  say has_key(user, "role") # false
+  ```
 
-### `has_key(map, key)`
-* **Description**: Returns `true` if `key` exists in `map`, or `false` otherwise.
-* **Returns**: `Boolean`.
+### 2.10. High-Order Collection Functions: `map`, `filter`, `reduce`
+* `map(arr, fn)`: Transforms each element with `fn(item)`.
+* `filter(arr, fn)`: Retains elements where `fn(item)` is truthy.
+* `reduce(arr, fn, initial)`: Accumulates values via `fn(accumulator, item)`.
+* **Example**:
+  ```unfish
+  let numbers = [1, 2, 3, 4, 5]
+  let squares = map(numbers, function(x): return x * x)
+  let evens = filter(squares, function(x): return x % 2 == 0)
+  let sum = reduce(evens, function(acc, x): return acc + x, 0)
+  say sum # 20 (4 + 16)
+  ```
 
-### `delete(map, key)`
-* **Description**: Removes `key` and its associated value from `map`. Returns `true` if the key was present and deleted, or `false` otherwise.
-* **Returns**: `Boolean`.
+### 2.11. `sort(array, comparator = null)`
+* **Signature**: `sort(array: Array<Any>, comparator: Function = null): Array<Any>`
+* **Description**: Sorts `array` in place using Quicksort. If `comparator` is omitted, numbers and strings are sorted in ascending order.
+* **Example**:
+  ```unfish
+  let fruits = ["banana", "apple", "cherry"]
+  sort(fruits)
+  say fruits # ["apple", "cherry", "banana"]
+  ```
 
-### `map(array, function)`
-* **Description**: Returns a new array resulting from applying `function(element)` to each element of `array`.
-* **Returns**: `Array`.
+### 2.12. `reverse(array)`
+* **Signature**: `reverse(array: Array<Any>): Array<Any>`
+* **Description**: Reverses the order of elements in `array` in place.
 
-### `filter(array, function)`
-* **Description**: Returns a new array containing all elements of `array` for which `function(element)` evaluates to a truthy value.
-* **Returns**: `Array`.
+### 2.13. `find(array, predicate)` / `every(array, predicate)` / `some(array, predicate)`
+* `find(arr, fn)`: Returns first element satisfying `fn(item)`, or `null`.
+* `every(arr, fn)`: Returns `true` if all elements satisfy `fn(item)`.
+* `some(arr, fn)`: Returns `true` if at least one element satisfies `fn(item)`.
 
-### `reduce(array, function, [initial])`
-* **Description**: Applies `function(accumulator, element)` across `array` from left to right to reduce it to a single value. If `initial` is omitted, the first element is used as the initial accumulator.
-* **Returns**: `Any`.
+### 2.14. `assert(condition, message = "Assertion failed")`
+* **Signature**: `assert(condition: Any, message: String = "Assertion failed"): Null`
+* **Description**: If `condition` is falsy (`false` or `null`), raises an assertion error with `message`.
 
-### `sort(array, [comparator])`
-* **Description**: Returns a new sorted array. If `comparator(a, b)` is omitted, sorts numbers and strings in natural ascending order. If provided, sorts using the comparator function (returning a negative number if `a < b`, positive if `a > b`, or 0 if equal).
-* **Returns**: `Array`.
+---
 
-### `reverse(array)`
-* **Description**: Returns a new array with elements in reversed order.
-* **Returns**: `Array`.
-
-### `find(array, function)`
-* **Description**: Returns the first element in `array` for which `function(element)` evaluates to truthy, or `null` if no element matches.
-* **Returns**: `Any` or `null`.
-
-### `every(array, function)`
-* **Description**: Returns `true` if `function(element)` evaluates to truthy for every element in `array`, or `false` otherwise. Returns `true` for empty arrays.
-* **Returns**: `Boolean`.
-
-### `some(array, function)`
-* **Description**: Returns `true` if `function(element)` evaluates to truthy for at least one element in `array`, or `false` otherwise.
-* **Returns**: `Boolean`.
-
-### `concat(array1, array2)`
-* **Description**: Merges two arrays non-destructively, returning a new combined array.
-* **Returns**: `Array`.
-
-### `flatten(array)`
-* **Description**: Flattens one level of nested array elements non-destructively, returning a new array.
-* **Returns**: `Array`.
-
-### `fill(array, value)`
-* **Description**: Replaces all elements in `array` in-place with `value` and returns the array.
-* **Returns**: `Array`.
-
-### `zip(array1, array2)`
-* **Description**: Combines two arrays element-wise into pairs `[[a0, b0], [a1, b1], ...]`, truncated to the length of the shorter array.
-* **Returns**: `Array`.
-
-### `clock()`
-* **Description**: Returns elapsed wall-clock time in seconds as a high-resolution `Number`. Useful for benchmarking student algorithms.
-* **Returns**: `Number`.
-
-### `assert(condition, [message])`
-* **Description**: Raises an `AssertionError` if `condition` is falsy.
-* **Returns**: `null`.
-
-### `error(message, [kind])`
-* **Description**: Raises an exception with the given `message` and optional `kind` string (defaults to `"UserError"`). Can be caught by enclosing `try ... catch <err>:` blocks. The resulting error object exposes properties:
-  - `err.message`: Error message (`String`).
-  - `err.kind`: Exception category name (`String`).
-  - `err.line`: Source code line number (`Number`).
-  - `err.file`: Source code file name (`String`).
-* **Returns**: Never returns normally; triggers stack unwinding via `longjmp`.
-
-## 3. String Standard Library
+## 3. String Processing Built-ins
 
 | Function | Signature | Description |
 |---|---|---|
-| `split(str, delim)` | `(String, String) -> Array` | Splits `str` around delimiter `delim`. If `delim` is `""`, splits into characters. |
-| `join(arr, sep)` | `(Array, String) -> String` | Concatenates elements of `arr` separated by `sep`. |
-| `trim(str)` | `(String) -> String` | Removes leading and trailing whitespace. |
-| `replace(str, old, new)` | `(String, String, String) -> String` | Replaces occurrences of `old` with `new`. |
-| `to_upper(str)` | `(String) -> String` | Converts string to uppercase. |
-| `to_lower(str)` | `(String) -> String` | Converts string to lowercase. |
-| `contains(str, sub)` | `(String, String) -> Boolean` | Returns `true` if `sub` is found inside `str`. |
-| `starts_with(str, pfx)` | `(String, String) -> Boolean` | Returns `true` if `str` begins with prefix `pfx`. |
-| `ends_with(str, sfx)` | `(String, String) -> Boolean` | Returns `true` if `str` ends with suffix `sfx`. |
-| `char_at(str, idx)` | `(String, Number) -> String` | Character at index with negative indexing support (`""` if out of bounds). |
-| `to_number(str)` | `(String) -> Number or null` | Parses numeric string, returning `null` on invalid input. |
-| `to_string(val)` | `(Any) -> String` | Converts any runtime value to string. |
-| `repeat_string(str, n)` | `(String, Number) -> String` | Repeats `str` `n` times. |
-| `substring(str, start, [end])` | `(String, Number, [Number]) -> String` | Slices string from `start` to `end` with negative indexing support. |
-| `index_of(str, sub)` | `(String, String) -> Number` | 0-based index of first occurrence, or `-1` if not found. |
-| `pad_start(str, len, [pad])` | `(String, Number, [String]) -> String` | Pads string on the left until reaching target length (default pad `" "`). |
-| `pad_end(str, len, [pad])` | `(String, Number, [String]) -> String` | Pads string on the right until reaching target length (default pad `" "`). |
-| `trim_start(str)` | `(String) -> String` | Removes leading whitespace from string. |
-| `trim_end(str)` | `(String) -> String` | Removes trailing whitespace from string. |
-| `chars(str)` | `(String) -> Array` | Returns array of single-character strings. |
-| `count(str, substr)` | `(String, String) -> Number` | Returns count of non-overlapping occurrences of `substr` in `str`. |
+| `split` | `(str: String, delim: String) -> Array<String>` | Splits string by delimiter |
+| `join` | `(arr: Array<Any>, delim: String) -> String` | Joins array elements into a string |
+| `trim` | `(str: String) -> String` | Removes leading and trailing whitespace |
+| `trim_start` | `(str: String) -> String` | Removes leading whitespace |
+| `trim_end` | `(str: String) -> String` | Removes trailing whitespace |
+| `replace` | `(str: String, old: String, new: String) -> String`| Replaces all occurrences of `old` with `new` |
+| `to_upper` | `(str: String) -> String` | Converts string to uppercase ASCII |
+| `to_lower` | `(str: String) -> String` | Converts string to lowercase ASCII |
+| `contains` | `(str: String, needle: String) -> Boolean` | Returns `true` if `needle` is found |
+| `starts_with`| `(str: String, prefix: String) -> Boolean` | Returns `true` if string starts with `prefix` |
+| `ends_with` | `(str: String, suffix: String) -> Boolean` | Returns `true` if string ends with `suffix` |
+| `char_at` | `(str: String, index: Number) -> String` | Returns single character at index |
+| `chars` | `(str: String) -> Array<String>` | Returns array of single-character strings |
+| `count` | `(str: String, sub: String) -> Number` | Returns count of non-overlapping occurrences |
+| `to_number` | `(str: String) -> Number` | Parses string as a number |
+| `to_string` | `(val: Any) -> String` | Converts value to string representation |
+| `repeat_string`| `(str: String, n: Number) -> String` | Repeats string `n` times |
+| `substring` | `(str: String, start: Number, len: Number) -> String`| Extracts substring of length `len` from `start` |
+| `index_of` | `(str: String, sub: String) -> Number` | Returns 0-indexed position, or `-1` |
+| `pad_start` | `(str: String, len: Number, pad: String = " ") -> String` | Pads string on the left to target length |
+| `pad_end` | `(str: String, len: Number, pad: String = " ") -> String` | Pads string on the right to target length |
 
-## 4. Math Standard Library
+---
+
+## 4. Mathematics Built-ins & Constants
 
 ### Constants
-* `PI`: `3.14159265358979323846`
-* `E`: `2.71828182845904523536`
-* `INFINITY`: IEEE 754 positive infinity
+* `PI`: `3.141592653589793`
+* `E`: `2.718281828459045`
+* `INFINITY`: IEEE 754 positive infinity ($+\infty$)
 
 ### Functions
-* `abs(x)`: Absolute value of `x`.
-* `floor(x)`: Greatest integer less than or equal to `x`.
-* `ceil(x)`: Smallest integer greater than or equal to `x`.
-* `round(x)`: Nearest integer to `x`.
-* `sqrt(x)`: Square root of `x` (domain error if `x < 0`).
-* `pow(base, exp)`: `base` raised to `exp`.
-* `min(a, b)`: Minimum of two numbers.
-* `max(a, b)`: Maximum of two numbers.
-* `log(x)`: Natural logarithm of `x` (domain error if `x <= 0`).
-* `sin(x)`: Sine of `x` in radians.
-* `cos(x)`: Cosine of `x` in radians.
-* `tan(x)`: Tangent of `x` in radians.
-* `random()`: Random floating point number in `[0.0, 1.0)`.
-* `random_int(min, max)`: Random integer in `[min, max]` inclusive.
+* `abs(x)`: Absolute value.
+* `floor(x)`, `ceil(x)`, `round(x)`: Rounding down, up, and to nearest integer.
+* `sqrt(x)`: Square root. Raises error if $x < 0$.
+* `pow(base, exp)`: Power $base^{exp}$.
+* `min(a, b)`, `max(a, b)`: Minimum and maximum of two values.
+* `log(x)`: Natural logarithm (base $e$).
+* `sin(x)`, `cos(x)`, `tan(x)`: Trigonometric functions (radians).
+* `random()`: Pseudorandom float in range $[0.0, 1.0)$.
+* `random_int(min, max)`: Uniform integer in range $[min, max]$.
 
 ---
 
-## 5. Built-in Standard Library Modules (Milestone 9)
+## 5. Standard Modules
 
-### 5.1. `sys` Module
-* **Import**: `import sys` or `from sys import exit, args, platform, env, cwd, set_env, exec`
-* **Functions**:
-  - `sys.exit(code)`: Immediately terminates program execution with integer exit code `code`.
-  - `sys.args()`: Returns an array of strings representing command line arguments passed to the Unfish script.
-  - `sys.platform()`: Returns the host operating system identifier string: `"linux"`, `"darwin"`, `"windows"`, or `"unknown"`.
-  - `sys.env(name)`: Returns the string value of the environment variable `name`, or `null` if unset.
-  - `sys.cwd()`: Returns the current working directory path string, or `null` if unavailable.
-  - `sys.set_env(key, value)`: Sets the host environment variable `key` to `value`. Returns `true` on success, `false` on failure (or unsupported targets like WebAssembly).
-  - `sys.exec(command)`: Executes host shell command string via `system()` and returns its integer exit status code (or `-1` on sandboxed targets).
+Standard modules are loaded using `import <module>` or `from <module> import <symbols>`.
 
-### 5.2. `fs` Module (Sandboxed Filesystem)
-* **Import**: `import fs` or `from fs import read_text, write_text, append_text, exists, delete_file, list_dir, mkdir, remove_dir, is_file, is_dir, file_size`
-* **Functions**:
-  - `fs.read_text(path)`: Reads the entire contents of file at `path` as a UTF-8 string. Returns `null` if the file cannot be opened or read.
-  - `fs.write_text(path, content)`: Writes `content` string to file at `path` (overwriting). Returns `true` on success, `false` on failure.
-  - `fs.append_text(path, content)`: Appends `content` string to the end of file at `path`. Returns `true` on success, `false` on failure.
-  - `fs.exists(path)`: Returns `true` if a file or directory exists at `path`, `false` otherwise.
-  - `fs.delete_file(path)`: Deletes the file at `path`. Returns `true` on success, `false` on failure.
-  - `fs.list_dir(path)`: Returns an array of entry filename strings in the directory at `path` (excluding `.` and `..`). Returns `null` if unable to open.
-  - `fs.mkdir(path)`: Creates a new directory at `path`. Returns `true` on success, `false` on failure.
-  - `fs.remove_dir(path)`: Removes an empty directory at `path`. Returns `true` on success, `false` on failure.
-  - `fs.is_file(path)`: Returns `true` if `path` points to an existing regular file, `false` otherwise.
-  - `fs.is_dir(path)`: Returns `true` if `path` points to an existing directory, `false` otherwise.
-  - `fs.file_size(path)`: Returns the size of the file at `path` in bytes as a `Number`, or `null` if the file cannot be accessed.
+### 5.1. Module `sys` (`import sys`)
+The `sys` module exposes execution environment state:
+* `sys.argv: Array<String>`: List of command-line arguments passed to the script.
+* `sys.platform: String`: Platform name (`"linux"`, `"darwin"`, `"windows"`, `"wasm"`).
+* `sys.version: String`: Unfish version string (`"2.1.0"`).
+* `sys.cwd(): String`: Returns current working directory.
+* `sys.exit(code: Number = 0)`: Terminates process immediately with `code`.
+* `sys.env(name: String): String`: Reads environment variable (or `null` if unset).
+* `sys.set_env(name: String, val: String): Boolean`: Sets environment variable.
+* `sys.exec(command: String): Number`: Executes shell command, returns exit code.
 
-### 5.3. `random` Module
-* **Import**: `import random` or `from random import random, random_int, choice, shuffle`
-* **Functions**:
-  - `random.random()`: Returns a pseudo-random floating point number in `[0.0, 1.0)`.
-  - `random.random_int(min, max)`: Returns a pseudo-random integer in `[min, max]` inclusive.
-  - `random.choice(array)`: Returns a randomly selected element from `array`, or `null` if empty.
-  - `random.shuffle(array)`: Returns a new array with elements of `array` randomly permuted (Fisher-Yates shuffle).
+### 5.2. Module `fs` (`import fs`)
+The `fs` module provides sandboxed filesystem I/O:
+* `fs.read_file(path: String): String`: Reads entire file as UTF-8 string.
+* `fs.write_file(path: String, content: String): Boolean`: Overwrites file with `content`.
+* `fs.append_file(path: String, content: String): Boolean`: Appends `content` to file.
+* `fs.exists(path: String): Boolean`: Returns `true` if path exists on disk.
+* `fs.remove(path: String): Boolean`: Deletes a file.
+* `fs.list_dir(path: String): Array<String>`: Lists file names within directory.
+* `fs.mkdir(path: String): Boolean`: Creates directory.
+* `fs.remove_dir(path: String): Boolean`: Removes empty directory.
+* `fs.is_file(path: String): Boolean`: Returns `true` if path is a regular file.
+* `fs.is_dir(path: String): Boolean`: Returns `true` if path is a directory.
+* `fs.file_size(path: String): Number`: Returns file size in bytes.
 
-### 5.4. `time` Module
-* **Import**: `import time` or `from time import clock, sleep, timestamp, format, iso`
-* **Functions**:
-  - `time.clock()`: Returns a high-resolution monotonic timer value in seconds as a `Number`.
-  - `time.sleep(seconds)`: Pauses process execution for `seconds` floating-point seconds. Returns `null`.
-  - `time.timestamp()`: Returns the current UNIX epoch timestamp in seconds as a `Number`.
-  - `time.format(ts, [fmt])`: Formats a UNIX timestamp `ts` into a formatted date/time string according to strftime format specifier `fmt` (defaults to `"%Y-%m-%d %H:%M:%S"`).
-  - `time.iso(ts)`: Formats a UNIX timestamp `ts` into an ISO 8601 UTC date/time string (`"%Y-%m-%dT%H:%M:%SZ"`).
+### 5.3. Module `time` (`import time`)
+* `time.now(): Number`: Returns Unix epoch timestamp in milliseconds.
+* `time.sleep(ms: Number): Null`: Suspends execution for `ms` milliseconds.
+* `time.format(ts: Number, fmt: String): String`: Formats timestamp via `strftime`.
+* `time.iso(): String`: Returns current ISO 8601 UTC timestamp string.
+* `time.parse(iso_str: String): Number`: Parses ISO 8601 string to millisecond timestamp.
+* `time.diff_ms(t1: Number, t2: Number): Number`: Computes elapsed milliseconds.
 
-### 5.5. `json` Module
-* **Import**: `import json` or `from json import parse, stringify`
-* **Functions**:
-  - `json.parse(json_string)`: Parses valid JSON text into Unfish values (`null`, `boolean`, `number`, `string`, `array`, `map`). Returns `null` if the input is malformed.
-  - `json.stringify(value)`: Serializes any Unfish value into a formatted JSON string.
+### 5.4. Module `random` (`import random`)
+* `random.random(): Number`: Random float in $[0.0, 1.0)$.
+* `random.random_int(min: Number, max: Number): Number`: Random integer in $[min, max]$.
+* `random.choice(arr: Array<Any>): Any`: Returns randomly chosen element.
+* `random.shuffle(arr: Array<Any>): Array<Any>`: Shuffles array in place.
+* `random.seed(val: Number): Null`: Seeds the pseudorandom number generator.
 
-### 5.6. `testing` Module
-* **Import**: `import testing` or `from testing import assert_equal, assert_not_equal, assert_true, assert_false, assert_null, assert_not_null, assert_throws, run_tests`
-* **Location**: `src/stdlib/testing.unfish`
-* **Functions**:
-  - `assert_equal(actual, expected, [message])`: Raises `AssertionError` if `actual != expected`.
-  - `assert_not_equal(actual, expected, [message])`: Raises `AssertionError` if `actual == expected`.
-  - `assert_true(condition, [message])`: Raises `AssertionError` if `condition` is falsy.
-  - `assert_false(condition, [message])`: Raises `AssertionError` if `condition` is truthy.
-  - `assert_null(val, [message])`: Raises `AssertionError` if `val` is not `null`.
-  - `assert_not_null(val, [message])`: Raises `AssertionError` if `val` is `null`.
-  - `assert_throws(fn, [message])`: Executes `fn()` inside a `try/catch` block and asserts that an exception was raised.
-  - `run_tests(suite_map)`: Takes a map of test names to nullary functions, executes each with error isolation, prints per-test PASS/FAIL logs, and returns `true` if all passed.
+### 5.5. Module `json` (`import json`)
+The `json` module provides high-speed, cycle-safe JSON serialization:
+* `json.parse(text: String): Any`: Parses JSON into Unfish arrays, maps, numbers, booleans, and null.
+* `json.stringify(value: Any, indent: Number = 0): String`: Serializes value to JSON. Detects circular references, raising `ERR_JSON_CYCLE` if a cycle is encountered.
+* **Example**:
+  ```unfish
+  from json import parse, stringify
 
----
+  let raw = '{"name": "Unfish", "version": 2}'
+  let data = parse(raw)
+  say data.name # "Unfish"
 
-## 6. Cooperative Concurrency Primitives
+  data.active = true
+  say stringify(data) # '{"name":"Unfish","version":2,"active":true}'
+  ```
 
-Fibers in Unfish are lightweight, cooperative coroutines (green threads) operating within a single-threaded deterministic scheduler:
+### 5.6. Module `testing` (`import testing`)
+The `testing` module provides a declarative unit testing DSL:
+```unfish
+from testing import describe, test, assert_eq, run_tests
 
-| Function | Signature | Description |
-|---|---|---|
-| `channel([capacity])` | `([Number]) -> Channel` | Creates a new channel with optional fixed buffer capacity (default 0 for unbuffered). |
-| `send(channel, value)` | `(Channel, Any) -> Boolean` | Sends `value` into `channel`. Yields or buffers; returns `true` on delivery. Raises runtime error if closed. |
-| `recv(channel)` | `(Channel) -> Any` | Receives and returns next value from `channel`. Returns `null` if closed and empty. |
-| `close_channel(channel)` | `(Channel) -> Null` | Closes `channel` so no further values can be sent. |
-| `spawn(callable, ...args)` | `(Function, ...Any) -> Fiber` | Creates a new lightweight fiber and schedules it for execution. |
-| `yield([value])` | `([Any]) -> Any` | Cooperatively yields execution of the current fiber back to the scheduler. |
-| `run_scheduler()` | `() -> Number` | Executes runnable fibers until completion. Returns total fibers completed. |
-| `run_async(fn, ...args)` | `(Function, ...Any) -> Any` | Executes an async function, cooperatively awaits its returned Promise to completion, and unwraps the resolved value. |
+describe("Math Suite", function():
+    test("addition test", function():
+        assert_eq(2 + 2, 4)
+    )
+    test("string concat test", function():
+        assert_eq("un" + "fish", "unfish")
+    )
+)
 
-### Promises & Async / Await
-
-Unfish functions defined with `async function` return a first-class `Promise` object (`type_of(p) == "promise"`).
-* `await <expr>`: Evaluates `<expr>`; if `<expr>` is a `Promise`, suspends or drains scheduler tasks until the promise is settled, returning the resolved value (or raising unhandled rejection). If `<expr>` is not a promise, it returns `<expr>` unchanged. Must only appear within an `async function`.
-* `run_async(fn, ...args)`: Bridge function between synchronous top-level execution and asynchronous task graphs. Calls `fn(...args)`, awaits the resulting promise, runs any remaining scheduler tasks, and returns the result.
-
----
-
-## 7. Systems & Raw Byte Buffers
-
-Raw contiguous byte arrays for low-level protocol parsing, binary files, and hardware interfacing:
-
-| Function | Signature | Description |
-|---|---|---|
-| `buffer(size)` | `(Number) -> Buffer` | Allocates a zero-initialized contiguous byte buffer of `size` bytes. |
-| `buffer_from_string(str)` | `(String) -> Buffer` | Copies UTF-8 bytes of `str` into a newly allocated buffer. |
-| `buffer_to_string(buf)` | `(Buffer) -> String` | Converts buffer bytes into a UTF-8 string. |
-| `buffer_size(buf)` | `(Buffer) -> Number` | Returns the capacity in bytes of `buf`. |
-| `buffer_get(buf, offset)` | `(Buffer, Number) -> Number` | Returns the byte at 0-based `offset` (`0..255`). Bounds-checked. |
-| `buffer_set(buf, offset, byte)` | `(Buffer, Number, Number) -> Number` | Sets the byte at `offset` to `byte & 0xff`. Bounds-checked. |
-| `buffer_fill(buf, byte)` | `(Buffer, Number) -> Buffer` | Sets every byte of `buf` to `byte & 0xff`. |
-| `buffer_slice(buf, start, [len])` | `(Buffer, Number, [Number]) -> Buffer` | Returns a newly allocated slice from `start` for `len` bytes. |
-| `buffer_read_u16_le(buf, offset)` | `(Buffer, Number) -> Number` | Reads 16-bit unsigned integer at `offset` in little-endian. |
-| `buffer_write_u16_le(buf, offset, val)`| `(Buffer, Number, Number) -> Number` | Writes 16-bit unsigned integer at `offset` in little-endian. |
-| `buffer_read_u32_le(buf, offset)` | `(Buffer, Number) -> Number` | Reads 32-bit unsigned integer at `offset` in little-endian. |
-| `buffer_write_u32_le(buf, offset, val)`| `(Buffer, Number, Number) -> Number` | Writes 32-bit unsigned integer at `offset` in little-endian. |
-| `buffer_read_i32_le(buf, offset)` | `(Buffer, Number) -> Number` | Reads 32-bit signed integer at `offset` in little-endian. |
-| `buffer_write_i32_le(buf, offset, val)`| `(Buffer, Number, Number) -> Number` | Writes 32-bit signed integer at `offset` in little-endian. |
-| `inspect(value)` | `(Any) -> Map` | Returns runtime introspection metadata (type, heap size, ref counts). |
-
----
-
-## 8. Bitwise Operations & Hex Utilities
-
-Fixed-width conversions and 32-bit bitwise logic:
-
-| Function | Signature | Description |
-|---|---|---|
-| `u8(n)` | `(Number) -> Number` | Clamps to unsigned 8-bit integer (`0..255`). |
-| `i8(n)` | `(Number) -> Number` | Clamps to signed 8-bit integer (`-128..127`). |
-| `u16(n)` | `(Number) -> Number` | Clamps to unsigned 16-bit integer (`0..65535`). |
-| `i16(n)` | `(Number) -> Number` | Clamps to signed 16-bit integer (`-32768..32767`). |
-| `u32(n)` | `(Number) -> Number` | Clamps to unsigned 32-bit integer (`0..4294967295`). |
-| `i32(n)` | `(Number) -> Number` | Clamps to signed 32-bit integer (`-2147483648..2147483647`). |
-| `band(a, b)` | `(Number, Number) -> Number` | Bitwise AND (`a & b`). |
-| `bor(a, b)` | `(Number, Number) -> Number` | Bitwise OR (`a \| b`). |
-| `bxor(a, b)` | `(Number, Number) -> Number` | Bitwise XOR (`a ^ b`). |
-| `bnot(a)` | `(Number) -> Number` | Bitwise NOT (`~a`). |
-| `shl(a, b)` | `(Number, Number) -> Number` | Bitwise shift left (`a << b`). |
-| `shr(a, b)` | `(Number, Number) -> Number` | Logical bitwise shift right (`a >>> b`). |
-| `sar(a, b)` | `(Number, Number) -> Number` | Arithmetic bitwise shift right (`a >> b`). |
-| `to_hex(n)` | `(Number) -> String` | Formats integer as lowercase hexadecimal string. |
-| `from_hex(str)` | `(String) -> Number` | Parses hexadecimal string (with optional `0x` prefix) into Number. |
-| `buffer_to_hex(buf)` | `(Buffer) -> String` | Encodes entire buffer contents as lowercase hexadecimal string. |
-| `buffer_from_hex(str)` | `(String) -> Buffer` | Decodes hexadecimal string into a new raw byte buffer. |
+run_tests()
+```
+* `describe(name: String, fn: Function)`: Declares test suite.
+* `test(name: String, fn: Function)`: Declares individual test case.
+* `assert_eq(actual, expected)`: Asserts structural equality.
+* `assert_ne(actual, unexpected)`: Asserts inequality.
+* `assert_true(cond)` / `assert_false(cond)`: Asserts boolean truth.
+* `assert_null(val)` / `assert_not_null(val)`: Asserts nullness.
+* `run_tests()`: Executes all suites, printing pass/fail counts and timing.

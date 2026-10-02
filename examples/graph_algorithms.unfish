@@ -1,0 +1,118 @@
+# Unfish Graph Algorithms & Adjacency Representation Example
+# Demonstrates object-oriented graph representation, BFS, DFS, and topological sorting
+
+struct DirectedGraph:
+    adj: Map
+
+    fn add_edge(self, src, dst):
+        if not has_key(self.adj, src):
+            self.adj[src] = []
+        let neighbors = self.adj[src]
+        push(neighbors, dst)
+        self.adj[src] = neighbors
+
+        # Ensure dst has an entry in adjacency table
+        if not has_key(self.adj, dst):
+            self.adj[dst] = []
+
+    fn get_neighbors(self, node):
+        if has_key(self.adj, node):
+            return self.adj[node]
+        return []
+
+    fn bfs(self, start_node):
+        let visited = {}
+        let queue = [start_node]
+        let order = []
+        visited[start_node] = true
+
+        while len(queue) > 0:
+            let node = queue[0]
+            # Dequeue head element
+            let next_queue = []
+            for i in range(1, len(queue)):
+                push(next_queue, queue[i])
+            queue = next_queue
+
+            push(order, node)
+
+            for neighbor in self.get_neighbors(node):
+                if not has_key(visited, neighbor):
+                    visited[neighbor] = true
+                    push(queue, neighbor)
+        return order
+
+    fn dfs(self, start_node):
+        let visited = {}
+        let order = []
+
+        fn visit(u):
+            visited[u] = true
+            push(order, u)
+            for v in self.get_neighbors(u):
+                if not has_key(visited, v):
+                    visit(v)
+
+        visit(start_node)
+        return order
+
+    fn topological_sort(self):
+        # Calculate in-degrees
+        let in_degree = {}
+        for u in keys(self.adj):
+            in_degree[u] = 0
+
+        for u in keys(self.adj):
+            for v in self.adj[u]:
+                in_degree[v] = in_degree[v] + 1
+
+        # Queue nodes with 0 in-degree
+        let queue = []
+        for u in keys(in_degree):
+            if in_degree[u] == 0:
+                push(queue, u)
+
+        let topo_order = []
+        while len(queue) > 0:
+            let u = queue[0]
+            let nq = []
+            for i in range(1, len(queue)):
+                push(nq, queue[i])
+            queue = nq
+
+            push(topo_order, u)
+
+            for v in self.get_neighbors(u):
+                in_degree[v] = in_degree[v] - 1
+                if in_degree[v] == 0:
+                    push(queue, v)
+
+        return topo_order
+
+fn make_graph():
+    return DirectedGraph({})
+
+# Demonstration
+say "=== Testing Unfish Graph Algorithms ==="
+let g = make_graph()
+
+# Build build pipeline dependency graph:
+# "lexer" -> "parser" -> "semantic" -> "compiler" -> "runtime"
+# "ast" -> "parser"
+g.add_edge("lexer", "parser")
+g.add_edge("ast", "parser")
+g.add_edge("parser", "semantic")
+g.add_edge("semantic", "compiler")
+g.add_edge("compiler", "runtime")
+
+say "1. Breadth-First Search (BFS) from \"lexer\":"
+let bfs_result = g.bfs("lexer")
+say f"  Traversal: {bfs_result}"
+
+say "\n2. Depth-First Search (DFS) from \"ast\":"
+let dfs_result = g.dfs("ast")
+say f"  Traversal: {dfs_result}"
+
+say "\n3. Topological Build Order (Kahn's Algorithm):"
+let build_order = g.topological_sort()
+say f"  Execution Pipeline: {build_order}"

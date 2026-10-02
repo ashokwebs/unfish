@@ -192,6 +192,11 @@
         <a class="nav-item" data-target="tut-15">15. Memory Model &amp; GC</a>
         <a class="nav-item" data-target="tut-16">16. VM &amp; Native Compilation</a>
         <a class="nav-item" data-target="tut-17">17. Fibers &amp; Channels</a>
+        <a class="nav-item" data-target="tut-18">18. Traits &amp; Interfaces</a>
+        <a class="nav-item" data-target="tut-19">19. Pipelines &amp; Comprehensions</a>
+        <a class="nav-item" data-target="tut-20">20. Systems Buffers &amp; Bitwise</a>
+        <a class="nav-item" data-target="tut-21">21. Async / Await Coroutines</a>
+        <a class="nav-item" data-target="tut-22">22. Developer Tooling &amp; LSP</a>
       </div>
 
       <div class="nav-section">
@@ -1014,6 +1019,200 @@ while true:
 
 say "Scheduler drained cleanly."</textarea>
           <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 18: Traits & Interfaces -->
+      <article id="doc-tut-18" class="doc-chapter">
+        <h1>18. Traits &amp; Polymorphic Interfaces</h1>
+        <p>
+          Traits define abstract behavioral contracts that structs implement to enable polymorphic dispatch. Traits allow you to write generic algorithms that operate on any type providing required methods.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut18_traits.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="18" spellcheck="false">trait Describable:
+    fn describe(self)
+
+struct Product:
+    title
+    price
+
+impl Describable for Product:
+    fn describe(self):
+        return f"{self.title} (Price: ${self.price})"
+
+struct User:
+    username
+    role
+
+impl Describable for User:
+    fn describe(self):
+        return f"User: {self.username} [{self.role}]"
+
+let items = [
+    Product("Mechanical Keyboard", 129.99),
+    User("ada_lovelace", "Admin")
+]
+
+for item in items:
+    say item.describe()</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 19: Pipelines & Comprehensions -->
+      <article id="doc-tut-19" class="doc-chapter">
+        <h1>19. Pipelines &amp; List Comprehensions</h1>
+        <p>
+          Unfish features point-free pipeline chaining via the <code>|&gt;</code> operator and concise declarative transformations using list and map comprehensions.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut19_pipelines.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="18" spellcheck="false">let raw_scores = [12, 45, 88, 92, 34, 76, 100, 54]
+
+# List comprehension: filter passing scores (&gt;= 60) and add 5 bonus points
+let curved = [s + 5 for s in raw_scores if s >= 60]
+say f"Curved passing scores: {curved}"
+
+# Pipeline operator |>
+fn compute_mean(arr):
+    let total = reduce(arr, fn(acc, v): acc + v, 0)
+    return total / len(arr)
+
+fn format_stat(val):
+    return f"Average Score: {round(val * 10) / 10}%"
+
+# Point-free transformation pipeline
+let summary = curved |> compute_mean |> format_stat
+say summary</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 20: Systems Buffers & Bitwise -->
+      <article id="doc-tut-20" class="doc-chapter">
+        <h1>20. Systems Programming: Byte Buffers &amp; Bitwise Math</h1>
+        <p>
+          Unfish combines high-level syntax with direct low-level memory buffers (<code>buffer</code>) and 64-bit bitwise operators for wire-level networking and binary protocol framing.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut20_systems_buffer.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="18" spellcheck="false"># Allocate 8-byte raw buffer
+let packet = buffer(8)
+
+# Write magic 32-bit header (0x55465348) little-endian
+buffer_write_u32_le(packet, 0, 1430664008)
+
+# Write 16-bit sequence number (0x0102 = 258)
+buffer_write_u16_le(packet, 4, 258)
+
+# Write individual flag bytes
+buffer_set(packet, 6, 0xAA)
+buffer_set(packet, 7, 0x55)
+
+say f"Hex buffer payload: {buffer_to_hex(packet)}"
+say f"Read sequence back: {buffer_read_u16_le(packet, 4)}"
+
+# Bitwise math
+let flags = buffer_get(packet, 6)
+let is_masked = band(flags, 0x80) != 0
+say f"High bit flag set: {is_masked}"</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 21: Async / Await Coroutines -->
+      <article id="doc-tut-21" class="doc-chapter">
+        <h1>21. Asynchronous Coroutines (Async / Await)</h1>
+        <p>
+          Asynchronous programming in Unfish is powered by <code>async fn</code> and <code>await</code>, desugaring to cooperative coroutine fibers and channel-based rendezvous under the centralized runtime scheduler.
+        </p>
+
+        <div class="code-runner">
+          <div class="runner-header">
+            <span class="runner-title">tut21_async_await.uf</span>
+            <div class="runner-actions">
+              <button class="btn btn-primary btn-sm btn-run-example">▶ Run in Place</button>
+              <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
+            </div>
+          </div>
+          <textarea class="runner-editor" rows="18" spellcheck="false">async fn fetch_api(endpoint):
+    say f"[HTTP Async] Fetching from {endpoint}..."
+    yield
+    return {"status": 200, "data": f"Payload from {endpoint}"}
+
+async fn main_flow():
+    say "[Main] Starting concurrent async requests"
+    let req1 = await fetch_api("/users/1")
+    let req2 = await fetch_api("/orders/99")
+    say f"Request 1 Status: {req1.status} -&gt; {req1.data}"
+    say f"Request 2 Status: {req2.status} -&gt; {req2.data}"
+    say "[Main] Asynchronous workflows completed successfully"
+
+run_async(main_flow)</textarea>
+          <div class="runner-output"></div>
+        </div>
+      </article>
+
+      <!-- Chapter 22: Developer Tooling & LSP -->
+      <article id="doc-tut-22" class="doc-chapter">
+        <h1>22. Developer Tooling, Debugger &amp; Language Server</h1>
+        <p>
+          Unfish is equipped with a rich, self-contained developer toolchain built directly into the unified <code>unfish</code> executable:
+        </p>
+
+        <div class="tooling-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 1.5rem 0;">
+          <div class="tooling-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:1.2rem;">
+            <h3>🛠️ Language Server (LSP)</h3>
+            <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.75rem;">Implements LSP 3.17 over standard I/O for VS Code, Neovim, and Sublime with diagnostics, hover, completions, and formatting.</p>
+            <code>unfish lsp</code>
+          </div>
+          <div class="tooling-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:1.2rem;">
+            <h3>🐞 Interactive Debugger</h3>
+            <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.75rem;">Step-by-step interactive CLI debugger supporting breakpoints, frame inspection, local variable inspection, and bytecode stepping.</p>
+            <code>unfish debug app.uf</code>
+          </div>
+          <div class="tooling-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:1.2rem;">
+            <h3>✨ Code Formatter</h3>
+            <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.75rem;">Canonical, deterministic indentation and syntax formatter with in-place rewriting.</p>
+            <code>unfish format -i app.uf</code>
+          </div>
+          <div class="tooling-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:1.2rem;">
+            <h3>🧪 Conformance Test Runner</h3>
+            <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.75rem;">High-speed test runner executing test suites with ANSI progress and microsecond execution metrics.</p>
+            <code>unfish test tests/</code>
+          </div>
+          <div class="tooling-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:1.2rem;">
+            <h3>📦 Package Manager</h3>
+            <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.75rem;">Dependency management, project scaffolding, and semantic version validation.</p>
+            <code>unfish pkg init my_app</code>
+          </div>
+          <div class="tooling-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:1.2rem;">
+            <h3>⚡ Native AOT Transpiler</h3>
+            <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.75rem;">Transpiles Unfish source into standalone, dependency-free ANSI C99 or bare-metal ARM firmware.</p>
+            <code>unfish emit-c -o app.c app.uf</code>
+          </div>
         </div>
       </article>
 

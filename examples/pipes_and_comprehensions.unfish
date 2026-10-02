@@ -1,0 +1,54 @@
+## Unfish Modern Functional Ergonomics: Pipe Operator (|>) & Comprehensions
+## Demonstrates data transformation pipelines, list comprehensions, and map comprehensions.
+
+say "=== 1. Forward Pipeline Operator (|>) ==="
+
+function square(n):
+    return n * n
+
+function is_even(n):
+    return n % 2 == 0
+
+function multiply_by(val, factor):
+    return val * factor
+
+# Pipelines flow naturally from left to right:
+let result = 5 |> square |> multiply_by(2)
+say f"5 squared then doubled: {result}" # (5 * 5) * 2 = 50
+
+# Pipeline with string built-ins:
+let clean_text = "   unfish programming language   " |> trim |> to_upper
+say f"Cleaned text: '{clean_text}'"
+
+say "\n=== 2. List Comprehensions ==="
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# Transform every element:
+let squares = [x * x for x in [1, 2, 3, 4, 5]]
+say f"Squares: {squares}"
+
+# Filter elements with 'if':
+let even_squares = [x * x for x in numbers if is_even(x)]
+say f"Even squares: {even_squares}"
+
+# Nested comprehension (Cartesian product):
+let coordinates = [f"({x}, {y})" for x in [1, 2] for y in [10, 20]]
+say f"Grid coordinates: {coordinates}"
+
+say "\n=== 3. Map Comprehensions ==="
+let words = ["apple", "banana", "cherry", "date"]
+
+# Generate key-value dictionary mapping word to length:
+let word_lengths = {to_string(w): len(w) for w in words}
+say f"Word length dictionary: {word_lengths}"
+
+# Filtered map comprehension:
+let long_words = {to_string(w): len(w) for w in words if len(w) > 4}
+say f"Long words (> 4 chars):  {long_words}"
+
+say "\n=== 4. Combining Comprehensions with Pipes ==="
+# Filter words, count them, and format in a single fluid expression:
+let long_word_count = [w for w in words if len(w) > 4] |> len
+say f"Total long words counted via pipeline: {long_word_count}"
+
+say "Pipes and comprehensions demo complete!"

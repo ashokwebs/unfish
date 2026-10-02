@@ -1,0 +1,74 @@
+# Unfish Object-Oriented LRU (Least-Recently-Used) Cache Example
+# Demonstrates struct methods, mutable map manipulation, array filtering, and cache eviction
+
+struct LruCache:
+    capacity: Number
+    store: Map
+    order: Array
+
+    fn get(self, key):
+        if not has_key(self.store, key):
+            return null
+        
+        # Move key to most-recent position (tail of order array)
+        let new_order = []
+        for k in self.order:
+            if k != key:
+                push(new_order, k)
+        push(new_order, key)
+        self.order = new_order
+        
+        return self.store[key]
+
+    fn put(self, key, val):
+        if has_key(self.store, key):
+            self.store[key] = val
+            self.get(key) # Mark as recently used
+            return null
+
+        # Evict least-recently-used item if capacity reached
+        if len(self.order) >= self.capacity:
+            let oldest = self.order[0]
+            let remaining = []
+            for i in range(1, len(self.order)):
+                push(remaining, self.order[i])
+            self.order = remaining
+            delete(self.store, oldest)
+            say f"  [Eviction] Evicted least recently accessed key: {oldest}"
+
+        self.store[key] = val
+        push(self.order, key)
+        return null
+
+    fn display(self):
+        say f"  Cache state: {len(self.order)}/{self.capacity} entries. Order (oldest -> newest): {self.order}"
+
+# Demonstration
+say "=== Testing Unfish LRU Cache (Capacity = 3) ==="
+let cache = LruCache(3, {}, [])
+
+say "1. Inserting entries \"alpha\", \"beta\", \"gamma\":"
+cache.put("alpha", 100)
+cache.put("beta", 200)
+cache.put("gamma", 300)
+cache.display()
+
+say "\n2. Accessing \"alpha\" (makes \"alpha\" most recently used):"
+let val_alpha = cache.get("alpha")
+say f"  Retrieved \"alpha\" = {val_alpha}"
+cache.display()
+
+say "\n3. Inserting \"delta\" (triggers eviction of oldest entry \"beta\"):"
+cache.put("delta", 400)
+cache.display()
+
+say "\n4. Verifying eviction status:"
+let has_beta = cache.get("beta") != null
+let has_alpha = cache.get("alpha") != null
+let has_gamma = cache.get("gamma") != null
+let has_delta = cache.get("delta") != null
+
+say f"  Contains beta?  {has_beta}"
+say f"  Contains alpha? {has_alpha}"
+say f"  Contains gamma? {has_gamma}"
+say f"  Contains delta? {has_delta}"

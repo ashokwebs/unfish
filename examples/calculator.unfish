@@ -1,0 +1,97 @@
+# Unfish Recursive-Descent Expression Parser & Evaluator
+# Demonstrates Pratt/Recursive-Descent parsing techniques, string slicing, and arithmetic
+
+struct Token:
+    kind: String
+    val: String
+
+fn tokenize(expr_str):
+    let tokens = []
+    let i = 0
+    let n = len(expr_str)
+    let s = chars(expr_str)
+
+    while i < n:
+        let c = s[i]
+        if c == " " or c == "\t" or c == "\n":
+            i = i + 1
+        else if c == "+" or c == "-" or c == "*" or c == "/" or c == "(" or c == ")":
+            push(tokens, Token(c, c))
+            i = i + 1
+        else if c >= "0" and c <= "9":
+            let num = ""
+            while i < n and (s[i] >= "0" and s[i] <= "9" or s[i] == "."):
+                num = num + s[i]
+                i = i + 1
+            push(tokens, Token("NUM", num))
+        else:
+            error(f"Unexpected character: {c}")
+    push(tokens, Token("EOF", ""))
+    return tokens
+
+struct Parser:
+    tokens: Array
+    pos: Number
+
+    fn peek(self):
+        return self.tokens[self.pos]
+
+    fn advance(self):
+        let t = self.peek()
+        self.pos = self.pos + 1
+        return t
+
+    fn parse_factor(self):
+        let tok = self.advance()
+        if tok.kind == "NUM":
+            return to_number(tok.val)
+        else if tok.kind == "(":
+            let val = self.parse_expr()
+            let close_tok = self.advance()
+            if close_tok.kind != ")":
+                error("Expected closing parenthesis ')'")
+            return val
+        else if tok.kind == "-":
+            return -self.parse_factor()
+        else:
+            error(f"Unexpected token in expression: {tok.kind}")
+
+    fn parse_term(self):
+        let left = self.parse_factor()
+        while self.peek().kind == "*" or self.peek().kind == "/":
+            let op = self.advance().kind
+            let right = self.parse_factor()
+            if op == "*":
+                left = left * right
+            else:
+                left = left / right
+        return left
+
+    fn parse_expr(self):
+        let left = self.parse_term()
+        while self.peek().kind == "+" or self.peek().kind == "-":
+            let op = self.advance().kind
+            let right = self.parse_term()
+            if op == "+":
+                left = left + right
+            else:
+                left = left - right
+        return left
+
+fn evaluate(expression_string):
+    let toks = tokenize(expression_string)
+    let p = Parser(toks, 0)
+    return p.parse_expr()
+
+# Test computations
+let test_cases = [
+    "3 + 5 * 2",
+    "(10 + 20) / 6",
+    "100 - 4 * (5 + 3) + 12 / 4",
+    "-5 + 15"
+]
+
+say "=== Unfish Calculator Expression Engine ==="
+for expr in test_cases:
+    let result = evaluate(expr)
+    say f"  {expr} = {result}"

@@ -8,6 +8,7 @@ The project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Stack VM Compiler — Match Statement Operand Stack Leakage on Guard Failure**: In `src/compiler/uf_compiler.c`, when pattern arms in `UF_STMT_MATCH` failed after binding local variables (or when arm guards failed), the allocated locals remained on the VM operand stack, shifting subsequent arm slots and causing runtime type errors on guards. Implemented 2-pass pattern matching (literals tested before variables bound) and cleanup of local variables on guard failure using `OP_JUMP_IF_FALSE`.
 - **Bytecode Compilers (Stack VM and Register VM) — Internal Limits Silently Miscompiled Nested Functions**: Both bytecode compilers track failure in a per-compiler `had_error` flag, but a *nested* function body got its own compiler whose flag was never read by the enclosing one. A function that blew an internal limit (more than 255 locals, or — in the register VM — an expression needing more than 250 of the 250 virtual registers) therefore left the outer compiler emitting a closure over half-built bytecode, which the VM then happily ran. The observable result was a wrong answer with no diagnostic and a **success exit code**: a 300-local function that returns `7` printed `null` under both VMs while the AST interpreter and the native C99 backend printed `7`. The register allocator made this worse by returning register 0 on exhaustion — the slot holding the live closure — so the corruption started before the limit was even reported.
   - Nested-function failures now propagate to the enclosing compiler at every site that builds one (function expressions, function statements, and struct/impl methods), aborting the whole compile.
   - Every internal limit now reports a real, located diagnostic naming the function and the limit (e.g. `Too many local variables in function 'f' (limit is 255); split it into smaller functions`) instead of only setting a silent flag. This covers the local, upvalue, register, jump-distance, loop-size, and match-arm-test limits in both compilers.
@@ -30,6 +31,28 @@ The project adheres to [Semantic Versioning](https://semver.org/).
 - **Native C99 Runtime — Maps Are Now Actually Hash Maps**: `UfRtMap` carried the shape of a hash table (`entries`, `capacity`, a 75% load factor, growth by doubling) but never hashed anything: every lookup, insert, membership test, and delete scanned the whole table comparing keys with `strcmp`, and insertion took the first free slot. Map-heavy native programs were therefore O(n) per operation and O(n²) overall — the `hash_map_stress` benchmark ran **35x slower natively (1.179s) than on either VM (0.033s)**, inverting the entire premise of the native tier. Keys (always strings) are now hashed with FNV-1a into an open-addressed table probed linearly from the hash, with the cached hash compared before the key itself, deletion leaving a tombstone so probe chains stay intact, and tombstones counted toward the load factor so a churning map still grows. This is the structure ADR 014 (`docs/DECISIONS.md`) already specifies for Unfish maps — open addressing, linear probing, power-of-two capacities, 75% load factor, 32-bit FNV-1a for string keys — which the interpreter/VM map had always implemented and the native runtime had not. `hash_map_stress` went from 1.179s to **0.017s (~69x)** and `map_operations` from 0.097s to 0.009s (~11x); native is no longer slower than either VM on any of the 13 benchmarks (it had been the slowest tier on both map-heavy ones). Map semantics are unchanged — insertion-order iteration, `keys`/`values`, `has_key`, `delete`, re-insertion after delete, and stringification all still match the interpreter byte-for-byte.
 
 ### Added
+- **6-Volume Comprehensive Technical Reference Compendium (`docs/`)**:
+  - **`docs/INDEX.md`**: Master Table of Contents and Compendium Navigator mapping all 28 chapters across 6 volumes.
+  - **`docs/COOKBOOK.md`**: 25 comprehensive production-grade recipes across algorithms, data wrangling, systems buffers, networking mocks, and concurrency.
+  - **`docs/CONCURRENCY.md`**: Complete Concurrency & Async Architecture Manual covering M:1 cooperative fibers, CSP channels, scheduler finite automaton, and deadlock detection.
+  - **`docs/SYSTEMS_PROGRAMMING.md`**: Complete Systems & Low-Level Programming Manual covering raw byte buffers, endianness, bitwise manipulation, C99 ABI, and bare-metal ARM Cortex-M microcontrollers.
+  - **`docs/INTERNALS_GUIDE.md`**: The Unfish Hacker's Guide to Compiler & VM Internals with architectural blueprints, scanner mechanics, Pratt parsing tables, dual bytecode pipelines, and step-by-step feature guides.
+  - **`docs/NATIVE_COMPILER.md`**: Native C99 Transpiler, WebAssembly & Embedded Manual.
+  - Overhaul and encyclopedic expansion of all 21 core architectural manuals, scaling the documentation suite to 51,500+ words across 7,650+ lines.
+- **Interactive CLI & Web Learning Platform Expansion**:
+  - Expanded interactive hands-on CLI tutorial (`unfish learn`) from 10 to 15 lessons (adding pipelines, traits, byte buffers, string interpolation, and async functions).
+  - Expanded web documentation portal (`web/docs/index.html`) with Chapters 18 through 22, including in-place WebAssembly execution runners for traits, pipelines, systems buffers, async/await, and tooling.
+- **10 New Production-Grade Examples (`examples/`)**:
+  - `examples/calculator.unfish`: Recursive-descent expression parser and calculator with operator precedence.
+  - `examples/lru_cache.unfish`: Object-oriented LRU cache with struct methods and map tracking.
+  - `examples/binary_protocol.unfish`: Wire protocol serialization/deserialization with headers, checksums, and slicing.
+  - `examples/graph_algorithms.unfish`: Directed graph with BFS, DFS, and topological sorting.
+  - `examples/text_adventure.unfish`: Dungeon crawler simulation with structs, enums, pattern matching, and game state loops.
+  - `examples/concurrency.unfish`: Fiber spawning, channel communication, and cooperative scheduling.
+  - `examples/pattern_matching.unfish`: Enum sum types, guards, and wildcard matching.
+  - `examples/pipes_and_comprehensions.unfish`: Pipeline operator `|>` and list/map comprehensions.
+  - `examples/structs_traits.unfish`: Structs, methods, traits, and polymorphic dispatch.
+  - `examples/systems_buffers.unfish`: Byte buffers, little-endian read/write, and bitwise manipulation.
 - **Unfish Web Ecosystem (v2.1.0)**:
   - **Unfish Studio (`web/studio.html`)**: Flagship browser IDE featuring multi-file workspace (`unfish.toml`, `src/`, `tests/`), line numbers, clickable breakpoint gutters, auto-indentation, search/replace, 2-way visual block canvas, multi-engine execution (AST, VM, RegVM), step debugger, AST inspector, bytecode disassembler, tokens inspector, and shareable project URL hashes.
   - **Unfish Learn Platform (`web/learn.html`)**: Interactive learning platform featuring a 22-chapter progressive tutorial, in-place runnable code snippets, "Learn the Computer through Unfish" 5-layer pipeline visualizer (Tokens -> AST -> Scopes -> Bytecode ISA -> Memory & GC), searchable standard library reference, and instant search (<kbd>Ctrl+K</kbd>).

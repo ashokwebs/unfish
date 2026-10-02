@@ -1436,6 +1436,8 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
 
                 begin_scope(c);
 
+                int arm_start_locals = c->local_count;
+
                 if (arm->pattern->kind == UF_PAT_LITERAL) {
                     emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
                     emit_u16(c, (uint16_t)match_val_slot, line);
@@ -1506,22 +1508,19 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         }
                     }
 
+                    /* Pass 1: test literal fields before binding any variables */
                     for (size_t f = 0; f < arm->pattern->as.struct_pat.field_count; ++f) {
                         UfPattern* fp = arm->pattern->as.struct_pat.field_patterns[f];
-                        const char* fname = (field_names_lookup && f < field_names_count) ? field_names_lookup[f] : "";
-                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
-                        emit_u16(c, (uint16_t)match_val_slot, line);
-                        if (fname && fname[0] != '\0') {
-                            emit_constant(c, uf_val_string_cstr(c->rt, fname), line);
-                        } else {
-                            emit_constant(c, uf_val_number((double)f), line);
-                        }
-                        emit_byte(c, (uint8_t)OP_INDEX_GET, line);
-
-                        if (fp->kind == UF_PAT_VARIABLE) {
-                            add_local(c, fp->as.var_name, line);
-                            mark_initialized(c);
-                        } else if (fp->kind == UF_PAT_LITERAL) {
+                        if (fp->kind == UF_PAT_LITERAL) {
+                            const char* fname = (field_names_lookup && f < field_names_count) ? field_names_lookup[f] : "";
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            if (fname && fname[0] != '\0') {
+                                emit_constant(c, uf_val_string_cstr(c->rt, fname), line);
+                            } else {
+                                emit_constant(c, uf_val_number((double)f), line);
+                            }
+                            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
                             compile_expr(c, fp->as.literal);
                             emit_byte(c, (uint8_t)OP_EQ, line);
                             if (fail_jump_count < 256) {
@@ -1534,19 +1533,34 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                             emit_byte(c, (uint8_t)OP_POP, line);
                         }
                     }
+
+                    /* Pass 2: bind variable fields now that literals matched */
+                    for (size_t f = 0; f < arm->pattern->as.struct_pat.field_count; ++f) {
+                        UfPattern* fp = arm->pattern->as.struct_pat.field_patterns[f];
+                        if (fp->kind == UF_PAT_VARIABLE) {
+                            const char* fname = (field_names_lookup && f < field_names_count) ? field_names_lookup[f] : "";
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            if (fname && fname[0] != '\0') {
+                                emit_constant(c, uf_val_string_cstr(c->rt, fname), line);
+                            } else {
+                                emit_constant(c, uf_val_number((double)f), line);
+                            }
+                            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+                            add_local(c, fp->as.var_name, line);
+                            mark_initialized(c);
+                        }
+                    }
                 } else if (arm->pattern->kind == UF_PAT_ARRAY) {
                     size_t normal_count = arm->pattern->as.array_pat.has_rest ? (arm->pattern->as.array_pat.count > 0 ? arm->pattern->as.array_pat.count - 1 : 0) : arm->pattern->as.array_pat.count;
+                    /* Pass 1: test literal elements */
                     for (size_t f = 0; f < normal_count; ++f) {
                         UfPattern* ep = arm->pattern->as.array_pat.elements[f];
-                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
-                        emit_u16(c, (uint16_t)match_val_slot, line);
-                        emit_constant(c, uf_val_number((double)f), line);
-                        emit_byte(c, (uint8_t)OP_INDEX_GET, line);
-
-                        if (ep->kind == UF_PAT_VARIABLE) {
-                            add_local(c, ep->as.var_name, line);
-                            mark_initialized(c);
-                        } else if (ep->kind == UF_PAT_LITERAL) {
+                        if (ep->kind == UF_PAT_LITERAL) {
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            emit_constant(c, uf_val_number((double)f), line);
+                            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
                             compile_expr(c, ep->as.literal);
                             emit_byte(c, (uint8_t)OP_EQ, line);
                             if (fail_jump_count < 256) {
@@ -1557,8 +1571,18 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                                               "simplify the pattern or split the match");
                             }
                             emit_byte(c, (uint8_t)OP_POP, line);
-                        } else if (ep->kind == UF_PAT_WILDCARD) {
-                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    }
+                    /* Pass 2: bind variable elements */
+                    for (size_t f = 0; f < normal_count; ++f) {
+                        UfPattern* ep = arm->pattern->as.array_pat.elements[f];
+                        if (ep->kind == UF_PAT_VARIABLE) {
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            emit_constant(c, uf_val_number((double)f), line);
+                            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+                            add_local(c, ep->as.var_name, line);
+                            mark_initialized(c);
                         }
                     }
                     if (arm->pattern->as.array_pat.has_rest) {
@@ -1574,17 +1598,14 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         }
                     }
                 } else if (arm->pattern->kind == UF_PAT_MAP) {
+                    /* Pass 1: test literal values */
                     for (size_t f = 0; f < arm->pattern->as.map_pat.count; ++f) {
                         UfPattern* vp = arm->pattern->as.map_pat.values[f];
-                        emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
-                        emit_u16(c, (uint16_t)match_val_slot, line);
-                        emit_constant(c, uf_val_string_cstr(c->rt, arm->pattern->as.map_pat.keys[f]), line);
-                        emit_byte(c, (uint8_t)OP_INDEX_GET, line);
-
-                        if (vp->kind == UF_PAT_VARIABLE) {
-                            add_local(c, vp->as.var_name, line);
-                            mark_initialized(c);
-                        } else if (vp->kind == UF_PAT_LITERAL) {
+                        if (vp->kind == UF_PAT_LITERAL) {
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            emit_constant(c, uf_val_string_cstr(c->rt, arm->pattern->as.map_pat.keys[f]), line);
+                            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
                             compile_expr(c, vp->as.literal);
                             emit_byte(c, (uint8_t)OP_EQ, line);
                             if (fail_jump_count < 256) {
@@ -1595,22 +1616,49 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                                               "simplify the pattern or split the match");
                             }
                             emit_byte(c, (uint8_t)OP_POP, line);
-                        } else if (vp->kind == UF_PAT_WILDCARD) {
-                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                    }
+                    /* Pass 2: bind variable values */
+                    for (size_t f = 0; f < arm->pattern->as.map_pat.count; ++f) {
+                        UfPattern* vp = arm->pattern->as.map_pat.values[f];
+                        if (vp->kind == UF_PAT_VARIABLE) {
+                            emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                            emit_u16(c, (uint16_t)match_val_slot, line);
+                            emit_constant(c, uf_val_string_cstr(c->rt, arm->pattern->as.map_pat.keys[f]), line);
+                            emit_byte(c, (uint8_t)OP_INDEX_GET, line);
+                            add_local(c, vp->as.var_name, line);
+                            mark_initialized(c);
                         }
                     }
                 }
 
+                int guard_fail_jump = -1;
                 if (arm->guard) {
                     compile_expr(c, arm->guard);
-                    if (fail_jump_count < 256) {
-                        fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                    int arm_locals = c->local_count - arm_start_locals;
+                    if (arm_locals > 0) {
+                        int guard_fail = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                        emit_byte(c, (uint8_t)OP_POP, line); /* pop true when guard passes */
+                        int guard_pass_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
+
+                        patch_jump(c, guard_fail);
+                        emit_byte(c, (uint8_t)OP_POP, line); /* pop false */
+                        for (int p = 0; p < arm_locals; ++p) {
+                            emit_byte(c, (uint8_t)OP_POP, line);
+                        }
+                        guard_fail_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
+
+                        patch_jump(c, guard_pass_jump);
                     } else {
-                        compile_error(c, line,
-                                      "Match arm has too many pattern tests (limit is 256); "
-                                      "simplify the pattern or split the match");
+                        if (fail_jump_count < 256) {
+                            fail_jumps[fail_jump_count++] = emit_jump(c, (uint8_t)OP_JUMP_IF_FALSE, line);
+                        } else {
+                            compile_error(c, line,
+                                          "Match arm has too many pattern tests (limit is 256); "
+                                          "simplify the pattern or split the match");
+                        }
+                        emit_byte(c, (uint8_t)OP_POP, line);
                     }
-                    emit_byte(c, (uint8_t)OP_POP, line);
                 }
 
                 compile_stmt(c, arm->body);
@@ -1623,6 +1671,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                 }
                 if (fail_jump_count > 0) {
                     emit_byte(c, (uint8_t)OP_POP, line);
+                }
+                if (guard_fail_jump >= 0) {
+                    patch_jump(c, guard_fail_jump);
                 }
             }
 

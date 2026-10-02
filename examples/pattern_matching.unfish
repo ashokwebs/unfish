@@ -1,0 +1,74 @@
+## Unfish Pattern Matching & Algebraic Data Types Example
+## Demonstrates match statements, enum sum types, guards, and wildcard patterns.
+
+# 1. Define an algebraic sum type (enum with payloads)
+enum Shape:
+    Circle(radius)
+    Rectangle(width, height)
+    Point
+
+# 2. Pattern matching with value extraction and calculations
+function area(shape):
+    match shape:
+        when Shape.Circle(r):
+            return 3.14159 * r * r
+        when Rectangle(w, h):
+            return w * h
+        when Point:
+            return 0
+        else:
+            return -1
+
+let c = Circle(5)
+let r = Rectangle(4, 6)
+let p = Shape.Point
+
+say f"Circle area:    {area(c)}"
+say f"Rectangle area: {area(r)}"
+say f"Point area:     {area(p)}"
+
+# 3. Numeric matching with conditional guards ('if')
+function classify_number(n):
+    match n:
+        when 0:
+            say "Number is exactly zero"
+        when x if x > 100:
+            say f"Number {x} is huge (> 100)"
+        when x if x > 0:
+            say f"Number {x} is positive"
+        else:
+            say f"Number {n} is negative"
+
+say "\n--- Numeric Pattern Matching ---"
+classify_number(0)
+classify_number(42)
+classify_number(999)
+classify_number(-15)
+
+# 4. Struct pattern matching
+struct User:
+    name: String
+    role: String
+    level: Number
+
+function authenticate(user):
+    match user:
+        when User("Alice", "admin", lvl):
+            say f"Welcome SuperAdmin Alice (Level {lvl})"
+        when User(name, "admin", lvl):
+            say f"Welcome Admin {name}"
+        when User(name, role, lvl) if lvl >= 10:
+            say f"Welcome Veteran {name} ({role})"
+        else:
+            say "Standard user access"
+
+say "\n--- Struct Pattern Matching ---"
+authenticate(User("Alice", "admin", 99))
+authenticate(User("Bob", "admin", 5))
+authenticate(User("Charlie", "moderator", 12))
+authenticate(User("Dave", "guest", 1))
+
+# 5. Wildcard catch-all pattern
+match "unexpected_token":
+    when _:
+        say "\nWildcard '_' successfully matched fallback!"

@@ -1,0 +1,37 @@
+## Unfish Concurrency Example: Cooperative Fibers and CSP Channels
+## Demonstrates lightweight threads (fibers), message channels, and cooperative scheduling.
+
+# 1. Define a worker function that communicates through a channel
+function worker(id, ch):
+    say f"Worker {id} started"
+    for i in range(1, 4):
+        let msg = f"Task {i} completed by Worker {id}"
+        send(ch, msg)
+        yield(id)
+    say f"Worker {id} finished"
+
+# 2. Create a channel with buffer capacity 10
+let ch = channel(10)
+say f"Created channel of type: {type_of(ch)}"
+
+# 3. Spawn multiple cooperative fibers
+let f1 = spawn(worker, 1, ch)
+let f2 = spawn(worker, 2, ch)
+say f"Spawned fiber 1: {type_of(f1)}"
+say f"Spawned fiber 2: {type_of(f2)}"
+
+# 4. Run the cooperative scheduler to execute all queued fibers
+say "Running scheduler..."
+let executed_count = run_scheduler()
+say f"Scheduler finished executing {executed_count} fibers"
+
+# 5. Read back all results enqueued into the channel
+say "\n--- Reading messages from channel ---"
+while true:
+    let item = recv(ch)
+    if item == null:
+        break
+    say f"Received: {item}"
+
+close_channel(ch)
+say "Concurrency demo complete!"

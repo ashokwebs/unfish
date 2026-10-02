@@ -1,0 +1,89 @@
+# Unfish Binary Protocol Wire Framing & Codec Example
+# Demonstrates low-level byte buffers, endian-explicit serialization, slicing, and checksums
+
+let MAGIC_HEADER = 1430664008 # 0x55465348 ("UFSH") in little-endian u32
+
+struct Packet:
+    opcode: Number
+    payload: String
+
+fn serialize_packet(opcode, payload_text):
+    let payload_bytes = buffer_from_string(payload_text)
+    let body_len = buffer_size(payload_bytes)
+    let total_len = 4 + 2 + 4 + body_len + 2
+    let wire_buf = buffer(total_len)
+
+    # 1. Magic Header (4 bytes, offset 0)
+    buffer_write_u32_le(wire_buf, 0, MAGIC_HEADER)
+
+    # 2. Opcode (2 bytes, offset 4)
+    buffer_write_u16_le(wire_buf, 4, opcode)
+
+    # 3. Payload Length (4 bytes, offset 6)
+    buffer_write_u32_le(wire_buf, 6, body_len)
+
+    # 4. Payload Body (N bytes, offset 10)
+    for i in range(body_len):
+        buffer_set(wire_buf, 10 + i, buffer_get(payload_bytes, i))
+
+    # 5. XOR Checksum of payload (2 bytes at 10 + body_len)
+    let chk = 0
+    for i in range(body_len):
+        chk = bxor(chk, buffer_get(payload_bytes, i))
+    buffer_write_u16_le(wire_buf, 10 + body_len, chk)
+
+    return wire_buf
+
+fn deserialize_packet(wire_buf):
+    let total_size = buffer_size(wire_buf)
+    if total_size < 12:
+        error("Packet frame too short: minimum header size is 12 bytes")
+
+    # Verify Magic Header
+    let magic = buffer_read_u32_le(wire_buf, 0)
+    if magic != MAGIC_HEADER:
+        error("Corrupted wire frame: invalid magic header")
+
+    let opcode = buffer_read_u16_le(wire_buf, 4)
+    let body_len = buffer_read_u32_le(wire_buf, 6)
+
+    if total_size != 4 + 2 + 4 + body_len + 2:
+        error("Frame length mismatch with declared body size")
+
+    # Extract Body Slice
+    let body_slice = buffer_slice(wire_buf, 10, body_len)
+    let payload_text = buffer_to_string(body_slice)
+
+    # Verify Checksum
+    let received_chk = buffer_read_u16_le(wire_buf, 10 + body_len)
+    let computed_chk = 0
+    for i in range(body_len):
+        computed_chk = bxor(computed_chk, buffer_get(body_slice, i))
+
+    if received_chk != computed_chk:
+        error("Packet checksum failed: data corruption detected")
+
+    return Packet(opcode, payload_text)
+
+# Demonstration
+say "=== Testing Unfish Binary Wire Framing Protocol ==="
+
+let messages = [
+    {"op": 1, "msg": "HELLO_SERVER"},
+    {"op": 2, "msg": "AUTH_TOKEN_SECRET_9876"},
+    {"op": 99, "msg": "DISCONNECT"}
+]
+
+for item in messages:
+    let op_code = item["op"]
+    let expected_msg = item["msg"]
+    let raw_frame = serialize_packet(op_code, expected_msg)
+    let frame_len = buffer_size(raw_frame)
+    say f"Serialized Opcode {op_code}: {frame_len} bytes"
+    say f"  Hex Dump: {buffer_to_hex(raw_frame)}"
+
+    # Deserialize and verify
+    let restored = deserialize_packet(raw_frame)
+    say f"  Restored -> Opcode: {restored.opcode}, Payload: {restored.payload}"
+    let matches = restored.payload == expected_msg
+    say f"  Integrity Check: {matches}\n"

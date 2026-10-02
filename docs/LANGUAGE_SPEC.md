@@ -1,248 +1,421 @@
-# UNFISH — FORMAL LANGUAGE SPECIFICATION
-
-**Version:** 1.7.0  
-**Status:** Canonical Reference
+# UNFISH — FORMAL LANGUAGE SPECIFICATION & REFERENCE MANUAL
 
 ---
 
-## 1. Feature Status Inventory
+## 1. Introduction & Notation
 
-| Feature | Status | Implementation Reference |
-|---|---|---|
-| UTF-8 Source Encoding | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
-| Comments (`# ...`) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
-| Indentation (Off-Side Rule) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` (`INDENT`, `DEDENT`, `NEWLINE`) |
-| Identifiers & Keywords | **IMPLEMENTED** | `src/lexer/uf_token.c` |
-| Numeric Literals (Integers, Floats, Scientific) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` (64-bit IEEE 754) |
-| String Literals (`"..."` with `\n`, `\t`, `\"`, `\\`, `\uXXXX`) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
-| Multi-line Strings (`"""..."""`) | **IMPLEMENTED** | `src/lexer/uf_lexer.c` |
-| String Interpolation (`f"Hello {name}"`) | **IMPLEMENTED** | `src/lexer/uf_lexer.c`, `src/parser/uf_parser.c` |
-| Boolean Literals (`true`, `false`) | **IMPLEMENTED** | `src/lexer/uf_token.c` |
-| Null Literal (`null`) | **IMPLEMENTED** | `src/lexer/uf_token.c` |
-| Arithmetic Ops (`+`, `-`, `*`, `/`, `%`) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c`, `src/vm/uf_vm.c`, `src/codegen/uf_emit_c.c` |
-| Equality & Relational Ops (`==`, `!=`, `<`, `<=`, `>`, `>=`) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c`, `src/vm/uf_vm.c`, `src/codegen/uf_emit_c.c` |
-| Logical Operators (`and`, `or`, `not` with short-circuit) | **IMPLEMENTED** | `src/interpreter/uf_interpreter.c`, `src/vm/uf_vm.c`, `src/codegen/uf_emit_c.c` |
-| Variable Declarations (`let x = ...`, `let x: T = ...`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/semantic/uf_semantic.c` |
-| Variable Assignment (`x = ...`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| Destructuring (`let [a, b] = arr`, `let {x, y} = obj`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c`, `src/codegen/uf_emit_c.c` |
-| Output Statement (`say <expr>`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| Conditionals (`if / else / else if`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| While Loops (`while <cond>:`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| Repeat Loops (`repeat <n> times:`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| For-In Loops (`for x in arr:`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| Functions & Lexical Closures | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_runtime.c` |
-| Function Hoisting (Top-level & Mutually Recursive) | **IMPLEMENTED** | `src/semantic/uf_semantic.c`, `src/interpreter/uf_interpreter.c` |
-| Default Parameters (`fn greet(name="World"):`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_runtime.c` |
-| Return Statements (`return [<expr>]`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c` |
-| Exception Handling (`try / catch / finally`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c`, `src/vm/uf_vm.c` |
-| Arrays & Indexing (`[1, 2, 3]`, `arr[0]`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c` |
-| Hash Maps (`{"k": v}`, `m.k`, `m["k"]`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c` |
-| Modules & Imports (`import m`, `from m import a, b`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_module.c` |
-| Gradual Type Annotations (`x: Number`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/semantic/uf_semantic.c` |
-| Struct Declarations & Methods (`struct Point: fn dist(self):`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c`, `src/codegen/uf_emit_c.c` |
-| Enums & Sum Types / ADTs (`enum Result: Ok(val), Err(msg)`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/runtime/uf_value.c`, `src/codegen/uf_emit_c.c` |
-| Pattern Matching (`match val: when pat: ...`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/interpreter/uf_interpreter.c`, `src/compiler/uf_compiler.c` |
-| Cooperative Concurrency (`spawn`, `yield`, `channel`) | **IMPLEMENTED** | `src/runtime/uf_fiber.c`, `src/runtime/uf_stdlib.c`, `src/codegen/unfish_runtime.h` |
-| Async / Await & Promises (`async function`, `await`, `run_async`) | **IMPLEMENTED** | `src/runtime/uf_fiber.c`, `src/interpreter/uf_interpreter.c`, `src/vm/uf_vm.c`, `src/vm2/uf_regvm.c`, `src/codegen/uf_emit_c.c` |
-| Systems & Byte Buffers (`buffer`, `u16`, `u32`, bitwise) | **IMPLEMENTED** | `src/runtime/uf_stdlib.c`, `src/codegen/unfish_runtime.h` |
-| Spread / Rest Operator (`...args`, `...arr`, `...map`) | **IMPLEMENTED** | `src/parser/uf_parser.c`, `src/compiler/uf_compiler.c`, `src/interpreter/uf_interpreter.c`, `src/codegen/uf_emit_c.c` |
-| Standard Library Built-ins & Modules | **IMPLEMENTED** | `src/stdlib/uf_mod_sys.c`, `uf_mod_fs.c`, `uf_mod_random.c`, `uf_mod_time.c`, `uf_mod_json.c` |
+This document provides the definitive, formal language specification for **Unfish**. It is written for compiler implementors, language designers, educators, and advanced developers.
+
+### Grammar Notation (Extended Backus-Naur Form)
+Grammar productions in this specification use standard EBNF notation:
+* `Rule = Production ;` defines a grammar rule.
+* `[ Item ]` denotes an optional element (zero or one occurrence).
+* `{ Item }` denotes repetition (zero or more occurrences).
+* `Item1 | Item2` denotes alternation (either Item1 or Item2).
+* `'literal'` denotes a terminal token.
+* `( Item1 Item2 )` groups items.
 
 ---
 
-## 2. Lexical Grammar
+## 2. Lexical Structure
 
-### 2.1. Character Set & Encoding [IMPLEMENTED]
-Source files must be encoded in UTF-8.
+### 2.1. Source Encoding & Character Set
+Unfish source files must be encoded in valid **UTF-8**. Source files may optionally begin with a UTF-8 Byte Order Mark (BOM `0xEF, 0xBB, 0xBF`), which is silently discarded by the lexer.
 
-### 2.2. Whitespace & Newlines [IMPLEMENTED]
-* **Horizontal Whitespace**: Space (`U+0020`) and horizontal tab (`U+0009`). Spaces are standard (4 spaces per indentation level recommended). Mixed tabs and spaces on the same indentation line are strictly rejected with an informative diagnostic.
-* **Line Terminators**: LF (`\n`, `U+000A`) or CRLF (`\r\n`).
-* **Blank Lines**: Lines containing only whitespace and/or comments are ignored and do not emit `NEWLINE` or indentation tokens.
+### 2.2. Whitespace, Newlines & Indentation
+Unfish enforces block structure using indentation (the off-side rule), eliminating the need for curly braces `{}` or `begin`/`end` keywords:
 
-### 2.3. Comments [IMPLEMENTED]
-Comments begin with a hash character `#` and extend to the end of the physical line:
-```unfish
-# This is a comment
-let x = 42 # Inline comment
-```
+* **Whitespace**: Horizontal space characters (`' '` ASCII 32) and tabs (`'\t'` ASCII 9). Inside code lines, whitespace separates tokens.
+* **Line Terminators**: Standard Unix newline (`\n` ASCII 10) or Windows CRLF (`\r\n` ASCII 13, 10). Both are normalized to a logical `NEWLINE` token.
+* **Blank Lines**: Lines containing only whitespace and/or comments are completely ignored by the indentation scanner and do not emit indentation tokens.
+* **Logical Lines**: A single logical statement can span multiple physical lines if enclosed within matching parentheses `()`, brackets `[]`, or braces `{}`, or if an explicit trailing pipe operator `|>` appears at the end of the line.
 
-### 2.4. Indentation (Off-Side Rule) [IMPLEMENTED]
-Blocks of code are delimited by indentation changes. The lexer maintains an internal indentation stack:
-* At the beginning of each non-blank logical line, the lexer measures the column indentation.
-* If indentation is greater than the stack top: push current level, emit `INDENT`.
-* If indentation is equal to the stack top: emit no indentation token.
-* If indentation is less than the stack top: pop levels until a match is found. For each popped level, emit `DEDENT`. If the current indentation matches no previous level on the stack, an `IndentationError` is raised.
-* At the end of input (EOF), the lexer emits a `NEWLINE` (if the file did not terminate with one) followed by `DEDENT` tokens for every remaining level on the stack until level 0 is reached.
+#### The Indentation Stack Algorithm
+The lexer (`src/lexer/uf_lexer.c`) maintains an internal stack of indentation levels (column positions in spaces, with tab width configurable, default 4 spaces).
+1. At the beginning of each non-blank physical line, the lexer measures the leading whitespace column count $C$.
+2. Let $T$ be the top of the indentation stack.
+   * If $C > T$: Push $C$ onto the stack and emit an `INDENT` token.
+   * If $C == T$: Emit no indentation tokens.
+   * If $C < T$: Pop from the stack repeatedly until $T' == C$. For each popped level, emit a `DEDENT` token. If no matching level is found on the stack, report an `IndentationError` diagnostic.
+3. At the end of the source file (`EOF`), the lexer emits a `DEDENT` token for every remaining indentation level on the stack until only level 0 remains, followed by `EOF`.
 
-### 2.5. Identifiers [IMPLEMENTED]
-An identifier begins with an ASCII letter (`a-z`, `A-Z`) or an underscore (`_`), followed by any number of ASCII letters, digits (`0-9`), or underscores.
-
-### 2.6. Keywords [IMPLEMENTED]
-Reserved keywords:
-```
-and         as          break       catch       continue
-else        enum        false       fn          for
-from        function    if          import      in
-let         match       not         null        or
-repeat      return      say         struct      times
-true        try         when        while
-```
-
-### 2.7. Literals [IMPLEMENTED]
-* **Number**: decimal integers or floats, with an optional scientific/exponent suffix (e.g., `0`, `42`, `3.14159`, `1e10`, `6.022e23`, `1.5e-10`, `2.5E+3`).
-* **String**: delimited by `"..."` supporting `\n`, `\t`, `\"`, `\\`, and `\uXXXX` unicode code points.
-* **Multi-line String**: delimited by `"""..."""` preserving internal newlines and indentation.
-* **Format String**: `f"..."` supporting embedded `{expression}` interpolation.
-* **Boolean**: `true`, `false`.
-* **Null**: `null`.
-
-### 2.8. Destructuring [IMPLEMENTED]
-Destructuring allows binding variables to elements of arrays or properties of structs/maps.
-- **Array Destructuring**: `let [x, y] = array`
-- **Map/Struct Destructuring**: `let {a, b} = object`
-- **Rest Patterns**: `let [head, ...tail] = array`
-- **Wildcard Patterns**: `let [x, _, z] = array`
-- **Nested Patterns**: `let [[a, b], c] = [[1, 2], 3]`
-- **Match Integration**: `when [1, ...rest]:`
-- **Assignment**: `[a, b] = [b, a]`
-
-### 2.9. Enums & Sum Types [IMPLEMENTED]
-Enums declare enumerated types or algebraic sum types (tagged unions):
-- **Inline Syntax**: `enum Color: Red, Green, Blue`
-- **Sum Types with Payloads**:
+### 2.3. Comments & Docstrings
+Unfish provides two types of comments:
+* **Single-Line Comment**: Begins with `#` and continues to the end of the line. Ignored by the parser.
   ```unfish
-  enum Result:
-      Ok(value)
-      Err(message)
+  # This is a standard comment
+  let x = 10 # Inline comment
   ```
-- **Namespaced & Bare Construction**: `Color.Red`, `Result.Ok(42)`, `Red`, `Ok(42)`
-- **Pattern Matching**:
+* **Documentation Docstring**: Begins with `##` and continues to the end of the line. Attached to the immediately following declaration (function, struct, method, or module) by `unfish doc` and the Language Server Protocol:
   ```unfish
-  match r:
-      when Ok(val):
-          say val
-      when Err(msg):
-          say "Error: " + msg
+  ## Computes the Euclidean distance between two points.
+  ## Takes a Point instance and returns a floating-point number.
+  function distance(p1, p2):
+      return sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
   ```
-- **Introspection & Indexing**: `.tag`, `.name`, named payload properties (`r.value`), and numeric index access (`r[0]`).
-- **Structural Equality**: Deep recursive equality comparing definition identity, variant tag, and payload values.
+
+### 2.4. Identifiers & Keywords
+* **Identifiers**: Match the regular expression `[a-zA-Z_][a-zA-Z0-9_]*`. Case-sensitive.
+* **Reserved Keywords**:
+  ```
+  and          else         if           null         struct
+  async        enum         impl         or           trait
+  await        false        import       raise        true
+  break        finally      in           repeat       try
+  catch        for          let          return       while
+  continue     from         match        say          yield
+  elif         function     not          self
+  ```
+
+### 2.5. Literals
+
+#### Numbers
+Numbers in Unfish are represented internally as IEEE 754 64-bit double-precision floating-point values (`double`), capable of precisely representing integers up to $2^{53} - 1$ ($\pm 9,007,199,254,740,991$):
+* **Decimal Integer**: `0`, `42`, `1000000`
+* **Floating-Point**: `3.14159`, `0.5`, `.25`
+* **Scientific Notation**: `1e6`, `2.5e-3`, `1.0E+10`
+* **Hexadecimal**: `0x1A`, `0xFF00`, `0xDEADBEEF`
+* **Binary**: `0b1010`, `0b11110000`
+* **Octal**: `0o77`, `0o755`
+
+#### Strings
+Strings are UTF-8 encoded sequences of bytes:
+* **Single-Line String**: Enclosed in double quotes `"..."`.
+* **Escape Sequences**:
+  * `\n`: Line feed (0x0A)
+  * `\t`: Horizontal tab (0x09)
+  * `\r`: Carriage return (0x0D)
+  * `\"`: Double quote (0x22)
+  * `\\`: Backslash (0x5C)
+  * `\0`: Null byte (0x00)
+  * `\xHH`: Hexadecimal byte value (e.g. `\x1B` for ESC)
+* **String Interpolation (`f"..."`)**: Formatted string literals prefixed with `f` support dynamic expression embedding via `{expression}` and literal brace escaping via `{{` and `}}`:
+  ```unfish
+  let user = "Alice"
+  let score = 95
+  say f"User: {user}, Score: {score + 5}"
+  # Emits: User: Alice, Score: 100
+
+  # Multiline f-strings:
+  let multiline = f"""Results for {user}:
+  Score: {score}"""
+  ```
+
+#### Booleans & Null
+* `true`: Logical true.
+* `false`: Logical false.
+* `null`: Represents the absence of a value.
 
 ---
 
-## 3. Syntactic Grammar (EBNF) [IMPLEMENTED]
+## 3. Operator Precedence & Associativity
+
+The Unfish Pratt expression parser resolves operators according to 13 strict precedence tiers (from lowest to highest):
+
+| Precedence | Level Name | Operators | Associativity | Description |
+|---|---|---|---|---|
+| **1** | Pipe | `\|>` | Left | Forward pipeline data flow |
+| **2** | Logical OR | `or` | Left | Short-circuiting logical disjunction |
+| **3** | Logical AND | `and` | Left | Short-circuiting logical conjunction |
+| **4** | Equality | `==`, `!=` | None | Structural equality and inequality |
+| **5** | Relational | `<`, `<=`, `>`, `>=` | None | Comparison tests |
+| **6** | Bitwise OR | `bor` (fn) | Left | Bitwise inclusive OR |
+| **7** | Bitwise XOR | `bxor` (fn) | Left | Bitwise exclusive OR |
+| **8** | Bitwise AND | `band` (fn) | Left | Bitwise AND |
+| **9** | Bit Shifts | `shl`, `shr`, `sar` (fn)| Left | Bitwise shifts |
+| **10** | Additive | `+`, `-` | Left | Addition / String Concat, Subtraction |
+| **11** | Multiplicative | `*`, `/`, `%` | Left | Multiplication, Division, Modulo |
+| **12** | Unary Prefix | `-`, `not`, `bnot` | Right | Arithmetic negation, Logical NOT |
+| **13** | Primary / Call | `()`, `[]`, `.`, `await`| Left | Function calls, Indexing, Member access |
+
+---
+
+## 4. Formal EBNF Grammar
 
 ```ebnf
-Program        = { Statement | NEWLINE } , EOF ;
+(* ========================================================================= *)
+(* PROGRAM & TOP-LEVEL STRUCTURE                                             *)
+(* ========================================================================= *)
 
-Statement      = LetStmt
-               | AssignStmt
-               | IndexAssignStmt
-               | SayStmt
-               | IfStmt
-               | WhileStmt
-               | RepeatStmt
-               | ForStmt
-               | BreakStmt
-               | ContinueStmt
-               | FunctionStmt
-               | ReturnStmt
-               | TryCatchStmt
-               | StructStmt
-               | EnumStmt
-               | MatchStmt
-               | ImportStmt
-               | FromImportStmt
-               | ExprStmt ;
+Program         = { TopLevelItem } EOF ;
 
-Block          = ":" , NEWLINE , INDENT , { Statement | NEWLINE } , DEDENT ;
+TopLevelItem    = Stmt
+                | FunctionDecl
+                | StructDecl
+                | EnumDecl
+                | TraitDecl
+                | ImplDecl
+                | ImportStmt ;
 
-LetStmt        = "let" , ( identifier | DestructurePattern ) , [ ":" , TypeAnnotation ] , [ "=" , Expression ] , NEWLINE ;
+Block           = ':' NEWLINE INDENT { Stmt } DEDENT ;
+
+(* ========================================================================= *)
+(* STATEMENTS & DECLARATIONS                                                 *)
+(* ========================================================================= *)
+
+Stmt            = LetStmt
+                | AssignStmt
+                | IfStmt
+                | WhileStmt
+                | ForInStmt
+                | RepeatStmt
+                | ReturnStmt
+                | BreakStmt
+                | ContinueStmt
+                | RaiseStmt
+                | TryCatchStmt
+                | MatchStmt
+                | SayStmt
+                | ExprStmt ;
+
+LetStmt         = 'let' Pattern [ ':' TypeAnnotation ] '=' Expr NEWLINE ;
+
+AssignStmt      = LValue ( '=' | '+=' | '-=' | '*=' | '/=' | '%=' ) Expr NEWLINE ;
+
+LValue          = IDENTIFIER
+                | Expr '[' Expr ']'
+                | Expr '.' IDENTIFIER ;
+
+IfStmt          = 'if' Expr Block
+                  { 'elif' Expr Block }
+                  [ 'else' Block ] ;
+
+WhileStmt       = 'while' Expr Block ;
+
+ForInStmt       = 'for' ( IDENTIFIER | DestructurePattern ) 'in' Expr Block ;
+
+RepeatStmt      = 'repeat' Expr Block ;
+
+ReturnStmt      = 'return' [ Expr ] NEWLINE ;
+
+BreakStmt       = 'break' NEWLINE ;
+
+ContinueStmt    = 'continue' NEWLINE ;
+
+RaiseStmt       = 'raise' Expr NEWLINE ;
+
+TryCatchStmt    = 'try' Block
+                  'catch' IDENTIFIER Block
+                  [ 'finally' Block ] ;
+
+MatchStmt       = 'match' Expr ':' NEWLINE INDENT { MatchArm } DEDENT ;
+
+MatchArm        = MatchPattern [ 'if' Expr ] '=>' ( Stmt | Block ) ;
+
+SayStmt         = 'say' Expr NEWLINE ;
+
+ExprStmt        = Expr NEWLINE ;
+
+(* ========================================================================= *)
+(* FUNCTIONS, STRUCTS, TRAITS & ENUMS                                        *)
+(* ========================================================================= *)
+
+FunctionDecl    = [ 'async' ] 'function' IDENTIFIER [ GenericParams ] '(' [ ParamList ] ')' [ ':' TypeAnnotation ] Block ;
+
+ParamList       = Param { ',' Param } [ ',' RestParam ] ;
+Param           = IDENTIFIER [ ':' TypeAnnotation ] [ '=' Expr ] ;
+RestParam       = '...' IDENTIFIER ;
+
+StructDecl      = 'struct' IDENTIFIER [ GenericParams ] ':' NEWLINE INDENT
+                      { StructField | FunctionDecl }
+                  DEDENT ;
+
+StructField     = IDENTIFIER [ ':' TypeAnnotation ] NEWLINE ;
+
+EnumDecl        = 'enum' IDENTIFIER ':' NEWLINE INDENT
+                      { EnumVariant }
+                  DEDENT ;
+
+EnumVariant     = IDENTIFIER [ '(' [ ParamList ] ')' ] NEWLINE ;
+
+TraitDecl       = 'trait' IDENTIFIER [ GenericParams ] ':' NEWLINE INDENT
+                      { TraitMethod }
+                  DEDENT ;
+
+TraitMethod     = 'function' IDENTIFIER '(' [ ParamList ] ')' [ ':' TypeAnnotation ] NEWLINE ;
+
+ImplDecl        = 'impl' IDENTIFIER [ GenericParams ] 'for' IDENTIFIER ':' NEWLINE INDENT
+                      { FunctionDecl }
+                  DEDENT ;
+
+ImportStmt      = 'import' ModulePath [ 'as' IDENTIFIER ] NEWLINE
+                | 'from' ModulePath 'import' ImportSymbolList NEWLINE ;
+
+ModulePath      = IDENTIFIER { '.' IDENTIFIER } | STRING_LITERAL ;
+ImportSymbolList = IDENTIFIER [ 'as' IDENTIFIER ] { ',' IDENTIFIER [ 'as' IDENTIFIER ] } ;
+
+(* ========================================================================= *)
+(* EXPRESSIONS                                                               *)
+(* ========================================================================= *)
+
+Expr            = PipeExpr ;
+
+PipeExpr        = LogicalOrExpr { '|>' LogicalOrExpr } ;
+
+LogicalOrExpr   = LogicalAndExpr { 'or' LogicalAndExpr } ;
+
+LogicalAndExpr  = EqualityExpr { 'and' EqualityExpr } ;
+
+EqualityExpr    = RelationalExpr { ( '==' | '!=' ) RelationalExpr } ;
+
+RelationalExpr  = AdditiveExpr { ( '<' | '<=' | '>' | '>=' ) AdditiveExpr } ;
+
+AdditiveExpr    = MultiplicativeExpr { ( '+' | '-' ) MultiplicativeExpr } ;
+
+MultiplicativeExpr = UnaryExpr { ( '*' | '/' | '%' ) UnaryExpr } ;
+
+UnaryExpr       = ( '-' | 'not' ) UnaryExpr
+                | 'await' UnaryExpr
+                | CallIndexExpr ;
+
+CallIndexExpr   = PrimaryExpr { CallSuffix | IndexSuffix | DotSuffix } ;
+
+CallSuffix      = '(' [ ArgList ] ')' ;
+IndexSuffix     = '[' Expr ']' ;
+DotSuffix       = '.' IDENTIFIER ;
+
+ArgList         = ArgItem { ',' ArgItem } ;
+ArgItem         = [ '...' ] Expr ;
+
+PrimaryExpr     = NUMBER
+                | STRING
+                | 'true'
+                | 'false'
+                | 'null'
+                | 'self'
+                | IDENTIFIER
+                | '(' Expr ')'
+                | ArrayLiteral
+                | MapLiteral
+                | ComprehensionExpr
+                | AnonymousFunction ;
+
+ArrayLiteral    = '[' [ ArgList ] ']' ;
+
+MapLiteral      = '{' [ MapEntryList ] '}' ;
+MapEntryList    = MapEntry { ',' MapEntry } ;
+MapEntry        = ( IDENTIFIER | STRING | '[' Expr ']' ) ':' Expr
+                | '...' Expr ;
+
+ComprehensionExpr = '[' Expr 'for' IDENTIFIER 'in' Expr [ 'if' Expr ] ']' ;
+
+AnonymousFunction = 'function' '(' [ ParamList ] ')' [ ':' TypeAnnotation ] Block ;
+
+(* ========================================================================= *)
+(* PATTERNS & DESTRUCTURING                                                  *)
+(* ========================================================================= *)
+
+MatchPattern    = LiteralPattern
+                | VariablePattern
+                | WildcardPattern
+                | ArrayPattern
+                | MapPattern
+                | EnumPattern ;
+
+LiteralPattern  = NUMBER | STRING | 'true' | 'false' | 'null' ;
+VariablePattern = IDENTIFIER ;
+WildcardPattern = '_' ;
+ArrayPattern    = '[' [ PatternList ] ']' ;
+MapPattern      = '{' [ MapPatternList ] '}' ;
+EnumPattern     = IDENTIFIER '.' IDENTIFIER [ '(' [ PatternList ] ')' ] ;
+
 DestructurePattern = ArrayPattern | MapPattern ;
-ArrayPattern   = "[" , [ PatternElem , { "," , PatternElem } ] , "]" ;
-MapPattern     = "{" , [ MapPatternElem , { "," , MapPatternElem } ] , "}" ;
-PatternElem    = identifier | "_" | ( "..." , identifier ) | DestructurePattern ;
-MapPatternElem = identifier | ( "..." , identifier ) ;
-AssignStmt     = ( identifier | DestructurePattern ) , "=" , Expression , NEWLINE ;
-IndexAssignStmt= Expression , "[" , Expression , "]" , "=" , Expression , NEWLINE ;
-SayStmt        = "say" , Expression , NEWLINE ;
-BreakStmt      = "break" , NEWLINE ;
-ContinueStmt   = "continue" , NEWLINE ;
-ReturnStmt     = "return" , [ Expression ] , NEWLINE ;
-ImportStmt     = "import" , identifier , [ "as" , identifier ] , NEWLINE ;
-FromImportStmt = "from" , identifier , "import" , ImportSpecList , NEWLINE ;
-ImportSpecList = ImportSpec , { "," , ImportSpec } ;
-ImportSpec     = identifier , [ "as" , identifier ] ;
-ExprStmt       = Expression , NEWLINE ;
-
-StructStmt     = "struct" , identifier , ":" , NEWLINE , INDENT , { StructMember } , DEDENT ;
-StructMember   = StructField | MethodDecl ;
-StructField    = identifier , [ ":" , TypeAnnotation ] , NEWLINE ;
-MethodDecl     = ( "function" | "fn" ) , identifier , "(" , "self" , [ "," , ParamList ] , ")" , [ ":" , TypeAnnotation ] , Block ;
-EnumStmt       = "enum" , identifier , ":" , ( InlineVariants | BlockVariants ) ;
-InlineVariants = EnumVariant , { "," , EnumVariant } , NEWLINE ;
-BlockVariants  = NEWLINE , INDENT , { EnumVariant , NEWLINE } , DEDENT ;
-EnumVariant    = identifier , [ "(" , [ VariantFieldList ] , ")" ] ;
-VariantFieldList = VariantField , { "," , VariantField } ;
-VariantField   = identifier , [ ":" , TypeAnnotation ] ;
-MatchStmt      = "match" , Expression , ":" , NEWLINE , INDENT , { MatchArm } , DEDENT ;
-MatchArm       = "when" , Expression , Block ;
-
-IfStmt         = "if" , Expression , Block , [ "else" , ( Block | IfStmt ) ] ;
-WhileStmt      = "while" , Expression , Block ;
-RepeatStmt     = "repeat" , Expression , "times" , Block ;
-ForStmt        = "for" , identifier , "in" , Expression , Block ;
-FunctionStmt   = ( "function" | "fn" ) , identifier , "(" , [ ParamList ] , ")" , [ ":" , TypeAnnotation ] , Block ;
-TryCatchStmt   = "try" , Block , "catch" , identifier , Block ;
-
-ParamList      = ( Param , { "," , Param } , [ "," , RestParam ] ) | RestParam ;
-Param          = identifier , [ ":" , TypeAnnotation ] , [ "=" , Expression ] ;
-RestParam      = "..." , identifier , [ ":" , TypeAnnotation ] ;
-TypeAnnotation = identifier ;
-ArgList        = Argument , { "," , Argument } ;
-Argument       = Expression | SpreadExpr ;
-SpreadExpr     = "..." , Expression ;
-
-Expression     = LogicOr ;
-LogicOr        = LogicAnd , { "or" , LogicAnd } ;
-LogicAnd       = Equality , { "and" , Equality } ;
-Equality       = Comparison , { ( "==" | "!=" ) , Comparison } ;
-Comparison     = Term , { ( "<" | "<=" | ">" | ">=" ) , Term } ;
-Term           = Factor , { ( "+" | "-" ) , Factor } ;
-Factor         = Unary , { ( "*" | "/" | "%" ) , Unary } ;
-Unary          = ( "-" | "not" | "..." | "await" ) , Unary | Postfix ;
-Postfix        = Primary , { ( "(" , [ ArgList ] , ")" ) | ( "[" , Expression , "]" ) | ( "." , identifier ) } ;
-
-Primary        = number_literal
-               | string_literal
-               | "true"
-               | "false"
-               | "null"
-               | identifier
-               | ArrayLiteral
-               | MapLiteral
-               | FunctionExpr
-               | "(" , Expression , ")" ;
-
-ArrayLiteral   = "[" , [ ArrayElement , { "," , ArrayElement } ] , [ "," ] , "]" ;
-ArrayElement   = Expression | SpreadExpr ;
-MapLiteral     = "{" , [ MapEntry , { "," , MapEntry } ] , [ "," ] , "}" ;
-MapEntry       = ( ( identifier | Expression ) , ":" , Expression ) | SpreadExpr ;
-FunctionExpr   = [ "async" ] , "function" , [ identifier ] , "(" , [ ParamList ] , ")" , ":" , ( Block | Expression | ReturnStmt ) ;
 ```
 
 ---
 
-## 4. Operator Precedence Table [IMPLEMENTED]
+## 5. Semantic Rules & Execution Semantics
 
-| Precedence | Operator | Description | Associativity |
-|---|---|---|---|
-| 1 | `or` | Logical OR (short-circuit) | Left |
-| 2 | `and` | Logical AND (short-circuit) | Left |
-| 3 | `==`, `!=` | Equality | Left |
-| 4 | `<`, `<=`, `>`, `>=` | Relational | Left |
-| 5 | `+`, `-` | Addition, Subtraction, String Concatenation | Left |
-| 6 | `*`, `/`, `%` | Multiplication, Division, Modulo | Left |
-| 7 | `-` (prefix), `not`, `...` (spread), `await` | Unary negation, Logical NOT, Spread, Await | Right |
-| 8 | `()` (call), `[]` (index), `.` (dot) | Function Call, Subscript Indexing, Property Access | Left |
-| 9 | Literals, `[]`, `{}`, `(expr)` | Array/Map Literals, Grouping, Primaries | N/A |
+### 5.1. Variables & Scope
+1. **Declaration (`let`)**: `let name = expr` introduces a binding into the current lexical scope. Variable redeclaration in the same scope without shadowing is rejected by the semantic analyzer with an error diagnostic.
+2. **Lexical Scoping**: Inner scopes can read and mutate bindings from enclosing outer scopes.
+3. **Shadowing**: A declaration in an inner scope may shadow a declaration in an outer scope. User variables may cleanly shadow global built-in functions.
+4. **Hoisting**: Top-level function declarations are hoisted to the enclosing program or module scope. Functions can be called before their syntactic point of declaration, enabling mutual recursion:
+   ```unfish
+   function is_even(n):
+       if n == 0: return true
+       return is_odd(n - 1)
+
+   function is_odd(n):
+       if n == 0: return false
+       return is_even(n - 1)
+   ```
+
+### 5.2. Control Flow Semantics
+* **`if` / `elif` / `else`**: Evaluates conditions sequentially. Only values that are strictly `false` or `null` are considered falsy; all other values (including `0`, `""`, and `[]`) are truthy.
+* **`while cond:`**: Iterates while `cond` evaluates to a truthy value.
+* **`for item in iterable:`**: Iterates over elements of arrays, keys of maps, characters of strings, or ranges produced by `range(start, end)`. Supports pattern destructuring:
+  ```unfish
+  let pairs = [["a", 1], ["b", 2]]
+  for [key, val] in pairs:
+      say key + " -> " + str(val)
+  ```
+* **`repeat count:`**: Dedicated educational construct executing a block exactly `count` times (where `count` must evaluate to a positive integer).
+* **`break` / `continue`**: `break` immediately terminates the innermost enclosing loop; `continue` skips the remainder of the current iteration. Using either outside a loop is a compile-time semantic error.
+
+### 5.3. Functions, Closures & Parameters
+* **First-Class Citizens**: Functions are runtime values of kind `UF_VAL_FUNCTION` or `UF_VAL_CLOSURE`. They can be stored in variables, passed as arguments, returned from other functions, and stored in collections.
+* **Lexical Closures**: A function captures any local variables from enclosing scopes that it references. Captured variables remain accessible and mutable across the closure's entire lifetime even after the enclosing function returns.
+* **Default Arguments**: Function parameters may declare default values (`function f(x = 10)`). Default parameters must follow non-default parameters.
+* **Rest Parameters (`...rest`)**: Collects all remaining arguments into a dynamically allocated array. Must be the final parameter.
+* **Spread Arguments (`f(...args)`)**: Expands an array into individual function arguments at the call site.
+
+### 5.4. Pipe Operator (`|>`)
+Unfish provides the forward pipe operator `|>` to facilitate clear, readable data processing pipelines:
+```unfish
+# Equivalent to: say(to_upper(trim("  unfish  ")))
+"  unfish  " |> trim |> to_upper |> say
+```
+When piped into a function call with multiple arguments, the piped value becomes the first argument:
+```unfish
+# Equivalent to: filter(map(nums, double_fn), is_even)
+nums |> map(double_fn) |> filter(is_even)
+```
+
+### 5.5. Structs & Object-Oriented Semantics
+* **Declaration**: Structs declare named fields and associated methods.
+* **Constructors**: Invoking the struct name as a function constructs a new instance with fields initialized in declaration order:
+  ```unfish
+  struct Vector2:
+      x
+      y
+
+      function magnitude(self):
+          return sqrt(self.x * self.x + self.y * self.y)
+
+  let v = Vector2(3, 4)
+  say v.magnitude() # 5
+  ```
+* **The `self` Keyword**: The first parameter of every struct method must be named `self`, explicitly binding the instance on method dispatch. Calling a struct method without an explicit `self` parameter declaration triggers a compile-time diagnostic.
+
+### 5.6. Pattern Matching (`match`)
+The `match` construct provides multi-way branching based on value shape and type:
+```unfish
+match shape:
+    Circle(r) => PI * r * r
+    Rectangle(w, h) => w * h
+    Point(x, y) if x == y => 0
+    _ => -1
+```
+* **Exhaustiveness**: A wildcard `_` or variable pattern guarantees exhaustiveness.
+* **Guards**: `if <expr>` guards allow arbitrary boolean expressions to restrict pattern matching.
+
+### 5.7. Concurrency: Fibers & Channels
+Unfish provides cooperative user-space fibers:
+```unfish
+let ch = channel()
+
+spawn(function():
+    send(ch, "Message from fiber")
+)
+
+let msg = recv(ch)
+say msg # "Message from fiber"
+run_scheduler()
+```
+* `spawn(fn)` creates a new cooperative fiber.
+* `yield()` yields the CPU to the next scheduled fiber.
+* `channel(cap)` creates a message passing channel.
+* `send(ch, val)` sends a value to the channel.
+* `recv(ch)` receives a value from the channel.
+* `run_scheduler()` runs all queued fibers to completion.

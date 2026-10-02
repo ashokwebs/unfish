@@ -102,19 +102,33 @@ make bench
 
 ---
 
-## 📚 Technical Documentation
+## 📚 Technical Documentation & Systems Compendium
 
-Exhaustive architectural specifications and design records are documented in [`docs/`](docs/):
+The complete, book-length technical documentation suite is cataloged in the [**Master Documentation Index**](docs/INDEX.md):
 
-- [`docs/VISION.md`](docs/VISION.md) — Pedagogical philosophy and progression.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Decoupled pipeline architecture.
-- [`docs/LANGUAGE_SPEC.md`](docs/LANGUAGE_SPEC.md) — Formal EBNF grammar, lexical conventions, and operator table.
-- [`docs/TYPE_SYSTEM.md`](docs/TYPE_SYSTEM.md) — 4-tier gradual type system.
-- [`docs/MEMORY_MODEL.md`](docs/MEMORY_MODEL.md) — Compilation arenas and mark-sweep GC.
-- [`docs/RUNTIME.md`](docs/RUNTIME.md) — Environments (`UfEnv`), call frames, and error unwinding.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — Architectural Decision Records (ADRs 001 through 034).
-- [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) — Living inventory of all language milestones and health metrics.
-- [`CHANGELOG.md`](CHANGELOG.md) — Version history and roadmap releases.
+- [**`docs/INDEX.md`**](docs/INDEX.md) — Grand Master Table of Contents & Technical Manual Index.
+- [**`docs/VISION.md`**](docs/VISION.md) — Pedagogical philosophy, "Glass Box" paradigm, and curriculum integration.
+- [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) — Decoupled 5-backend pipeline, memory boundaries, and subsystem inventory.
+- [**`docs/LANGUAGE_SPEC.md`**](docs/LANGUAGE_SPEC.md) — Formal EBNF grammar, lexical rules, and 13-tier operator table.
+- [**`docs/VM.md`**](docs/VM.md) — 57-opcode Stack VM ISA and 256-register RegVM computed-goto architecture.
+- [**`docs/COMPILER.md`**](docs/COMPILER.md) — Bytecode compiler, scope resolution, peephole optimization, and `.ufc` caching.
+- [**`docs/NATIVE_COMPILER.md`**](docs/NATIVE_COMPILER.md) — Standalone C99 AOT transpiler, WebAssembly (WASI), and bare-metal ARM.
+- [**`docs/RUNTIME.md`**](docs/RUNTIME.md) — 16-byte tagged unions, heap objects, and cooperative fiber concurrency.
+- [**`docs/MEMORY_MODEL.md`**](docs/MEMORY_MODEL.md) — Compilation arenas, mark-sweep GC, and raw systems byte buffers.
+- [**`docs/STANDARD_LIBRARY.md`**](docs/STANDARD_LIBRARY.md) — Exhaustive reference encyclopedia for all 60+ built-ins and 6 modules.
+- [**`docs/TYPE_SYSTEM.md`**](docs/TYPE_SYSTEM.md) — 4-tier gradual typing, parametric generics, and trait bounds.
+- [**`docs/ERROR_MODEL.md`**](docs/ERROR_MODEL.md) — ANSI diagnostic squiggles, 2-D coordinates, and structured exception unwinding.
+- [**`docs/MODULES.md`**](docs/MODULES.md) — Module resolution algorithm, circular dependency detection, and `unfish.toml`.
+- [**`docs/TOOLING.md`**](docs/TOOLING.md) — Complete 22-command CLI reference, LSP 3.17 server, and profiler.
+- [**`docs/DEBUGGER.md`**](docs/DEBUGGER.md) — Source-level interactive step debugger and VM bytecode tracer.
+- [**`docs/BLOCKS.md`**](docs/BLOCKS.md) — Bidirectional AST ↔ JSON visual block round-tripping specification.
+- [**`docs/TESTING.md`**](docs/TESTING.md) — 4-tier verification hierarchy and 5-way differential parity harness.
+- [**`docs/PERFORMANCE.md`**](docs/PERFORMANCE.md) — 13-suite benchmark engineering analysis comparing all 5 backends.
+- [**`docs/SECURITY.md`**](docs/SECURITY.md) — Sandboxing model, capability-based I/O permissions, and resource quotas.
+- [**`docs/ROADMAP.md`**](docs/ROADMAP.md) — Milestone retrospective (Phases 0–10) and future horizons (JIT, M:N threads).
+- [**`docs/DECISIONS.md`**](docs/DECISIONS.md) — Architectural Decision Records (ADRs 001 through 038).
+- [**`docs/PROJECT_STATE.md`**](docs/PROJECT_STATE.md) — Living census of 38,629 lines of C99 and health dashboard.
+- [**`CHANGELOG.md`**](CHANGELOG.md) — Comprehensive version history and release ledger.
 
 ---
 
