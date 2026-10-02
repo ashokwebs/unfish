@@ -4,7 +4,7 @@
 
 ## 1. Executive Roadmap Summary
 
-The evolution of Unfish is divided into twelve disciplined architectural phases. As of release **v2.1.0**, Phases 0 through 10 are **100% complete, verified by 91/91 passing differential conformance tests, and fully operational across all platforms**.
+The evolution of Unfish is divided into twelve disciplined architectural phases. As of release **v2.1.0**, Phases 0 through 10 are **100% complete, verified by 95/95 passing differential conformance tests, and fully operational across all platforms**.
 
 This document records the completed milestone ledger and outlines future engineering horizons.
 

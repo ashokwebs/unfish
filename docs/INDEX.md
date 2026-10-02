@@ -225,7 +225,7 @@ This documentation suite is organized as a multi-volume, book-length technical c
 * [**Chapter 26: Codebase Inventory, Census & Health Metrics**](file:///home/charizard/unfish/docs/PROJECT_STATE.md)
   * Complete source code census: lines of code, file counts, and component breakdown
   * Subsystem completion matrix: 100% verified status across all components
-  * Conformance test results (91/91 passing differential tests)
+  * Conformance test results (95/95 passing differential tests)
   * Target platform support: Linux x86_64/ARM64, macOS, Windows MinGW, WASI WebAssembly, ARM Cortex-M
 
 ---

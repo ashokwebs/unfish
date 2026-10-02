@@ -1,182 +1,194 @@
-# UNFISH — VISION, PHILOSOPHY & PEDAGOGICAL ARCHITECTURE
+# UNFISH — THE ARCHITECTURAL VISION, PHILOSOPHY & PEDAGOGICAL MANIFESTO
+## The Definitive Treatise on the Unbroken Path of Computing Education
 
-> *"A learner can begin programming visually in Unfish, transition naturally into textual Unfish, and eventually use the same language to learn advanced programming, algorithms, runtime systems, compilers, operating systems, networking, and low-level computer concepts."*
-
----
-
-## 1. The Crisis in Computing Education
-
-Introductory computer science education is severely fragmented. For decades, the path from novice to professional programmer has been broken by an artificial, hostile chasm:
-
-```
-[Visual Blocks (Scratch/Blockly)] ───► [CLIFF] ───► [Industrial Text (Python/Java/C++)]
-   • Non-transferable syntax                             • Cryptic compilation errors
-   • Artificial limitations                              • Complex tooling & boilerplates
-   • "Black box" execution                               • Hidden runtime machinery
-```
-
-1. **The Toy Language Trap**: Students begin with block-based platforms like Scratch or Blockly. While these platforms successfully remove syntax frustration, they introduce artificial constraints. They lack first-class functions, lexical closures, structured error handling, real data structures, and real file I/O. When students outgrow the visual paradigm, their knowledge does not transfer.
-2. **The Industrial Cliff**: When transitioning to industrial languages like Python, Java, or C++, students encounter a steep cliff. Syntax errors are confusing, runtime behavior is completely opaque, and the underlying computing environment is hidden behind gigabytes of compiler infrastructure.
-3. **The "Black Box" Deception**: Modern high-level languages treat the computer as a black box. Students write code without any understanding of stack frames, memory allocation, instruction pointers, garbage collection, or machine code translation. Later, when they must learn computer architecture and systems programming, they are forced to switch to C or Rust, starting from scratch with entirely new mental models.
-
-Unfish was created to eliminate this cliff entirely. It provides an **unbroken path of intellectual ascent** where a single language, built from first principles in ANSI C99, scales from kindergarten block dragging to university compiler engineering and bare-metal systems programming.
+> *"A learner can begin programming visually in Unfish, transition naturally into textual Unfish, and eventually use the exact same language to master advanced programming, algorithms, virtual machine design, compiler engineering, operating systems, networking, and bare-metal embedded systems."*
 
 ---
 
-## 2. The Principle of Intellectual Ascent
+## 1. Executive Summary: What is the Main Aim of Unfish?
 
-Unfish is engineered around five progressive developmental stages. Each stage expands the learner's understanding without invalidating what was learned in previous stages:
+The primary aim of **Unfish** is to provide the world's first **unbroken, zero-friction continuum for computer science education and systems engineering**.
+
+For half a century, the path from novice to master software engineer has been artificially fractured by incompatible tools, incompatible mental models, and artificial pedagogical walls. Students begin in visual block environments (Scratch, Blockly) where they are taught algorithmic sequences in a sandbox devoid of real-world capabilities. When they attempt to transition to industry languages (Python, Java, C++), they hit an immediate wall of cognitive overload: cryptic compilation errors, complex project tooling, and confusing punctuation noise. Later, when they must learn low-level computer architecture, operating systems, and memory management, they hit another wall: high-level languages treat the hardware as an opaque "black box," forcing students to discard everything they learned and start over with C or assembly language.
+
+**Unfish fundamentally repudiates this fragmentation.**
+
+Unfish is designed from first principles around three revolutionary engineering pillars:
+1. **The Unbroken Intellectual Ascent**: A single, elegant programming language that scales seamlessly across five developmental stages—from kindergarten block dragging to university compiler engineering and bare-metal ARM Cortex-M microcontrollers.
+2. **The "Glass Box" Paradigm**: Complexity is never hidden behind impenetrable abstraction walls. Every layer of the computing stack—from lexical tokens and typed ASTs to virtual machine opcodes, operand stacks, register files, and generated C99 code—can be visualized, inspected, and understood at any moment.
+3. **Pure Zero-Dependency ANSI C99 Foundation**: The entire language, runtime, compilers, and tools are implemented in ~25,000 lines of pristine, ANSI C99 code with zero external library dependencies. It is its own textbook: any undergraduate student can read the entire codebase in a single semester.
+
+```mermaid
+flowchart TD
+    subgraph S1["Stage 1: Visual Blocks"]
+        B1["Drag & Drop Blocks"] --> B2["Live Bidirectional Text Sync"]
+    end
+    subgraph S2["Stage 2: Clean Textual Scripting"]
+        T1["Indentation Scoping"] --> T2["Dynamic Typing & Functions"]
+    end
+    subgraph S3["Stage 3: Algorithms & Data Structures"]
+        A1["Closures & Recursion"] --> A2["Structs, Traits & Fibers"]
+    end
+    subgraph S4["Stage 4: Compilers & Virtual Machines"]
+        C1["Pratt Parsing & AST"] --> C2["Stack VM vs Register VM"]
+    end
+    subgraph S5["Stage 5: Systems & Bare Metal"]
+        M1["Raw Byte Buffers & Endian Ops"] --> M2["AOT Native C99 & ARM Cortex-M"]
+    end
+
+    S1 ==> S2 ==> S3 ==> S4 ==> S5
+```
+
+---
+
+## 2. The Crisis in Computing Education
+
+Modern software education suffers from three fundamental pathologies:
+
+### 2.1. The Toy Language Trap
+Novices typically begin with block-based visual environments like Scratch or Blockly. While these systems successfully eliminate syntax frustration, they introduce crippling pedagogical dead ends:
+* They lack first-class functions, lexical closures, structured error handling, real data structures (such as hash maps and dynamic arrays), and standard filesystem I/O.
+* They operate in an isolated browser or canvas sandbox, disconnected from the operating system shell, files, and networks.
+* When students outgrow the visual interface, virtually none of their syntactic knowledge transfers to textual languages. The transition feels like starting over from zero.
+
+### 2.2. The Industrial Cliff
+When learners transition from blocks to textual programming, they are thrown into industrial languages designed for enterprise production rather than human learning:
+* **Python**: While syntactically approachable, CPython's runtime is an impenetrable 500,000-line monolith of C code with complex reference-counting gymnastics, cyclic garbage collection heuristics, and opaque GIL locks. Python hides memory layout, call stacks, and bytecode mechanics, leaving students with no mental model of how a computer actually works.
+* **Java & C++**: Learners are assaulted by punctuation noise, mandatory boilerplate (`public static void main(String[] args)`), confusing compiler diagnostic cascades, and complex build tools (Gradle, CMake) before they can write a simple loop.
+* **Rust**: While safe and modern, Rust's borrow checker imposes an insurmountable cognitive load on beginners who have not yet internalized basic control flow and data representation.
+
+### 2.3. The "Black Box" Deception
+High-level languages encourage students to view the computer as a magical black box. Values exist without memory addresses; functions execute without stack frames; collections grow without dynamic allocations or amortized doubling; objects dispatch without method tables or vtables.
+
+When these students later encounter computer architecture, systems programming, and operating systems courses, they suffer massive cognitive dissonance. They are forced to switch to C, where uninitialized pointers, segmentation faults, and undefined behavior consume 80% of their learning time.
+
+---
+
+## 3. The Unfish Solution: The Glass Box Paradigm
+
+Unfish replaces the "Black Box" with the **Glass Box Paradigm**:
+> *"Complexity is hidden until the learner is ready—but it is never locked behind an opaque wall."*
+
+In Unfish, every running script can be inspected at any level of abstraction using standard command-line flags and tools:
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        STAGE 5: SYSTEMS & BARE-METAL PROGRAMMING                       │
-│  Raw byte buffers, little-endian access, bitwise ops, memory introspection, ARM Cortex │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│                       STAGE 4: COMPILERS & VIRTUAL MACHINE DESIGN                      │
-│  AST vs Bytecode, 57-opcode stack VM, 256-register VM, AOT C transpilation, WASM       │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│                      STAGE 3: ALGORITHMS & ADVANCED DATA STRUCTURES                    │
-│  Hash maps, recursion, closures, pattern matching, structs, traits, cooperative fibers │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│                         STAGE 2: CLEAN TEXTUAL PROGRAMMING                             │
-│  Indentation blocks, dynamic typing, first-class functions, structured try/catch       │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│                          STAGE 1: VISUAL BLOCK PROGRAMMING                             │
-│  Drag-and-drop AST blocks, live bidirectional sync with text, visual syntax            │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ LEVEL 1: High-Level Unfish Source Code                                 │
+│   say 40 + 2                                                           │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 2: Lexical Token Stream (`unfish tokens`)                        │
+│   [TOK_IDENTIFIER "say" (1:1)], [TOK_NUMBER 40 (1:5)],                 │
+│   [TOK_PLUS "+" (1:8)], [TOK_NUMBER 2 (1:10)], [TOK_EOF]               │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 3: Abstract Syntax Tree (`unfish ast`)                           │
+│   (program (say (+ (literal 40) (literal 2))))                         │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 4: Semantic Analysis & Scope Binding (`unfish check`)            │
+│   Resolved: 'say' -> Global Builtin | Type: Number -> Number -> Number │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 5: Stack Bytecode ISA (`unfish disasm`)                          │
+│   0000  OP_CONSTANT      0 (40.0)                                      │
+│   0003  OP_CONSTANT      1 (2.0)                                       │
+│   0006  OP_ADD                                                         │
+│   0007  OP_SAY                                                         │
+│   0008  OP_RETURN                                                      │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 6: Register VM 3-Address Code (`unfish disasm --reg`)            │
+│   0000  ROP_LOAD_K       R1, K0       ; R1 = 40.0                      │
+│   0001  ROP_LOAD_K       R2, K1       ; R2 = 2.0                       │
+│   0002  ROP_ADD          R0, R1, R2   ; R0 = R1 + R2                   │
+│   0003  ROP_SAY          R0                                            │
+│   0004  ROP_RETURN                                                     │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 7: Native C99 Transpilation (`unfish emit-c`)                    │
+│   UfValue r1 = uf_val_number(40.0);                                    │
+│   UfValue r2 = uf_val_number(2.0);                                     │
+│   UfValue r0 = uf_val_number(r1.as.number + r2.as.number);            │
+│   uf_rt_say(rt, r0);                                                   │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 8: Bare-Metal Machine Code (`unfish build --embedded --arm`)     │
+│   MOVS R1, #40                                                         │
+│   ADDS R0, R1, #2                                                      │
+│   BL   uart_print_number                                               │
+└────────────────────────────────────────────────────────────────────────┘
 ```
+
+The learner can start at Level 1 and gradually peel back each layer as their curiosity and curriculum advance. There are no sudden leaps, no jarring language switches, and no unlearning required.
+
+---
+
+## 4. The Five Developmental Stages
+
+Unfish is structured around five progressive stages of computer science mastery:
 
 ### Stage 1: Visual Block Programming
-* **Audience**: Beginners, young students, visual learners.
-* **Concepts**: Sequences, conditional branches, loops, variables, and function calls.
-* **The Unfish Difference**: Unfish blocks are not a toy subset. They represent the exact same Abstract Syntax Tree (AST) as textual Unfish. Modifying a block immediately updates the text; typing text immediately updates the visual blocks. There is zero semantic impedance mismatch.
+* **Target Audience**: Elementary and middle school students, visual learners, coding club members.
+* **Core Concepts**: Sequences, branching logic (`if`/`else`), loops (`repeat`, `while`), variables, function calls.
+* **The Unfish Pedagogical Difference**: Unlike Scratch or Blockly, Unfish blocks are **not a simplified toy language**. They are a direct, bidirectional visual rendering of the Unfish Abstract Syntax Tree (AST).
+  * Modifying a visual block immediately updates the textual code.
+  * Editing the textual code immediately updates the visual blocks.
+  * Students can switch between visual and text views at will, building intuition for textual syntax without fear.
 
-### Stage 2: Clean Textual Programming
-* **Audience**: Secondary school students, introductory university courses, bootcamps.
-* **Concepts**: Indentation-delimited scoping, dynamic typing, first-class functions, array and map operations, string manipulation, structured error handling.
-* **The Unfish Difference**: Unfish eliminates punctuation noise (no mandatory semicolons, curly braces, or boilerplate `public static void main`). Diagnostics provide full source excerpts with 2-D coordinates and actionable suggestions.
+### Stage 2: Clean Textual Scripting
+* **Target Audience**: High school students, AP Computer Science Principles, introductory university courses, bootcamps.
+* **Core Concepts**: Indentation-delimited scoping, dynamic typing, first-class functions, lists/arrays, hash maps, string formatting (`f"..."`), structured exception handling (`try`/`catch`/`finally`).
+* **The Unfish Pedagogical Difference**: Syntax is completely noise-free. There are no mandatory semicolons, no curly braces, and no boilerplates. Error messages are compassionate, providing 2-D source excerpts, line and column pointers, and actionable fix suggestions.
 
-### Stage 3: Algorithms & Advanced Data Structures
-* **Audience**: Undergraduate Computer Science students.
-* **Concepts**: High-order functional programming, lexical closures, recursion with hoisting, pattern matching, user-defined structs with methods, sum-type enums, traits, and cooperative concurrency (fibers and channels).
-* **The Unfish Difference**: Unfish supports modern functional and object-oriented idioms without massive runtime bloat. Students can inspect closure upvalues, call stacks, and execution steps directly through the built-in CLI debugger and execution tracer.
+### Stage 3: Algorithms, Data Structures & Concurrency
+* **Target Audience**: University sophomore Computer Science students (Data Structures & Algorithms).
+* **Core Concepts**: High-order functions (`map`, `filter`, `reduce`), lexical closures, recursion with hoisting, pattern matching (`match`), user-defined structs with methods, sum-type enums, traits, and cooperative concurrency (fibers and channels).
+* **The Unfish Pedagogical Difference**: Learners can observe closure upvalues, call stacks, and execution steps directly through the built-in CLI debugger (`unfish debug`) and execution profiler (`unfish run --profile`).
 
-### Stage 4: Compilers & Virtual Machine Architecture
-* **Audience**: Advanced undergraduate and graduate compiler/runtime courses.
-* **Concepts**: Lexical analysis, Pratt parsing, semantic symbol resolution, bytecode generation, stack-based vs. register-based virtual machines, instruction dispatch loops, garbage collection algorithms, and AOT compilation.
-* **The Unfish Difference**: Unfish is its own textbook. The entire implementation is written in clean, ANSI C99 with zero external dependencies. A student can read `src/lexer/uf_lexer.c`, `src/parser/uf_parser.c`, `src/vm/uf_vm.c`, and `src/vm2/uf_regvm.c` in a single semester and understand every single line of code.
+### Stage 4: Compiler Engineering & Virtual Machine Design
+* **Target Audience**: University junior/senior Computer Science students (Compilers & Programming Languages).
+* **Core Concepts**: Lexical scanning, Pratt operator-precedence parsing, semantic symbol resolution, bytecode generation, stack-based vs. register-based virtual machines, instruction dispatch loops, garbage collection algorithms, and AOT compilation.
+* **The Unfish Pedagogical Difference**: Unfish is its own textbook. The entire implementation is written in clean, ANSI C99 with zero external dependencies. A student can read `src/lexer/uf_lexer.c`, `src/parser/uf_parser.c`, `src/vm/uf_vm.c`, and `src/vm2/uf_regvm.c` in a single semester and understand every single line of code.
 
-### Stage 5: Systems & Bare-Metal Programming
-* **Audience**: Systems programmers, embedded software engineers, OS students.
-* **Concepts**: Byte buffers, memory layout introspection, bitwise arithmetic, endian-explicit binary serialization, and freestanding embedded deployment.
-* **The Unfish Difference**: Unfish scripts can compile directly to standalone C99 (`unfish emit-c`) or bare-metal binaries for ARM Cortex-M microcontrollers (`unfish build --embedded --arm`). Learners see high-level code translate directly into hardware registers.
+### Stage 5: Systems Programming & Bare-Metal Hardware
+* **Target Audience**: University seniors, embedded systems engineers, operating systems students.
+* **Core Concepts**: Raw byte buffers, endian-explicit binary serialization, bitwise arithmetic, memory layout introspection, freestanding runtime environments, ARM Cortex-M microcontrollers.
+* **The Unfish Pedagogical Difference**: Unfish scripts can compile directly to standalone C99 (`unfish emit-c`) or bare-metal binaries for ARM Cortex-M microcontrollers (`unfish build --embedded --arm`). Learners see high-level code translate directly into hardware registers.
 
 ---
 
-## 3. The "Glass Box" Design Paradigm
+## 5. Architectural Comparison Matrix
 
-In software engineering pedagogy, systems are often described as "black boxes" (where internal mechanisms are deliberately hidden) or "white boxes" (where internal details overwhelm the learner).
+| Dimension | Scratch / Blockly | Python (CPython) | Lua 5.4 | Wren | C (C99) | Rust | **Unfish** |
+|---|---|---|---|---|---|---|---|
+| **Entry Barrier** | Very Low | Low | Medium | Medium | High | Very High | **Very Low** |
+| **Visual Block Support** | Native (Only) | Third-Party Stubs | None | None | None | None | **Native Bidirectional (AST Parity)** |
+| **Implementation Language** | JS / TS | C (CPython) | ANSI C | C99 | C | Rust | **ANSI C99 (Zero Dependencies)** |
+| **Codebase Size** | Complex Web Stack | 500k+ lines of C | ~20k lines of C | ~15k lines of C | N/A | Millions of lines | **~25k lines of clean, modular C99** |
+| **Execution Engines** | JS Interpreter | Bytecode VM | Register VM | Stack VM | Machine Code | Machine Code | **5 Backends (AST, Stack VM, RegVM, C99, WASM)** |
+| **Systems Primitives** | None | Limited `ctypes` | None (pure script) | None | Full Low-Level | Full Low-Level | **Built-in `buffer`, `inspect`, endian ops** |
+| **Embedded Microcontrollers**| No | MicroPython (Heavy) | Embedded (Manual) | Embedded (Manual)| Native | Embedded HAL | **Native (`--embedded`, `--arm`)** |
+| **Gradual Type System** | None | Optional (mypy) | None | None | Strict Static | Strict Static | **4-Tier Built-in Gradual Typing** |
+| **Differential Test Parity** | N/A | N/A | N/A | N/A | N/A | N/A | **100% 5-Way Test Parity Enforcement** |
 
-Unfish pioneers the **Glass Box Paradigm**:
-> *"Complexity is hidden until the learner is ready — but it is never hidden behind an impenetrable wall."*
+---
+
+## 6. Comprehensive Curriculum Blueprint
+
+The following table provides a complete 4-year institutional curriculum blueprint mapping Unfish across an entire undergraduate computer science degree:
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ High-Level Code:   say 40 + 2                          │
-├────────────────────────────────────────────────────────┤
-│ Lexical Tokens:    TOK_IDENTIFIER("say"), TOK_INT(40)  │
-│ Abstract Syntax:   UfStmtSay(UfExprBinary(+, 40, 2))   │
-│ Scope Resolution:  Global Scope -> Builtin Symbol      │
-│ Bytecode Chunk:    OP_CONSTANT 0 (40), OP_CONSTANT 1(2)│
-│                    OP_ADD, OP_SAY                      │
-│ Virtual CPU Stack: [ 40 ] -> [ 40, 2 ] -> [ 42 ] -> [] │
-│ Memory Allocation: Linear Arena + GC Heap Linked List  │
-└────────────────────────────────────────────────────────┘
+┌─────────┬──────────────────────────────────┬────────────────────────────────────────────────────────┐
+│ Term    │ Course Title                     │ Unfish Pedagogical Role                                │
+├─────────┼──────────────────────────────────┼────────────────────────────────────────────────────────┤
+│ Year 1A │ CS 101: Introduction to Coding   │ Visual blocks -> Clean text, control flow, functions   │
+│ Year 1B │ CS 102: Data Structures          │ Structs, dynamic arrays, hash maps, recursion, search  │
+│ Year 2A │ CS 201: Algorithms & Complexity  │ Big-O analysis, sorting algorithms, profiler tracing   │
+│ Year 2B │ CS 202: Programming Languages    │ Closures, pattern matching, gradual typing, AST dumps │
+│ Year 3A │ CS 301: Compilers & Runtimes     │ Pratt parser, stack VM vs register VM, GC algorithms   │
+│ Year 3B │ CS 302: Operating Systems        │ Fibers, channels, cooperative scheduling, buffers      │
+│ Year 4A │ CS 401: Embedded Systems         │ Bare-metal C emit, ARM Cortex-M, bitwise registers     │
+│ Year 4B │ CS 402: Capstone Project         │ Full-stack web (WASM) or IoT embedded sensor network   │
+└─────────┴──────────────────────────────────┴────────────────────────────────────────────────────────┘
 ```
 
-At any moment, any user can take any running Unfish program and inspect every layer of the computing stack:
-1. `unfish tokens script.unfish`: Shows the exact lexical token stream with line/column coordinates.
-2. `unfish ast script.unfish`: Dumps the typed Abstract Syntax Tree as an S-expression.
-3. `unfish check script.unfish`: Displays scope bindings and type consistency analysis.
-4. `unfish disasm script.unfish`: Disassembles the bytecode instructions for the stack VM or register VM.
-5. `unfish run --vm --debug script.unfish`: Executes the script instruction by instruction with a visual stack dump.
-6. `unfish emit-c script.unfish`: Emits human-readable, standalone C99 code.
-7. `unfish studio`: Interactively visualizes all five layers simultaneously in a browser IDE.
-
 ---
 
-## 4. Architectural Comparison
-
-| Dimension | Scratch / Blockly | Python | Lua | Wren | Rust / C | **Unfish** |
-|---|---|---|---|---|---|---|
-| **Entry Barrier** | Very Low | Low | Medium | Medium | Very High | **Very Low (Visual & Text)** |
-| **Visual Block Support** | Native (Only) | Third-Party Stubs | None | None | None | **Native Bidirectional (AST Parity)** |
-| **Implementation Language** | JS / TS | C (CPython) | ANSI C | C99 | Rust / C | **ANSI C99 (Zero Dependencies)** |
-| **Codebase Readability** | Complex Web Stack | 500k+ lines of C | 20k lines of C | 15k lines of C | Millions of lines | **~25k lines of clean, modular C99** |
-| **Execution Engines** | JS Interpreter | Bytecode VM | Register VM | Stack VM | Native Machine Code | **5 Backends (AST, Stack VM, RegVM, C99, WASM)** |
-| **Systems Primitives** | None | Limited `ctypes` | None (pure script) | None | Full Low-Level | **Built-in `buffer`, `inspect`, endian ops** |
-| **Embedded / Microcontrollers** | No | MicroPython (Heavy) | Embedded (Manual) | Embedded (Manual) | Yes | **Native (`--embedded`, `--arm`)** |
-| **Gradual Typing** | None | Optional (mypy) | None (TypedLua) | None | Strict Static | **4-Tier Built-in Gradual Typing** |
-| **Differential Test Parity** | N/A | N/A | N/A | N/A | N/A | **100% 5-Way Test Parity Enforcement** |
-
-### Why Not Just Python?
-Python is a wonderful language for scripting and data science, but it fails as a comprehensive systems curriculum language:
-* CPython's codebase is over 500,000 lines of complex C code involving macro gymnastics, complex reference counting loops, and internal caching heuristics that are impenetrable to an undergraduate student.
-* Python hides all memory mechanics. Students cannot observe or control stack frames, memory layouts, or bytecode dispatches cleanly.
-* Python has no native bidirectional visual block environment.
-
-### Why Not Just Lua?
-Lua is renowned for its minimalism and elegant register virtual machine, but:
-* 1-based indexing creates constant friction for students transitioning to systems languages like C, C++, or Java.
-* Lack of formal class/struct syntax forces students to learn prototype metatables before they understand basic object-oriented concepts.
-* Lua has no built-in gradual type checker, no native IDE tooling, and no visual block representation.
-
-### Why Not Just C?
-C provides ultimate systems control, but:
-* For novices, manual pointer arithmetic, memory leaks, and segmentation faults are catastrophic barriers to entry.
-* Beginners spend 80% of their cognitive bandwidth debugging `segfault` and undefined behavior rather than learning algorithmic problem solving.
-
-**Unfish combines the syntax elegance of Python, the clean architectural minimalism of Lua, the visual friendliness of Scratch, and the systems power of C.**
-
----
-
-## 5. Curriculum Integration Blueprint
-
-Unfish is designed to serve as the unified language across an entire computer science educational institution:
-
-### 1. Primary & Middle School: Creative Coding
-* **Topics**: Algorithmic thinking, animations, games, interactive stories.
-* **Interface**: Unfish Studio visual blocks.
-* **Learning Objective**: Sequences, loops, variables, conditional decisions.
-
-### 2. High School: Introduction to Computer Science (AP CS / GCSE)
-* **Topics**: Text programming, modular code, string processing, data structures.
-* **Interface**: Unfish CLI, text editor with VS Code LSP extension.
-* **Learning Objective**: Functions, arrays, maps, recursion, exception handling.
-
-### 3. University Year 1: Data Structures & Algorithms
-* **Topics**: Sorting algorithms, search trees, graph algorithms, dynamic programming.
-* **Interface**: Unfish CLI, testing runner (`unfish test`), profiler (`unfish run --profile`).
-* **Learning Objective**: Algorithmic complexity, benchmarking, memory allocation tracing.
-
-### 4. University Year 2: Programming Language Theory & Types
-* **Topics**: Lexical scoping, closures, gradual typing, pattern matching, structural vs nominal types.
-* **Interface**: Type checker (`unfish check --strict`), semantic analyzer inspection.
-* **Learning Objective**: Type consistency relations, static vs dynamic verification.
-
-### 5. University Year 3: Compilers & Virtual Machines
-* **Topics**: Pratt expression parsing, bytecode emission, stack vs register VM design, garbage collection.
-* **Interface**: `unfish ast`, `unfish disasm`, `src/parser/`, `src/compiler/`, `src/vm/`.
-* **Learning Objective**: Implementing compiler optimization passes, writing VM opcodes, implementing mark-and-sweep GC.
-
-### 6. University Year 4: Embedded Systems & Operating Systems
-* **Topics**: Binary protocol serialization, byte buffer manipulation, device drivers, bare-metal deployment.
-* **Interface**: `unfish build --embedded --arm`, systems buffers, hardware testing.
-* **Learning Objective**: Cross-compilation, linker scripts, low-level binary formats.
-
----
-
-## 6. Core Design Principles
+## 7. The Six Core Engineering Tenets
 
 Every architectural and syntactical decision in Unfish is governed by six immutable tenets:
 

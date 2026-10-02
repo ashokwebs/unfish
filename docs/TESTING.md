@@ -16,7 +16,7 @@ Unfish enforces a **Zero-Compromise Verification Philosophy** built around four 
 ├────────────────────────────────────────────────────────────────────────┤
 │ Pillar 3: Memory Safety Sanitizers (ASan, LSan, UBSan zero-leak rule)  │
 ├────────────────────────────────────────────────────────────────────────┤
-│ Pillar 2: 5-Way Differential Parity Verification (91/91 conformance)   │
+│ Pillar 2: 5-Way Differential Parity Verification (95/95 conformance)   │
 ├────────────────────────────────────────────────────────────────────────┤
 │ Pillar 1: Modular C Unit Tests (20+ isolated test suites in tests/unit)│
 └────────────────────────────────────────────────────────────────────────┘
@@ -73,8 +73,8 @@ $$\text{exit}(\text{Interp}) \equiv \text{exit}(\text{VM}) \equiv \text{exit}(\t
 If a single character, newline, or exit code diverges between any backend, the test harness reports an immediate failure with a unified diff.
 
 ### 3.2. Current Conformance Census
-As of v2.1.0, **91 out of 91 conformance tests pass with 100% differential parity across all five execution engines**:
-* 64 Valid Language Feature Tests (`01_hello.unfish` through `64_stdlib_expanded.unfish`)
+As of v2.1.0, **95 out of 95 conformance tests pass with 100% differential parity across all five execution engines**:
+* 68 Valid Language Feature Tests (`01_hello.unfish` through `68_fish_simulation.unfish`)
 * 27 Intentional Error Tests (`err_arity_mismatch.unfish` through `err_unterminated_string.unfish`)
 
 ---

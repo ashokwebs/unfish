@@ -34,6 +34,8 @@
 24. [Recipe 23: Structured Hierarchical Logging Engine](#recipe-23-structured-hierarchical-logging-engine)
 25. [Recipe 24: High-Performance Circular Ring Buffer](#recipe-24-high-performance-circular-ring-buffer)
 26. [Recipe 25: Text Processing & Markdown Table Formatter](#recipe-25-text-processing--markdown-table-formatter)
+27. [Recipe 26: Ocean Fish School Simulation & Vector Movement](#recipe-26-ocean-fish-school-simulation--vector-movement)
+28. [Recipe 27: Exception-Safe Resource Guard with Try-Catch-Finally](#recipe-27-exception-safe-resource-guard-with-try-catch-finally)
 
 ---
 
@@ -1127,4 +1129,83 @@ let data = [
     {"Name": "Native C99", "Opcodes": 0,   "Parity": "100%"}
 ]
 say format_markdown_table(["Name", "Opcodes", "Parity"], data)
+```
+
+---
+
+## Recipe 26: Ocean Fish School Simulation & Vector Movement
+
+Simulating multi-agent flocking, vector displacement, distance to navigational landmarks, and functional stream transformations using `struct`, `fn` lambdas, and higher-order mapping:
+
+```unfish
+## 🐠 School of Fish Simulation
+## Simulating fish movement, vectors and distance in the ocean!
+
+struct Fish:
+    id
+    x
+    y
+    speed
+
+    fn swim(self, dx, dy):
+        return Fish(self.id, self.x + dx * self.speed, self.y + dy * self.speed, self.speed)
+
+    fn distance_from_reef(self):
+        return sqrt(pow(self.x, 2) + pow(self.y, 2))
+
+let school = [
+    Fish(1, 10, 20, 1.5),
+    Fish(2, 14, 22, 1.2),
+    Fish(3, 8,  19, 1.8)
+]
+
+say "🌊 Initial Fish Positions in the Lagoon:"
+for f in school:
+    say f"Fish #{f.id}: pos=({f.x}, {f.y}) • distance to reef={round(f.distance_from_reef())}"
+
+say "\n🏊 A current pushes the school by (dx=5, dy=3):"
+let moved_school = map(school, fn(f): f.swim(5, 3))
+for f in moved_school:
+    say f"Fish #{f.id}: now at ({f.x}, {f.y}) • new distance={round(f.distance_from_reef())}"
+```
+
+---
+
+## Recipe 27: Exception-Safe Resource Guard with Try-Catch-Finally
+
+Guaranteed cleanup of allocated resources, open file descriptors, or transactional state using Unfish's dual-stack exception unwinding engine:
+
+```unfish
+import fs
+
+struct FileGuard:
+    path
+    opened
+
+    fn open(self):
+        say f"Opening resource at {self.path}"
+        self.opened = true
+        return self
+
+    fn close(self):
+        say f"Closing and releasing resource at {self.path}"
+        self.opened = false
+
+fn process_transaction(file_path):
+    let guard = FileGuard(file_path, false)
+    guard.open()
+    try:
+        say "Processing transactional data..."
+        if contains(file_path, "corrupt"):
+            raise "Corrupted transaction record encountered!"
+        say "Transaction processed successfully."
+        return "SUCCESS"
+    catch err:
+        say f"Transaction failed safely: {err}"
+        return "ROLLBACK"
+    finally:
+        guard.close()
+
+say f"Run 1: {process_transaction('data_valid.log')}"
+say f"Run 2: {process_transaction('data_corrupt.log')}"
 ```

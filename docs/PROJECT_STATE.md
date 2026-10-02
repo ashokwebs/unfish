@@ -10,7 +10,7 @@
 | **Language Version** | **v2.1.0** (Production Release) | `bin/unfish version` |
 | **Total Source Code** | **38,629 Lines of C99** (86 source/header files) | `find src/ -name "*.[ch]"` |
 | **External Dependencies**| **0 (Zero External Libraries)** | Pure ANSI C99 + libc / libm |
-| **Differential Test Parity** | **91 / 91 Passed (100% Parity)** | `make test` / `tools/run_differential_tests.sh` |
+| **Differential Test Parity** | **95 / 95 Passed (100% Parity)** | `make test` / `tools/run_differential_tests.sh` |
 | **Execution Backends** | **5 Backends in Lockstep** | AST, Stack VM, RegVM, Native C99, WASM |
 | **Memory Safety Auditing** | **Clean (0 Leaks, 0 Errors)** | LLVM AddressSanitizer & LeakSanitizer |
 | **Undefined Behavior Audit**| **Clean (0 Warnings)** | LLVM UndefinedBehaviorSanitizer |
@@ -63,11 +63,11 @@ Every subsystem in the Unfish engine is 100% implemented, differential-parity ve
 | **Indentation Lexer** | `src/lexer/uf_lexer.c` | **100% READY** | `tests/unit/test_lexer.c` |
 | **Pratt Expression Parser** | `src/parser/uf_parser.c` | **100% READY** | `tests/unit/test_parser.c` |
 | **Semantic Analyzer** | `src/semantic/uf_semantic.c`| **100% READY** | `tests/unit/test_semantic.c` |
-| **AST Tree Interpreter** | `src/interpreter/` | **100% READY** | 91/91 Differential tests |
-| **Stack Bytecode VM** | `src/vm/uf_vm.c` | **100% READY** | 91/91 Differential tests |
-| **Register Bytecode VM** | `src/vm2/uf_regvm.c` | **100% READY** | 91/91 Differential tests |
-| **Native C99 Transpiler** | `src/codegen/uf_emit_c.c` | **100% READY** | 91/91 Differential tests |
-| **WebAssembly Backend** | `src/codegen/` | **100% READY** | 91/91 Differential tests |
+| **AST Tree Interpreter** | `src/interpreter/` | **100% READY** | 95/95 Differential tests |
+| **Stack Bytecode VM** | `src/vm/uf_vm.c` | **100% READY** | 95/95 Differential tests |
+| **Register Bytecode VM** | `src/vm2/uf_regvm.c` | **100% READY** | 95/95 Differential tests |
+| **Native C99 Transpiler** | `src/codegen/uf_emit_c.c` | **100% READY** | 95/95 Differential tests |
+| **WebAssembly Backend** | `src/codegen/` | **100% READY** | 95/95 Differential tests |
 | **Mark-and-Sweep GC** | `src/runtime/uf_runtime.c` | **100% READY** | `tests/unit/test_stress.c` (ASan) |
 | **Bytecode Optimizer** | `src/compiler/uf_optimize.c`| **100% READY** | `tests/unit/test_optimize.c` |
 | **Bytecode Disk Cache** | `src/compiler/uf_cache.c` | **100% READY** | `tests/unit/test_cache.c` |
@@ -87,18 +87,18 @@ Every subsystem in the Unfish engine is 100% implemented, differential-parity ve
 
 The test suite comprises:
 * **20 Modular C Unit Test Drivers** in `tests/unit/`
-* **91 Conformance Tests** in `tests/conformance/`
+* **95 Conformance Tests** in `tests/conformance/`
 * **13 Performance Benchmark Suites** in `tests/benchmarks/`
 
-### Differential Test Results Matrix (91/91 Passing):
+### Differential Test Results Matrix (95/95 Passing):
 ```
 ============================================================================================
 DIFFERENTIAL CONFORMANCE TEST AUDIT (Five Execution Engines in Lockstep)
 ============================================================================================
-Feature Tests (01_hello.unfish - 64_stdlib_expanded.unfish)      : 64 / 64 PASS (100% Parity)
+Feature Tests (01_hello.unfish - 68_fish_simulation.unfish)      : 68 / 68 PASS (100% Parity)
 Error Tests   (err_arity_mismatch - err_unterminated_string)      : 27 / 27 PASS (100% Parity)
 --------------------------------------------------------------------------------------------
-Total Conformance Invariant: 91 passed (identical stdout, stderr, and exit codes), 0 diverged.
+Total Conformance Invariant: 95 passed (identical stdout, stderr, and exit codes), 0 diverged.
 ============================================================================================
 ```
 

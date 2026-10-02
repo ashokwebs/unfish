@@ -35,9 +35,12 @@ The project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **6-Volume Comprehensive Technical Reference Compendium (`docs/`)**:
-  - **`docs/INDEX.md`**: Master Table of Contents and Compendium Navigator mapping all 28 chapters across 6 volumes.
-  - **`docs/COOKBOOK.md`**: 25 comprehensive production-grade recipes across algorithms, data wrangling, systems buffers, networking mocks, and concurrency.
-  - **`docs/CONCURRENCY.md`**: Complete Concurrency & Async Architecture Manual covering M:1 cooperative fibers, CSP channels, scheduler finite automaton, and deadlock detection.
+  - **`docs/INDEX.md`**: Master Table of Contents and Compendium Navigator mapping all 28 chapters across 6 volumes with 95/95 passing differential tests.
+  - **`docs/COOKBOOK.md`**: 27 comprehensive production-grade recipes across algorithms, data wrangling, systems buffers, networking mocks, concurrency, and simulation (including Recipe 26: Ocean Fish School Simulation and Recipe 27: Exception-Safe Resource Guard).
+  - **`docs/VISION.md`**: Comprehensive architectural manifesto answering the primary aim of Unfish, the cognitive crisis in computing education, the unbroken intellectual ascent, the Glass Box paradigm, and full 4-year curriculum integration blueprint.
+  - **`docs/LANGUAGE_SPEC.md`**: Formal Language Specification & Reference Manual with full ISO EBNF grammar, Pratt precedence hierarchy, dual `function`/`fn` lambdas, structured exception unwinding invariants, and 4-tier gradual typing.
+  - **`docs/STANDARD_LIBRARY.md`**: Exhaustive Standard Library Reference Manual covering all core builtins, higher-order combinators, string operations, math functions, systems memory buffers, and standard modules (`sys`, `fs`, `time`, `random`, `json`, `testing`).
+  - **`docs/PROJECT_STATE.md`, `docs/TESTING.md`, `docs/SECURITY.md`, `docs/ROADMAP.md`**: Updated to reflect 95/95 passing differential tests across all five backends with 100% parity and 0 memory leaks.
   - **`docs/SYSTEMS_PROGRAMMING.md`**: Complete Systems & Low-Level Programming Manual covering raw byte buffers, endianness, bitwise manipulation, C99 ABI, and bare-metal ARM Cortex-M microcontrollers.
   - **`docs/INTERNALS_GUIDE.md`**: The Unfish Hacker's Guide to Compiler & VM Internals with architectural blueprints, scanner mechanics, Pratt parsing tables, dual bytecode pipelines, and step-by-step feature guides.
   - **`docs/NATIVE_COMPILER.md`**: Native C99 Transpiler, WebAssembly & Embedded Manual.

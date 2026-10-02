@@ -43,7 +43,7 @@ Every container access in Unfish is bounds-checked at runtime:
 Unfish does not expose raw pointers, pointer arithmetic, or manual memory deallocation (`free`) to the programmer. All object allocation is managed through the garbage collector and arena allocators. Dangling pointers and double-free vulnerabilities are impossible within Unfish programs.
 
 ### 2.3. AddressSanitizer (ASan) Continuous Verification
-The entire Unfish test suite (91+ differential tests, stress tests, and unit tests) is continuously built and executed under AddressSanitizer (`-fsanitize=address`) and UndefinedBehaviorSanitizer (`-fsanitize=undefined`). Any memory violation or leak immediately fails the build pipeline.
+The entire Unfish test suite (95+ differential tests, stress tests, and unit tests) is continuously built and executed under AddressSanitizer (`-fsanitize=address`) and UndefinedBehaviorSanitizer (`-fsanitize=undefined`). Any memory violation or leak immediately fails the build pipeline.
 
 ---
 

@@ -1,421 +1,428 @@
 # UNFISH — FORMAL LANGUAGE SPECIFICATION & REFERENCE MANUAL
+## Volume I: Lexical Grammar, Syntactic Productions & Operational Semantics
+### Version 2.1.0 (Core Standard)
 
 ---
 
-## 1. Introduction & Notation
+## 1. Introduction & Theoretical Foundations
 
-This document provides the definitive, formal language specification for **Unfish**. It is written for compiler implementors, language designers, educators, and advanced developers.
+This document provides the definitive, formal language specification for **Unfish**. It is designed as a rigorous reference for compiler engineers, language implementors, programming language theorists, educators, and systems programmers.
 
-### Grammar Notation (Extended Backus-Naur Form)
-Grammar productions in this specification use standard EBNF notation:
-* `Rule = Production ;` defines a grammar rule.
+### 1.1. Core Design Philosophy
+Unfish combines the ergonomic elegance of clean indentation syntax with the rigor of modern programming language theory:
+* **Off-side Lexing**: Structural indentation eliminates braces (`{}`) and semicolons (`;`) without syntactic ambiguities.
+* **Pratt Operator-Precedence Parsing**: Expressions are parsed using Vaughan Pratt's top-down operator precedence algorithm, ensuring unambiguous precedence resolution across 13 distinct binding tiers.
+* **Dual Function Paradigm**: First-class functions can be declared using either block-based `function name(args):` syntax or concise lambda `fn(args): expr` expressions.
+* **Structured Exception Safety**: Unwinding semantics guarantee deterministic stack and frame cleanup across nested `try`-`catch`-`finally` blocks, early returns, and loop jumps.
+* **Gradual Type System**: Optional type annotations enable a smooth, 4-tier spectrum from dynamic duck typing to strict static verification.
+
+### 1.2. Grammar Notation (EBNF)
+Grammar productions in this specification adhere to ISO/IEC 14977 Extended Backus-Naur Form (EBNF):
+* `Rule = Production ;` defines a non-terminal rule.
 * `[ Item ]` denotes an optional element (zero or one occurrence).
 * `{ Item }` denotes repetition (zero or more occurrences).
 * `Item1 | Item2` denotes alternation (either Item1 or Item2).
-* `'literal'` denotes a terminal token.
-* `( Item1 Item2 )` groups items.
+* `'literal'` denotes a terminal lexical token.
+* `( Item1 Item2 )` groups items for grouping and precedence.
 
 ---
 
-## 2. Lexical Structure
+## 2. Lexical Structure & Tokenization
 
-### 2.1. Source Encoding & Character Set
-Unfish source files must be encoded in valid **UTF-8**. Source files may optionally begin with a UTF-8 Byte Order Mark (BOM `0xEF, 0xBB, 0xBF`), which is silently discarded by the lexer.
+### 2.1. Character Encoding & Normalization
+* **Source Encoding**: Unfish source files must be valid UTF-8 sequences.
+* **Byte Order Mark (BOM)**: An optional leading UTF-8 BOM (`0xEF, 0xBB, 0xBF`) is recognized and discarded by the scanner prior to tokenization.
+* **Line Terminators**: Unfish normalizes both Unix line feeds (`\n`, ASCII 10) and Windows carriage-return line-feeds (`\r\n`, ASCII 13, 10) into a single logical `NEWLINE` token.
+* **Ignored Content**: Blank lines and lines consisting entirely of whitespace and comments do not alter the indentation state and produce no tokens.
 
-### 2.2. Whitespace, Newlines & Indentation
-Unfish enforces block structure using indentation (the off-side rule), eliminating the need for curly braces `{}` or `begin`/`end` keywords:
+### 2.2. The Indentation Stack Algorithm
+The Unfish lexer (`src/lexer/uf_lexer.c`) maintains an internal indentation stack:
+$$\text{Stack} = [S_0, S_1, \dots, S_k], \quad S_0 = 0$$
 
-* **Whitespace**: Horizontal space characters (`' '` ASCII 32) and tabs (`'\t'` ASCII 9). Inside code lines, whitespace separates tokens.
-* **Line Terminators**: Standard Unix newline (`\n` ASCII 10) or Windows CRLF (`\r\n` ASCII 13, 10). Both are normalized to a logical `NEWLINE` token.
-* **Blank Lines**: Lines containing only whitespace and/or comments are completely ignored by the indentation scanner and do not emit indentation tokens.
-* **Logical Lines**: A single logical statement can span multiple physical lines if enclosed within matching parentheses `()`, brackets `[]`, or braces `{}`, or if an explicit trailing pipe operator `|>` appears at the end of the line.
+For each non-empty, non-comment line:
+1. The scanner counts the column offset $C$ of the first non-whitespace character (spaces contribute 1; tabs contribute 4 or the configured tab stop).
+2. Let $T = S_k$ be the current top of the indentation stack.
+   * **Case 1 ($C > T$)**: The scanner pushes $C$ onto the stack and emits an `INDENT` token:
+     $$\text{Stack}' = [S_0, \dots, S_k, C], \quad \text{Emit}(\text{INDENT})$$
+   * **Case 2 ($C == T$)**: The indentation is unchanged. No indentation tokens are emitted.
+   * **Case 3 ($C < T$)**: The scanner searches the stack backwards for an index $j$ such that $S_j = C$.
+     * If such a $j$ exists, the scanner pops $k - j$ levels, emitting a `DEDENT` token for each popped level:
+       $$\text{Stack}' = [S_0, \dots, S_j], \quad \text{Emit}(\text{DEDENT}) \times (k - j)$$
+     * If no such $j$ exists, the indentation does not match any outer enclosing block. The scanner raises an `IndentationError` diagnostic with precise source line/column coordinates.
+3. **End of File (EOF)**: Upon reaching the end of the input stream, the scanner emits a `DEDENT` token for every remaining indentation level on the stack until only $S_0 = 0$ remains, followed by the terminal `EOF` token.
 
-#### The Indentation Stack Algorithm
-The lexer (`src/lexer/uf_lexer.c`) maintains an internal stack of indentation levels (column positions in spaces, with tab width configurable, default 4 spaces).
-1. At the beginning of each non-blank physical line, the lexer measures the leading whitespace column count $C$.
-2. Let $T$ be the top of the indentation stack.
-   * If $C > T$: Push $C$ onto the stack and emit an `INDENT` token.
-   * If $C == T$: Emit no indentation tokens.
-   * If $C < T$: Pop from the stack repeatedly until $T' == C$. For each popped level, emit a `DEDENT` token. If no matching level is found on the stack, report an `IndentationError` diagnostic.
-3. At the end of the source file (`EOF`), the lexer emits a `DEDENT` token for every remaining indentation level on the stack until only level 0 remains, followed by `EOF`.
+### 2.3. Multi-Line Expression Continuation
+A logical statement automatically spans multiple physical lines without triggering `NEWLINE` or `INDENT`/`DEDENT` tokens when:
+1. The lexer is currently inside unclosed grouping delimiters: parentheses `()`, brackets `[]`, or braces `{}`.
+2. A binary pipe operator `|>` appears as the final non-whitespace token of a physical line, indicating explicit forward continuation.
 
-### 2.3. Comments & Docstrings
-Unfish provides two types of comments:
-* **Single-Line Comment**: Begins with `#` and continues to the end of the line. Ignored by the parser.
+### 2.4. Comments & Documentation Docstrings
+* **Standard Line Comment**: Initiated by a single hash `#` not enclosed within a string literal. Extends to the end of the physical line and is discarded by the lexer:
   ```unfish
-  # This is a standard comment
-  let x = 10 # Inline comment
+  # This is a standard single-line comment
+  let count = 42 # Trailing comment
   ```
-* **Documentation Docstring**: Begins with `##` and continues to the end of the line. Attached to the immediately following declaration (function, struct, method, or module) by `unfish doc` and the Language Server Protocol:
+* **Documentation Docstring**: Initiated by a double hash `##`. Docstrings are preserved by the compiler and attached to the immediately subsequent declaration (`function`, `struct`, `trait`, or `enum`), making them available to `unfish doc` and the Language Server Protocol (LSP):
   ```unfish
-  ## Computes the Euclidean distance between two points.
-  ## Takes a Point instance and returns a floating-point number.
-  function distance(p1, p2):
-      return sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+  ## Computes the magnitude of a 2-dimensional vector.
+  ## Parameters:
+  ##   self - The Vector2 instance.
+  ## Returns:
+  ##   The Euclidean norm as a floating-point number.
+  fn magnitude(self):
+      return sqrt(self.x * self.x + self.y * self.y)
   ```
 
-### 2.4. Identifiers & Keywords
-* **Identifiers**: Match the regular expression `[a-zA-Z_][a-zA-Z0-9_]*`. Case-sensitive.
-* **Reserved Keywords**:
+### 2.5. Identifiers & Reserved Keywords
+* **Identifiers**: Defined by the regular expression `[a-zA-Z_][a-zA-Z0-9_]*`.
+* **Reserved Keywords Table**:
   ```
   and          else         if           null         struct
   async        enum         impl         or           trait
   await        false        import       raise        true
   break        finally      in           repeat       try
-  catch        for          let          return       while
-  continue     from         match        say          yield
-  elif         function     not          self
+  catch        fn           let          return       while
+  continue     for          match        say          yield
+  elif         from         not          self
   ```
 
-### 2.5. Literals
+### 2.6. Numeric Literals
+Numbers in Unfish are represented internally as IEEE 754 64-bit double-precision floating-point values (`double`), providing 53 bits of mantissa precision ($\pm 9,007,199,254,740,991$ exact integer range):
+* **Decimal Integers**: `0`, `42`, `1000000`
+* **Floating-Point**: `3.141592653589793`, `0.5`, `.125`
+* **Scientific Exponential**: `1e6`, `2.5e-3`, `6.022e23`, `1.0E+10`
+* **Hexadecimal**: Prefixed with `0x` or `0X` (`0xFF`, `0xDEADBEEF`, `0x1A2B`)
+* **Binary**: Prefixed with `0b` or `0B` (`0b1010`, `0b11110000`)
+* **Octal**: Prefixed with `0o` or `0O` (`0o755`, `0o644`)
 
-#### Numbers
-Numbers in Unfish are represented internally as IEEE 754 64-bit double-precision floating-point values (`double`), capable of precisely representing integers up to $2^{53} - 1$ ($\pm 9,007,199,254,740,991$):
-* **Decimal Integer**: `0`, `42`, `1000000`
-* **Floating-Point**: `3.14159`, `0.5`, `.25`
-* **Scientific Notation**: `1e6`, `2.5e-3`, `1.0E+10`
-* **Hexadecimal**: `0x1A`, `0xFF00`, `0xDEADBEEF`
-* **Binary**: `0b1010`, `0b11110000`
-* **Octal**: `0o77`, `0o755`
-
-#### Strings
-Strings are UTF-8 encoded sequences of bytes:
-* **Single-Line String**: Enclosed in double quotes `"..."`.
-* **Escape Sequences**:
-  * `\n`: Line feed (0x0A)
-  * `\t`: Horizontal tab (0x09)
-  * `\r`: Carriage return (0x0D)
-  * `\"`: Double quote (0x22)
-  * `\\`: Backslash (0x5C)
-  * `\0`: Null byte (0x00)
-  * `\xHH`: Hexadecimal byte value (e.g. `\x1B` for ESC)
-* **String Interpolation (`f"..."`)**: Formatted string literals prefixed with `f` support dynamic expression embedding via `{expression}` and literal brace escaping via `{{` and `}}`:
+### 2.7. String Literals & String Interpolation
+* **Single-Line Strings**: Delimited by double quotes `"..."`.
+* **Standard Escape Sequences**:
+  * `\n`: Line feed (U+000A)
+  * `\r`: Carriage return (U+000D)
+  * `\t`: Tab (U+0009)
+  * `\"`: Double quote (U+0022)
+  * `\\`: Backslash (U+005C)
+  * `\0`: Null byte (U+0000)
+  * `\xHH`: Exact 8-bit byte value in hexadecimal notation
+* **Multiline Strings**: Delimited by triple double quotes `"""..."""`. Preserves internal newlines and indentation verbatim.
+* **Interpolated Formatted Strings (`f"..."`)**: Prefixing a string with `f` activates string interpolation. Expressions enclosed within `{...}` are evaluated at runtime and converted to string representations:
   ```unfish
-  let user = "Alice"
-  let score = 95
-  say f"User: {user}, Score: {score + 5}"
-  # Emits: User: Alice, Score: 100
-
-  # Multiline f-strings:
-  let multiline = f"""Results for {user}:
-  Score: {score}"""
+  let name = "Lagoon"
+  let depth = 45.2
+  say f"Location: {name}, Depth: {depth}m, Status: {if depth > 30: 'deep' else: 'shallow'}"
   ```
-
-#### Booleans & Null
-* `true`: Logical true.
-* `false`: Logical false.
-* `null`: Represents the absence of a value.
+  * Literal braces inside f-strings are escaped by doubling: `{{` produces `{` and `}}` produces `}`.
 
 ---
 
-## 3. Operator Precedence & Associativity
+## 3. Operator Hierarchy & Precedence Table
 
-The Unfish Pratt expression parser resolves operators according to 13 strict precedence tiers (from lowest to highest):
+Unfish expressions are parsed using Pratt's top-down operator precedence algorithm across 13 distinct precedence tiers:
 
-| Precedence | Level Name | Operators | Associativity | Description |
+| Precedence | Tier Name | Operators | Associativity | Description |
 |---|---|---|---|---|
-| **1** | Pipe | `\|>` | Left | Forward pipeline data flow |
+| **1 (Lowest)** | Pipe | `\|>` | Left | Forward pipeline dataflow |
 | **2** | Logical OR | `or` | Left | Short-circuiting logical disjunction |
 | **3** | Logical AND | `and` | Left | Short-circuiting logical conjunction |
-| **4** | Equality | `==`, `!=` | None | Structural equality and inequality |
-| **5** | Relational | `<`, `<=`, `>`, `>=` | None | Comparison tests |
-| **6** | Bitwise OR | `bor` (fn) | Left | Bitwise inclusive OR |
-| **7** | Bitwise XOR | `bxor` (fn) | Left | Bitwise exclusive OR |
-| **8** | Bitwise AND | `band` (fn) | Left | Bitwise AND |
-| **9** | Bit Shifts | `shl`, `shr`, `sar` (fn)| Left | Bitwise shifts |
+| **4** | Equality | `==`, `!=` | None | Structural equality / inequality |
+| **5** | Relational | `<`, `<=`, `>`, `>=` | None | Numerical / string ordering |
+| **6** | Bitwise OR | `bor(...)` (builtin) | Left | Bitwise OR operation |
+| **7** | Bitwise XOR | `bxor(...)` (builtin) | Left | Bitwise XOR operation |
+| **8** | Bitwise AND | `band(...)` (builtin) | Left | Bitwise AND operation |
+| **9** | Bit Shifts | `shl`, `shr`, `sar` | Left | Bitwise logical/arithmetic shifts |
 | **10** | Additive | `+`, `-` | Left | Addition / String Concat, Subtraction |
 | **11** | Multiplicative | `*`, `/`, `%` | Left | Multiplication, Division, Modulo |
-| **12** | Unary Prefix | `-`, `not`, `bnot` | Right | Arithmetic negation, Logical NOT |
-| **13** | Primary / Call | `()`, `[]`, `.`, `await`| Left | Function calls, Indexing, Member access |
+| **12** | Unary Prefix | `-`, `not`, `bnot`, `await` | Right | Negation, Logical NOT, Bitwise NOT |
+| **13 (Highest)**| Primary & Postfix | `()`, `[]`, `.`, `f"..."` | Left | Function calls, Indexing, Member access |
 
 ---
 
-## 4. Formal EBNF Grammar
+## 4. Formal EBNF Grammar Specification
 
 ```ebnf
 (* ========================================================================= *)
-(* PROGRAM & TOP-LEVEL STRUCTURE                                             *)
+(* 1. PROGRAM ROOT & TOP-LEVEL DECLARATIONS                                  *)
 (* ========================================================================= *)
 
-Program         = { TopLevelItem } EOF ;
+Program             = { TopLevelDeclaration | Statement } EOF ;
 
-TopLevelItem    = Stmt
-                | FunctionDecl
-                | StructDecl
-                | EnumDecl
-                | TraitDecl
-                | ImplDecl
-                | ImportStmt ;
+TopLevelDeclaration = FunctionDeclaration
+                    | StructDeclaration
+                    | EnumDeclaration
+                    | TraitDeclaration
+                    | ImplDeclaration
+                    | ImportStatement ;
 
-Block           = ':' NEWLINE INDENT { Stmt } DEDENT ;
-
-(* ========================================================================= *)
-(* STATEMENTS & DECLARATIONS                                                 *)
-(* ========================================================================= *)
-
-Stmt            = LetStmt
-                | AssignStmt
-                | IfStmt
-                | WhileStmt
-                | ForInStmt
-                | RepeatStmt
-                | ReturnStmt
-                | BreakStmt
-                | ContinueStmt
-                | RaiseStmt
-                | TryCatchStmt
-                | MatchStmt
-                | SayStmt
-                | ExprStmt ;
-
-LetStmt         = 'let' Pattern [ ':' TypeAnnotation ] '=' Expr NEWLINE ;
-
-AssignStmt      = LValue ( '=' | '+=' | '-=' | '*=' | '/=' | '%=' ) Expr NEWLINE ;
-
-LValue          = IDENTIFIER
-                | Expr '[' Expr ']'
-                | Expr '.' IDENTIFIER ;
-
-IfStmt          = 'if' Expr Block
-                  { 'elif' Expr Block }
-                  [ 'else' Block ] ;
-
-WhileStmt       = 'while' Expr Block ;
-
-ForInStmt       = 'for' ( IDENTIFIER | DestructurePattern ) 'in' Expr Block ;
-
-RepeatStmt      = 'repeat' Expr Block ;
-
-ReturnStmt      = 'return' [ Expr ] NEWLINE ;
-
-BreakStmt       = 'break' NEWLINE ;
-
-ContinueStmt    = 'continue' NEWLINE ;
-
-RaiseStmt       = 'raise' Expr NEWLINE ;
-
-TryCatchStmt    = 'try' Block
-                  'catch' IDENTIFIER Block
-                  [ 'finally' Block ] ;
-
-MatchStmt       = 'match' Expr ':' NEWLINE INDENT { MatchArm } DEDENT ;
-
-MatchArm        = MatchPattern [ 'if' Expr ] '=>' ( Stmt | Block ) ;
-
-SayStmt         = 'say' Expr NEWLINE ;
-
-ExprStmt        = Expr NEWLINE ;
+Block               = ':' NEWLINE INDENT Statement { Statement } DEDENT ;
 
 (* ========================================================================= *)
-(* FUNCTIONS, STRUCTS, TRAITS & ENUMS                                        *)
+(* 2. STATEMENTS                                                             *)
 (* ========================================================================= *)
 
-FunctionDecl    = [ 'async' ] 'function' IDENTIFIER [ GenericParams ] '(' [ ParamList ] ')' [ ':' TypeAnnotation ] Block ;
+Statement           = LetStatement
+                    | AssignmentStatement
+                    | IfStatement
+                    | WhileStatement
+                    | ForInStatement
+                    | RepeatStatement
+                    | ReturnStatement
+                    | BreakStatement
+                    | ContinueStatement
+                    | RaiseStatement
+                    | TryCatchFinallyStatement
+                    | MatchStatement
+                    | SayStatement
+                    | PrintStatement
+                    | ExpressionStatement ;
 
-ParamList       = Param { ',' Param } [ ',' RestParam ] ;
-Param           = IDENTIFIER [ ':' TypeAnnotation ] [ '=' Expr ] ;
-RestParam       = '...' IDENTIFIER ;
+LetStatement        = 'let' Pattern [ ':' TypeAnnotation ] '=' Expression NEWLINE ;
 
-StructDecl      = 'struct' IDENTIFIER [ GenericParams ] ':' NEWLINE INDENT
-                      { StructField | FunctionDecl }
-                  DEDENT ;
+AssignmentStatement = LValue AssignmentOperator Expression NEWLINE ;
+AssignmentOperator  = '=' | '+=' | '-=' | '*=' | '/=' | '%=' ;
 
-StructField     = IDENTIFIER [ ':' TypeAnnotation ] NEWLINE ;
+LValue              = IDENTIFIER
+                    | PrimaryExpression '[' Expression ']'
+                    | PrimaryExpression '.' IDENTIFIER ;
 
-EnumDecl        = 'enum' IDENTIFIER ':' NEWLINE INDENT
-                      { EnumVariant }
-                  DEDENT ;
+IfStatement         = 'if' Expression Block
+                      { 'elif' Expression Block }
+                      [ 'else' Block ] ;
 
-EnumVariant     = IDENTIFIER [ '(' [ ParamList ] ')' ] NEWLINE ;
+WhileStatement      = 'while' Expression Block ;
 
-TraitDecl       = 'trait' IDENTIFIER [ GenericParams ] ':' NEWLINE INDENT
-                      { TraitMethod }
-                  DEDENT ;
+ForInStatement      = 'for' ( IDENTIFIER | DestructurePattern ) 'in' Expression Block ;
 
-TraitMethod     = 'function' IDENTIFIER '(' [ ParamList ] ')' [ ':' TypeAnnotation ] NEWLINE ;
+RepeatStatement     = 'repeat' Expression Block ;
 
-ImplDecl        = 'impl' IDENTIFIER [ GenericParams ] 'for' IDENTIFIER ':' NEWLINE INDENT
-                      { FunctionDecl }
-                  DEDENT ;
+ReturnStatement     = 'return' [ Expression ] NEWLINE ;
 
-ImportStmt      = 'import' ModulePath [ 'as' IDENTIFIER ] NEWLINE
-                | 'from' ModulePath 'import' ImportSymbolList NEWLINE ;
+BreakStatement      = 'break' NEWLINE ;
 
-ModulePath      = IDENTIFIER { '.' IDENTIFIER } | STRING_LITERAL ;
-ImportSymbolList = IDENTIFIER [ 'as' IDENTIFIER ] { ',' IDENTIFIER [ 'as' IDENTIFIER ] } ;
+ContinueStatement   = 'continue' NEWLINE ;
 
-(* ========================================================================= *)
-(* EXPRESSIONS                                                               *)
-(* ========================================================================= *)
+RaiseStatement      = 'raise' Expression NEWLINE ;
 
-Expr            = PipeExpr ;
+TryCatchFinallyStatement = 'try' Block
+                           'catch' IDENTIFIER Block
+                           [ 'finally' Block ] ;
 
-PipeExpr        = LogicalOrExpr { '|>' LogicalOrExpr } ;
+MatchStatement      = 'match' Expression ':' NEWLINE INDENT
+                          MatchArm { MatchArm }
+                      DEDENT ;
 
-LogicalOrExpr   = LogicalAndExpr { 'or' LogicalAndExpr } ;
+MatchArm            = MatchPattern [ 'if' Expression ] '=>' ( Statement | Block ) ;
 
-LogicalAndExpr  = EqualityExpr { 'and' EqualityExpr } ;
+SayStatement        = 'say' Expression NEWLINE ;
 
-EqualityExpr    = RelationalExpr { ( '==' | '!=' ) RelationalExpr } ;
+PrintStatement      = 'print' Expression NEWLINE ;
 
-RelationalExpr  = AdditiveExpr { ( '<' | '<=' | '>' | '>=' ) AdditiveExpr } ;
-
-AdditiveExpr    = MultiplicativeExpr { ( '+' | '-' ) MultiplicativeExpr } ;
-
-MultiplicativeExpr = UnaryExpr { ( '*' | '/' | '%' ) UnaryExpr } ;
-
-UnaryExpr       = ( '-' | 'not' ) UnaryExpr
-                | 'await' UnaryExpr
-                | CallIndexExpr ;
-
-CallIndexExpr   = PrimaryExpr { CallSuffix | IndexSuffix | DotSuffix } ;
-
-CallSuffix      = '(' [ ArgList ] ')' ;
-IndexSuffix     = '[' Expr ']' ;
-DotSuffix       = '.' IDENTIFIER ;
-
-ArgList         = ArgItem { ',' ArgItem } ;
-ArgItem         = [ '...' ] Expr ;
-
-PrimaryExpr     = NUMBER
-                | STRING
-                | 'true'
-                | 'false'
-                | 'null'
-                | 'self'
-                | IDENTIFIER
-                | '(' Expr ')'
-                | ArrayLiteral
-                | MapLiteral
-                | ComprehensionExpr
-                | AnonymousFunction ;
-
-ArrayLiteral    = '[' [ ArgList ] ']' ;
-
-MapLiteral      = '{' [ MapEntryList ] '}' ;
-MapEntryList    = MapEntry { ',' MapEntry } ;
-MapEntry        = ( IDENTIFIER | STRING | '[' Expr ']' ) ':' Expr
-                | '...' Expr ;
-
-ComprehensionExpr = '[' Expr 'for' IDENTIFIER 'in' Expr [ 'if' Expr ] ']' ;
-
-AnonymousFunction = 'function' '(' [ ParamList ] ')' [ ':' TypeAnnotation ] Block ;
+ExpressionStatement = Expression NEWLINE ;
 
 (* ========================================================================= *)
-(* PATTERNS & DESTRUCTURING                                                  *)
+(* 3. DECLARATIONS: FUNCTIONS, STRUCTS, ENUMS, TRAITS                        *)
 (* ========================================================================= *)
 
-MatchPattern    = LiteralPattern
-                | VariablePattern
-                | WildcardPattern
-                | ArrayPattern
-                | MapPattern
-                | EnumPattern ;
+FunctionDeclaration = [ 'async' ] ( 'function' | 'fn' ) IDENTIFIER [ GenericParameters ]
+                      '(' [ ParameterList ] ')' [ ':' TypeAnnotation ] Block ;
 
-LiteralPattern  = NUMBER | STRING | 'true' | 'false' | 'null' ;
-VariablePattern = IDENTIFIER ;
-WildcardPattern = '_' ;
-ArrayPattern    = '[' [ PatternList ] ']' ;
-MapPattern      = '{' [ MapPatternList ] '}' ;
-EnumPattern     = IDENTIFIER '.' IDENTIFIER [ '(' [ PatternList ] ')' ] ;
+ParameterList       = Parameter { ',' Parameter } [ ',' RestParameter ] ;
+Parameter           = IDENTIFIER [ ':' TypeAnnotation ] [ '=' Expression ] ;
+RestParameter       = '...' IDENTIFIER ;
 
-DestructurePattern = ArrayPattern | MapPattern ;
+StructDeclaration   = 'struct' IDENTIFIER [ GenericParameters ] ':' NEWLINE INDENT
+                          { StructMember }
+                      DEDENT ;
+
+StructMember        = StructField | MethodDeclaration ;
+StructField         = IDENTIFIER [ ':' TypeAnnotation ] NEWLINE ;
+MethodDeclaration   = ( 'function' | 'fn' ) IDENTIFIER '(' [ ParameterList ] ')' [ ':' TypeAnnotation ] Block ;
+
+EnumDeclaration     = 'enum' IDENTIFIER ':' NEWLINE INDENT
+                          EnumVariant { EnumVariant }
+                      DEDENT ;
+
+EnumVariant         = IDENTIFIER [ '(' [ ParameterList ] ')' ] NEWLINE ;
+
+TraitDeclaration    = 'trait' IDENTIFIER [ GenericParameters ] ':' NEWLINE INDENT
+                          { TraitMethodSignature }
+                      DEDENT ;
+
+TraitMethodSignature = ( 'function' | 'fn' ) IDENTIFIER '(' [ ParameterList ] ')' [ ':' TypeAnnotation ] NEWLINE ;
+
+ImplDeclaration     = 'impl' IDENTIFIER [ GenericParameters ] 'for' IDENTIFIER ':' NEWLINE INDENT
+                          { MethodDeclaration }
+                      DEDENT ;
+
+ImportStatement     = 'import' ModulePath [ 'as' IDENTIFIER ] NEWLINE
+                    | 'from' ModulePath 'import' ImportSymbolList NEWLINE ;
+
+ModulePath          = IDENTIFIER { '.' IDENTIFIER } | STRING_LITERAL ;
+ImportSymbolList    = IDENTIFIER [ 'as' IDENTIFIER ] { ',' IDENTIFIER [ 'as' IDENTIFIER ] } ;
+
+(* ========================================================================= *)
+(* 4. EXPRESSIONS & OPERATORS                                                *)
+(* ========================================================================= *)
+
+Expression          = PipeExpression ;
+
+PipeExpression      = LogicalOrExpression { '|>' LogicalOrExpression } ;
+
+LogicalOrExpression = LogicalAndExpression { 'or' LogicalAndExpression } ;
+
+LogicalAndExpression= EqualityExpression { 'and' EqualityExpression } ;
+
+EqualityExpression  = RelationalExpression { ( '==' | '!=' ) RelationalExpression } ;
+
+RelationalExpression= AdditiveExpression { ( '<' | '<=' | '>' | '>=' ) AdditiveExpression } ;
+
+AdditiveExpression  = MultiplicativeExpression { ( '+' | '-' ) MultiplicativeExpression } ;
+
+MultiplicativeExpression = UnaryExpression { ( '*' | '/' | '%' ) UnaryExpression } ;
+
+UnaryExpression     = ( '-' | 'not' | 'bnot' | 'await' ) UnaryExpression
+                    | PostfixExpression ;
+
+PostfixExpression   = PrimaryExpression { CallSuffix | IndexSuffix | DotSuffix } ;
+
+CallSuffix          = '(' [ ArgumentList ] ')' ;
+IndexSuffix         = '[' Expression ']' ;
+DotSuffix           = '.' IDENTIFIER ;
+
+ArgumentList        = ArgumentItem { ',' ArgumentItem } ;
+ArgumentItem        = [ '...' ] Expression ;
+
+PrimaryExpression   = NUMBER_LITERAL
+                    | STRING_LITERAL
+                    | INTERPOLATED_STRING
+                    | 'true'
+                    | 'false'
+                    | 'null'
+                    | 'self'
+                    | IDENTIFIER
+                    | '(' Expression ')'
+                    | ArrayLiteral
+                    | MapLiteral
+                    | ComprehensionExpression
+                    | LambdaExpression ;
+
+ArrayLiteral        = '[' [ ArgumentList ] ']' ;
+
+MapLiteral          = '{' [ MapEntryList ] '}' ;
+MapEntryList        = MapEntry { ',' MapEntry } ;
+MapEntry            = ( IDENTIFIER | STRING_LITERAL | '[' Expression ']' ) ':' Expression
+                    | '...' Expression ;
+
+ComprehensionExpression = '[' Expression 'for' IDENTIFIER 'in' Expression [ 'if' Expression ] ']' ;
+
+LambdaExpression    = ( 'function' | 'fn' ) '(' [ ParameterList ] ')' [ ':' TypeAnnotation ] ( Block | ':' Expression ) ;
+
+(* ========================================================================= *)
+(* 5. PATTERNS & DESTRUCTURING                                               *)
+(* ========================================================================= *)
+
+Pattern             = IDENTIFIER | DestructurePattern ;
+
+DestructurePattern  = ArrayPattern | MapPattern ;
+
+MatchPattern        = LiteralPattern
+                    | VariablePattern
+                    | WildcardPattern
+                    | ArrayPattern
+                    | MapPattern
+                    | EnumPattern ;
+
+LiteralPattern      = NUMBER_LITERAL | STRING_LITERAL | 'true' | 'false' | 'null' ;
+VariablePattern     = IDENTIFIER ;
+WildcardPattern     = '_' ;
+ArrayPattern        = '[' [ PatternList ] ']' ;
+MapPattern          = '{' [ MapPatternList ] '}' ;
+EnumPattern         = IDENTIFIER '.' IDENTIFIER [ '(' [ PatternList ] ')' ] ;
+
+PatternList         = MatchPattern { ',' MatchPattern } ;
+MapPatternList      = MapPatternEntry { ',' MapPatternEntry } ;
+MapPatternEntry     = IDENTIFIER [ ':' MatchPattern ] ;
+
+(* ========================================================================= *)
+(* 6. GRADUAL TYPE ANNOTATIONS                                               *)
+(* ========================================================================= *)
+
+TypeAnnotation      = BasicType
+                    | GenericType
+                    | FunctionType
+                    | UnionType ;
+
+BasicType           = 'Int' | 'Float' | 'Number' | 'String' | 'Boolean' | 'Null' | 'Any' | IDENTIFIER ;
+GenericType         = IDENTIFIER '<' TypeAnnotation { ',' TypeAnnotation } '>' ;
+FunctionType        = 'Function' '<' '(' [ TypeAnnotation { ',' TypeAnnotation } ] ')' '->' TypeAnnotation '>' ;
+UnionType           = TypeAnnotation '|' TypeAnnotation ;
 ```
 
 ---
 
-## 5. Semantic Rules & Execution Semantics
+## 5. Operational Semantics & Execution Models
 
-### 5.1. Variables & Scope
-1. **Declaration (`let`)**: `let name = expr` introduces a binding into the current lexical scope. Variable redeclaration in the same scope without shadowing is rejected by the semantic analyzer with an error diagnostic.
-2. **Lexical Scoping**: Inner scopes can read and mutate bindings from enclosing outer scopes.
-3. **Shadowing**: A declaration in an inner scope may shadow a declaration in an outer scope. User variables may cleanly shadow global built-in functions.
-4. **Hoisting**: Top-level function declarations are hoisted to the enclosing program or module scope. Functions can be called before their syntactic point of declaration, enabling mutual recursion:
-   ```unfish
-   function is_even(n):
-       if n == 0: return true
-       return is_odd(n - 1)
+### 5.1. Variables, Scoping & Upvalue Capture
+1. **Lexical Binding (`let`)**: `let x = expr` binds identifier `x` in the immediate lexical block scope. A duplicate declaration of `x` within the identical scope produces a compile-time semantic error.
+2. **Lexical Scope Resolution**: Variable lookup traverses parent lexical environments from innermost to outermost, ending at the global environment.
+3. **Identifier Shadowing**: Inner scopes may shadow variables of identical names from enclosing scopes or global builtins without mutating the outer binding.
+4. **Function Hoisting**: Named top-level function declarations are hoisted to the head of their enclosing block or module, permitting mutual recursion without forward declarations.
+5. **Lexical Closures (Upvalues)**: When a function captures a local variable from an enclosing scope:
+   * While the enclosing frame remains active on the call stack, the variable is accessed via an *open upvalue* referencing the stack slot.
+   * When the enclosing frame exits, the VM executes `OP_CLOSE_UPVALUE`, copying the stack value into heap storage (*closed upvalue*). The closure retains full read/write access for its entire lifetime.
 
-   function is_odd(n):
-       if n == 0: return false
-       return is_even(n - 1)
-   ```
+### 5.2. Control Flow & Truthiness Semantics
+* **Strict Truthiness**: In Unfish, only `false` and `null` evaluate to falsy in conditional contexts (`if`, `while`, logical `and`/`or`). All other values—including numeric `0`, empty strings `""`, empty arrays `[]`, and empty maps `{}`—are strictly truthy.
+* **Short-Circuit Evaluation**:
+  * `a or b`: Evaluates `a`. If `a` is truthy, returns `a` immediately without evaluating `b`. Otherwise, returns `b`.
+  * `a and b`: Evaluates `a`. If `a` is falsy, returns `a` immediately without evaluating `b`. Otherwise, returns `b`.
+* **Loop Control (`break` / `continue`)**:
+  * `break`: Immediately exits the innermost loop.
+  * `continue`: Aborts the current iteration and jumps to the loop header/increment test.
+  * Using `break` or `continue` outside an enclosing loop triggers a compile-time syntax error.
 
-### 5.2. Control Flow Semantics
-* **`if` / `elif` / `else`**: Evaluates conditions sequentially. Only values that are strictly `false` or `null` are considered falsy; all other values (including `0`, `""`, and `[]`) are truthy.
-* **`while cond:`**: Iterates while `cond` evaluates to a truthy value.
-* **`for item in iterable:`**: Iterates over elements of arrays, keys of maps, characters of strings, or ranges produced by `range(start, end)`. Supports pattern destructuring:
-  ```unfish
-  let pairs = [["a", 1], ["b", 2]]
-  for [key, val] in pairs:
-      say key + " -> " + str(val)
-  ```
-* **`repeat count:`**: Dedicated educational construct executing a block exactly `count` times (where `count` must evaluate to a positive integer).
-* **`break` / `continue`**: `break` immediately terminates the innermost enclosing loop; `continue` skips the remainder of the current iteration. Using either outside a loop is a compile-time semantic error.
+### 5.3. Structured Exception Unwinding Semantics
+Unfish provides full structured exception handling via `try`, `catch`, and optional `finally`:
 
-### 5.3. Functions, Closures & Parameters
-* **First-Class Citizens**: Functions are runtime values of kind `UF_VAL_FUNCTION` or `UF_VAL_CLOSURE`. They can be stored in variables, passed as arguments, returned from other functions, and stored in collections.
-* **Lexical Closures**: A function captures any local variables from enclosing scopes that it references. Captured variables remain accessible and mutable across the closure's entire lifetime even after the enclosing function returns.
-* **Default Arguments**: Function parameters may declare default values (`function f(x = 10)`). Default parameters must follow non-default parameters.
-* **Rest Parameters (`...rest`)**: Collects all remaining arguments into a dynamically allocated array. Must be the final parameter.
-* **Spread Arguments (`f(...args)`)**: Expands an array into individual function arguments at the call site.
-
-### 5.4. Pipe Operator (`|>`)
-Unfish provides the forward pipe operator `|>` to facilitate clear, readable data processing pipelines:
 ```unfish
-# Equivalent to: say(to_upper(trim("  unfish  ")))
-"  unfish  " |> trim |> to_upper |> say
-```
-When piped into a function call with multiple arguments, the piped value becomes the first argument:
-```unfish
-# Equivalent to: filter(map(nums, double_fn), is_even)
-nums |> map(double_fn) |> filter(is_even)
+try:
+    risky_operation()
+catch err:
+    say f"Caught error: {err}"
+finally:
+    cleanup_resources()
 ```
 
-### 5.5. Structs & Object-Oriented Semantics
-* **Declaration**: Structs declare named fields and associated methods.
-* **Constructors**: Invoking the struct name as a function constructs a new instance with fields initialized in declaration order:
-  ```unfish
-  struct Vector2:
-      x
-      y
+#### The Dual-Stack Exception Invariants
+1. **Handler Registration (`OP_PUSH_TRY`)**:
+   * Upon entering a `try` block, the VM pushes a `UfTryFrame` recording:
+     * `catch_ip`: Bytecode address of the `catch` handler.
+     * `frame_index`: Current call frame depth.
+     * `stack_depth`: Current operand evaluation stack height.
+2. **Exception Propagation (`raise` / `error()`)**:
+   * When an exception is raised, the VM inspects the `try_stack`:
+     * If handlers exist, the VM unwinds all call frames created after the `try` block entered (`vm->frame_count = handler->frame_index + 1`).
+     * The operand stack is restored to `handler->stack_depth`.
+     * The error value is pushed onto the restored stack.
+     * Control jumps directly to `handler->catch_ip`.
+3. **Structured Cleanup (`finally`)**:
+   * Code in a `finally` block is guaranteed to execute whether the `try` block completes normally, raises an exception caught by `catch`, or attempts an early return.
+4. **Early Returns & Loop Escapes Inside `try`**:
+   * When `return`, `break`, or `continue` is executed within a `try` block, the compiler emits explicit `OP_POP_TRY` instructions for each active enclosing `try` block up to the target scope boundary, preventing stale handler stack corruption.
 
-      function magnitude(self):
-          return sqrt(self.x * self.x + self.y * self.y)
+### 5.4. Structs, Methods & Dynamic Dispatch
+* **Struct Instantiation**: Calling a struct name `Fish(...)` invokes its constructor, allocating an instance object initialized with field arguments in declaration order.
+* **Method Invocation**: Method calls `instance.method(arg1, arg2)` bind `instance` as the explicit first parameter `self`.
+* **Field Mutability**: Struct fields are mutable via dot-assignment `instance.field = value`.
+* **Dynamic Reflection**: `has_field(inst, "field")` and `fields(inst)` permit dynamic structural reflection.
 
-  let v = Vector2(3, 4)
-  say v.magnitude() # 5
-  ```
-* **The `self` Keyword**: The first parameter of every struct method must be named `self`, explicitly binding the instance on method dispatch. Calling a struct method without an explicit `self` parameter declaration triggers a compile-time diagnostic.
+---
 
-### 5.6. Pattern Matching (`match`)
-The `match` construct provides multi-way branching based on value shape and type:
-```unfish
-match shape:
-    Circle(r) => PI * r * r
-    Rectangle(w, h) => w * h
-    Point(x, y) if x == y => 0
-    _ => -1
-```
-* **Exhaustiveness**: A wildcard `_` or variable pattern guarantees exhaustiveness.
-* **Guards**: `if <expr>` guards allow arbitrary boolean expressions to restrict pattern matching.
+## 6. Gradual Type System Tiers
 
-### 5.7. Concurrency: Fibers & Channels
-Unfish provides cooperative user-space fibers:
-```unfish
-let ch = channel()
+Unfish implements a multi-tier gradual type system that provides educational progression from pure dynamic scripting to strict compile-time type verification:
 
-spawn(function():
-    send(ch, "Message from fiber")
-)
-
-let msg = recv(ch)
-say msg # "Message from fiber"
-run_scheduler()
-```
-* `spawn(fn)` creates a new cooperative fiber.
-* `yield()` yields the CPU to the next scheduled fiber.
-* `channel(cap)` creates a message passing channel.
-* `send(ch, val)` sends a value to the channel.
-* `recv(ch)` receives a value from the channel.
-* `run_scheduler()` runs all queued fibers to completion.
+* **Tier 0: Untyped Dynamic (Default)**: Variables and parameters carry no type annotations. Full dynamic duck-typing is preserved.
+* **Tier 1: Soft Annotations**: Types can be written (`let x: Number = 42`, `fn add(a: Int, b: Int): Int`) to serve as self-documenting code and LSP editor hints.
+* **Tier 2: Gradual Consistency (`unfish check`)**: The semantic analyzer verifies local type assignments and warns on incompatible primitive operations while allowing `Any` escape hatches.
+* **Tier 3: Strict Static Mode (`unfish check --strict`)**: Type consistency is strictly enforced. Implicit type conversions are rejected, missing trait implementations trigger compile-time errors, and exhaustiveness checking is mandated on all `match` expressions.
