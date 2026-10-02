@@ -1,0 +1,16 @@
+# expect-exit: 3
+# expect-error: Runtime Error: 'len()' argument must be a string, array, map, or buffer, got 'number'
+
+# Regression: an uncaught error raised inside a builtin was reported, but both
+# VMs then carried on with a null result and ran the rest of the program --
+# here printing "after" and "still running" -- exiting 3 only at the very end.
+# The differential suite compares stdout, so any output after the error fails.
+
+function f():
+    let n = len(5)
+    say "still running"
+    return n
+
+say "before"
+f()
+say "after"

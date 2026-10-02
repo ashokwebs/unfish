@@ -212,6 +212,14 @@ static bool call_value(UfVM* vm, UfValue callee, size_t argc) {
         if (vm->rt && vm->rt->profiler) {
             uf_profiler_exit(vm->rt->profiler, callee.as.native_fn.name);
         }
+        /* A caught error never returns here (it longjmps to its handler), so a
+         * raised flag means the error was uncaught and already reported. It must
+         * stop the VM; carrying on with the null result ran the rest of the
+         * program after the diagnostic was printed. */
+        if (vm->rt && vm->rt->had_runtime_error) {
+            vm->had_error = true;
+            return false;
+        }
         vm->stack_top -= argc + 1;
         uf_vm_push(vm, res);
         return true;
@@ -253,6 +261,10 @@ static bool call_value(UfVM* vm, UfValue callee, size_t argc) {
         /* Tree-walk function called from VM */
         SourceSpan span = (SourceSpan){0};
         UfValue res = uf_runtime_call(vm->rt, callee, argc, vm->stack_top - argc, span);
+        if (vm->rt && vm->rt->had_runtime_error) {
+            vm->had_error = true;
+            return false;
+        }
         vm->stack_top -= argc + 1;
         uf_vm_push(vm, res);
         return true;

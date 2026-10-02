@@ -338,6 +338,14 @@ static bool regvm_call_value(UfRegVM* vm, UfValue callee, size_t argc, uint8_t b
         if (vm->rt && vm->rt->profiler) {
             uf_profiler_exit(vm->rt->profiler, callee.as.native_fn.name);
         }
+        /* A caught error never returns here (it longjmps to its handler), so a
+         * raised flag means the error was uncaught and already reported. It must
+         * stop the VM; carrying on with the null result ran the rest of the
+         * program after the diagnostic was printed. */
+        if (vm->rt && vm->rt->had_runtime_error) {
+            vm->had_error = true;
+            return false;
+        }
         caller_frame->regs[dest_reg] = res;
         return true;
     }
@@ -372,6 +380,10 @@ static bool regvm_call_value(UfRegVM* vm, UfValue callee, size_t argc, uint8_t b
     if (callee.kind == UF_VAL_FUNCTION) {
         SourceSpan span = (SourceSpan){0};
         UfValue res = uf_runtime_call(vm->rt, callee, argc, args_base, span);
+        if (vm->rt && vm->rt->had_runtime_error) {
+            vm->had_error = true;
+            return false;
+        }
         caller_frame->regs[dest_reg] = res;
         return true;
     }
