@@ -1,0 +1,98 @@
+# expect: try loop control test passed
+
+# 1. while loop with break inside try
+let w_count = 0
+let w_i = 0
+while w_i < 10:
+    w_i = w_i + 1
+    try:
+        if w_i == 5:
+            break
+        w_count = w_count + 1
+    catch e:
+        assert(false)
+
+assert(w_i == 5)
+assert(w_count == 4)
+
+# 2. while loop with continue inside try
+let w_evens = []
+let w_j = 0
+while w_j < 6:
+    w_j = w_j + 1
+    try:
+        if w_j % 2 != 0:
+            continue
+        push(w_evens, w_j)
+    catch e:
+        assert(false)
+
+assert(len(w_evens) == 3)
+assert(w_evens[0] == 2 and w_evens[1] == 4 and w_evens[2] == 6)
+
+# 3. repeat loop with break inside try
+let r_count = 0
+repeat 10 times:
+    try:
+        if r_count == 3:
+            break
+        r_count = r_count + 1
+    catch e:
+        assert(false)
+
+assert(r_count == 3)
+
+# 4. for-in loop with break inside try
+let f_found = null
+let items = ["apple", "banana", "cherry", "date"]
+for item in items:
+    try:
+        if item == "cherry":
+            f_found = item
+            break
+    catch e:
+        assert(false)
+
+assert(f_found == "cherry")
+
+# 5. for-in loop with continue inside try
+let f_filtered = []
+for item in items:
+    try:
+        if item == "banana":
+            continue
+        push(f_filtered, item)
+    catch e:
+        assert(false)
+
+assert(len(f_filtered) == 3)
+assert(f_filtered[0] == "apple" and f_filtered[1] == "cherry" and f_filtered[2] == "date")
+
+# 6. nested try with break
+let n_val = 0
+let n_i = 0
+while n_i < 5:
+    n_i = n_i + 1
+    try:
+        try:
+            if n_i == 3:
+                break
+            n_val = n_val + 10
+        catch inner_e:
+            assert(false)
+    catch outer_e:
+        assert(false)
+
+assert(n_i == 3)
+assert(n_val == 20)
+
+# 7. verify handler stack is clean after breaks and continues
+let outer_caught = false
+try:
+    let div_zero = 100 / 0
+catch e:
+    outer_caught = true
+
+assert(outer_caught)
+
+say "try loop control test passed"

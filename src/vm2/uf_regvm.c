@@ -1055,6 +1055,10 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
         case ROP_RETURN:
 #endif
         {
+            while (vm->handler_count > 0 && vm->handlers[vm->handler_count - 1].frame_index >= vm->frame_count - 1) {
+                vm->handler_count--;
+                if (vm->rt && vm->rt->try_handler_count > 0) vm->rt->try_handler_count--;
+            }
             uint8_t a = REG_GET_A(instr);
             UfValue ret_val = regs[a];
             if (frame->closure && frame->closure->function && frame->closure->function->is_async) {

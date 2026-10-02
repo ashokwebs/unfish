@@ -22,6 +22,7 @@ typedef struct {
 typedef struct UfRegLoop {
     int start_ip;
     int scope_depth;
+    int try_depth;
     int* break_jumps;
     size_t break_count;
     size_t break_capacity;
@@ -50,6 +51,7 @@ typedef struct UfRegCompiler {
     UfRegLocal locals[256];
     int local_count;
     int scope_depth;
+    int try_depth;
 
     UfRegUpvalue upvalues[256];
     int upvalue_count;
@@ -290,6 +292,7 @@ static void compiler_init(UfRegCompiler* c, UfRegCompiler* enclosing, RegFunctio
     c->had_error = false;
     c->local_count = 0;
     c->scope_depth = 0;
+    c->try_depth = 0;
     c->upvalue_count = 0;
     c->current_loop = NULL;
     c->next_reg = 0;
@@ -961,6 +964,7 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
             UfRegLoop loop;
             loop.start_ip = (int)c->chunk->code_count;
             loop.scope_depth = c->scope_depth;
+            loop.try_depth = c->try_depth;
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
@@ -999,6 +1003,7 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
             UfRegLoop loop;
             loop.start_ip = (int)c->chunk->code_count;
             loop.scope_depth = c->scope_depth;
+            loop.try_depth = c->try_depth;
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
@@ -1055,6 +1060,7 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
             UfRegLoop loop;
             loop.start_ip = (int)c->chunk->code_count;
             loop.scope_depth = c->scope_depth;
+            loop.try_depth = c->try_depth;
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
@@ -1123,6 +1129,9 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
                     emit_abc(c, ROP_CLOSE_UPVAL, c->locals[i].reg, 0, 0, line);
                 }
             }
+            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
+                emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
+            }
             if (c->current_loop->break_count >= c->current_loop->break_capacity) {
                 size_t old_cap = c->current_loop->break_capacity;
                 c->current_loop->break_capacity = (old_cap < 8) ? 8 : old_cap * 2;
@@ -1145,6 +1154,9 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
                 if (c->locals[i].is_captured) {
                     emit_abc(c, ROP_CLOSE_UPVAL, c->locals[i].reg, 0, 0, line);
                 }
+            }
+            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
+                emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
             }
             if (c->current_loop->continue_count >= c->current_loop->continue_capacity) {
                 size_t old_cap = c->current_loop->continue_capacity;
@@ -1220,6 +1232,9 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
         }
 
         case UF_STMT_RETURN: {
+            for (int t = 0; t < c->try_depth; ++t) {
+                emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
+            }
             if (stmt->as.return_stmt.value) {
                 uint8_t r_val = compile_expr(c, stmt->as.return_stmt.value, -1);
                 emit_abc(c, ROP_RETURN, r_val, 0, 0, line);
@@ -1246,9 +1261,11 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
             uint8_t r_err = alloc_reg(c);
             int try_jump = (int)c->chunk->code_count;
             emit_abx(c, ROP_PUSH_TRY, r_err, 0, line);
+            c->try_depth++;
 
             compile_stmt(c, stmt->as.try_catch.try_block);
             emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
+            c->try_depth--;
 
             int skip_catch = (int)c->chunk->code_count;
             emit_sax(c, ROP_JMP, 0, line);

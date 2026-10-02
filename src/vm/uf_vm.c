@@ -647,6 +647,10 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_RETURN: {
+                while (vm->handler_count > 0 && vm->handlers[vm->handler_count - 1].frame_index >= vm->frame_count - 1) {
+                    vm->handler_count--;
+                    if (vm->rt && vm->rt->try_handler_count > 0) vm->rt->try_handler_count--;
+                }
                 UfValue result = POP();
                 if (frame->closure && frame->closure->function && frame->closure->function->is_async) {
                     UfPromiseObject* p = uf_promise_create(vm->rt);

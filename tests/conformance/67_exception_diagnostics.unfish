@@ -1,0 +1,88 @@
+# expect: exception diagnostics test passed
+
+# 1. Inspect error kind and message for DivisionByZero
+let caught_div = false
+try:
+    let z = 100 / 0
+catch e:
+    caught_div = true
+    assert(e.kind == "DivisionByZero")
+    assert(len(e.message) > 0)
+
+assert(caught_div)
+
+# 2. Inspect error kind and message for IndexOutOfBounds
+let caught_oob = false
+try:
+    let arr = [1, 2, 3]
+    let bad = arr[10]
+catch e:
+    caught_oob = true
+    assert(e.kind == "IndexOutOfBounds")
+
+assert(caught_oob)
+
+# 3. UserError with custom kind and message
+let caught_user = false
+try:
+    error("insufficient funds", "PaymentError")
+catch e:
+    caught_user = true
+    assert(e.kind == "PaymentError")
+    assert(e.message == "insufficient funds")
+
+assert(caught_user)
+
+# 4. Error inspection using string conversion and type
+let caught_type = false
+try:
+    error("test error")
+catch e:
+    caught_type = true
+    assert(type_of(e) == "error")
+    assert(e.kind == "UserError")
+    assert(e.message == "test error")
+
+assert(caught_type)
+
+# 5. Multi-level exception unwinding through call stack
+fn level_c():
+    error("deep failure", "CallStackError")
+
+fn level_b():
+    level_c()
+    return "unreachable"
+
+fn level_a():
+    return level_b()
+
+let caught_stack = false
+try:
+    level_a()
+catch e:
+    caught_stack = true
+    assert(e.kind == "CallStackError")
+    assert(e.message == "deep failure")
+
+assert(caught_stack)
+
+# 6. Multiple sequential try-catches in same function
+let seq_count = 0
+try:
+    error("first")
+catch e1:
+    seq_count = seq_count + 1
+
+try:
+    error("second")
+catch e2:
+    seq_count = seq_count + 1
+
+try:
+    error("third")
+catch e3:
+    seq_count = seq_count + 1
+
+assert(seq_count == 3)
+
+say "exception diagnostics test passed"

@@ -26,6 +26,7 @@ typedef enum {
 typedef struct UfLoop {
     int start_ip;
     int scope_depth;
+    int try_depth;
     int* break_jumps;
     size_t break_count;
     size_t break_capacity;
@@ -57,6 +58,7 @@ typedef struct UfCompiler {
     UfLocal locals[256];
     int local_count;
     int scope_depth;
+    int try_depth;
 
     UfUpvalue upvalues[256];
     int upvalue_count;

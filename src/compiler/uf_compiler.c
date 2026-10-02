@@ -42,6 +42,7 @@ static void compiler_init(UfCompiler* compiler, UfCompiler* enclosing, FunctionT
     compiler->had_error = false;
     compiler->local_count = 0;
     compiler->scope_depth = 0;
+    compiler->try_depth = 0;
     compiler->upvalue_count = 0;
     compiler->current_loop = NULL;
     compiler->current_line = enclosing ? enclosing->current_line : 0;
@@ -890,6 +891,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             UfLoop loop;
             loop.start_ip = (int)c->chunk->code_count;
             loop.scope_depth = c->scope_depth;
+            loop.try_depth = c->try_depth;
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
@@ -934,6 +936,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             UfLoop loop;
             loop.start_ip = (int)c->chunk->code_count;
             loop.scope_depth = c->scope_depth;
+            loop.try_depth = c->try_depth;
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
@@ -998,6 +1001,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             UfLoop loop;
             loop.start_ip = (int)c->chunk->code_count;
             loop.scope_depth = c->scope_depth;
+            loop.try_depth = c->try_depth;
             loop.break_jumps = NULL;
             loop.break_count = 0;
             loop.break_capacity = 0;
@@ -1081,6 +1085,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                     }
                 }
             }
+            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
+                emit_byte(c, (uint8_t)OP_POP_TRY, line);
+            }
             int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
             if (c->current_loop->break_count >= c->current_loop->break_capacity) {
                 size_t ncap = c->current_loop->break_capacity < 4 ? 4 : c->current_loop->break_capacity * 2;
@@ -1103,6 +1110,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         emit_byte(c, (uint8_t)OP_POP, line);
                     }
                 }
+            }
+            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
+                emit_byte(c, (uint8_t)OP_POP_TRY, line);
             }
             int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
             if (c->current_loop->continue_count >= c->current_loop->continue_capacity) {
@@ -1183,6 +1193,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             } else {
                 emit_byte(c, (uint8_t)OP_NULL, line);
             }
+            for (int t = 0; t < c->try_depth; ++t) {
+                emit_byte(c, (uint8_t)OP_POP_TRY, line);
+            }
             emit_byte(c, (uint8_t)OP_RETURN, line);
             break;
         }
@@ -1196,10 +1209,12 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
         }
         case UF_STMT_TRY_CATCH: {
             int catch_jump = emit_jump(c, (uint8_t)OP_PUSH_TRY, line);
+            c->try_depth++;
 
             compile_stmt(c, stmt->as.try_catch.try_block);
 
             emit_byte(c, (uint8_t)OP_POP_TRY, line);
+            c->try_depth--;
             int try_success_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
 
             patch_jump(c, catch_jump);

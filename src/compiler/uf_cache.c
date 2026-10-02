@@ -23,8 +23,9 @@
 /* Bump whenever the compilers' output or their accept/reject behaviour changes,
  * so that bytecode cached by an older build is discarded rather than replayed.
  * v3: compilers now reject programs that exceed internal limits instead of
- * silently emitting broken bytecode. */
-#define UFC_VERSION     3
+ * silently emitting broken bytecode.
+ * v4: compilers properly emit OP_POP_TRY on loop break/continue and early returns. */
+#define UFC_VERSION     4
 
 uint64_t uf_cache_hash_source(const char* source, size_t length) {
     uint64_t hash = 14695981039346656037ULL;

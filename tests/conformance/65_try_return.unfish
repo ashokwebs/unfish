@@ -1,0 +1,57 @@
+# expect: try return test passed
+
+fn test_return_in_try():
+    try:
+        return 42
+    catch e:
+        return 99
+
+assert(test_return_in_try() == 42)
+
+fn test_return_in_nested_try():
+    try:
+        try:
+            return 100
+        catch e1:
+            return 101
+    catch e2:
+        return 102
+
+assert(test_return_in_nested_try() == 100)
+
+fn test_return_in_catch():
+    try:
+        let x = 10 / 0
+        return 1
+    catch e:
+        return 2
+
+assert(test_return_in_catch() == 2)
+
+fn test_try_return_caller_unaffected():
+    test_return_in_try()
+    test_return_in_nested_try()
+    test_return_in_catch()
+    let caught = false
+    try:
+        let y = 20 / 0
+    catch e:
+        caught = true
+    assert(caught)
+
+test_try_return_caller_unaffected()
+
+fn test_return_with_finally():
+    let fin = false
+    try:
+        try:
+            return 500
+        finally:
+            fin = true
+    catch e:
+        let _ = 0
+    assert(fin)
+
+assert(test_return_with_finally() == 500)
+
+say "try return test passed"

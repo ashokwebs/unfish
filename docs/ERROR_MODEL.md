@@ -124,42 +124,80 @@ The Unfish runtime engines handle stack unwinding differently according to their
 ├────────────────────┬───────────────────────────────────────────────────┤
 │ Execution Engine   │ Unwinding Mechanism                               │
 ├────────────────────┼───────────────────────────────────────────────────┤
-│ 1. AST Interpreter │ Setjmp/longjmp handler stack on UfRuntime         │
-│ 2. Stack VM        │ OP_PUSH_TRY / OP_POP_TRY exception frames         │
-│ 3. Register VM     │ ROP_PUSH_TRY / ROP_POP_TRY exception frames       │
-│ 4. Native C99 AOT  │ uf_try_push / uf_try_pop setjmp unwinding list    │
-│ 5. WebAssembly     │ WASI longjmp / JS exception rethrow bridge        │
+│ 1. AST Interpreter │ Dual-stack setjmp/longjmp handler stack on runtime│
+│ 2. Stack VM        │ OP_PUSH_TRY / OP_POP_TRY synchronized with setjmp │
+│ 3. Register VM     │ ROP_PUSH_TRY / ROP_POP_TRY synchronized handlers   │
+│ 4. Native C99 AOT  │ uf_catch_push / uf_catch_pop linked frame list    │
+│ 5. WebAssembly     │ WASI longjmp / Emscripten exception bridge        │
 └────────────────────┴───────────────────────────────────────────────────┘
 ```
 
-### 5.1. Stack VM Exception Unwinding (`src/vm/uf_vm.c`)
-In the bytecode virtual machine, exception handling is implemented via dedicated opcodes:
-* `OP_PUSH_TRY [u16 catch_offset]`: Pushes a `TryFrame` onto the VM's exception handler stack. The frame records:
-  * Catch instruction address (`ip + catch_offset`).
-  * Current call frame index (`frame_count`).
-  * Current operand stack pointer (`stack_top`).
-  * Current environment scope.
-* `OP_POP_TRY`: Discards the topmost `TryFrame` upon normal completion of the `try` block.
-* `OP_RETHROW`: Re-raises an exception that was not handled.
+### 5.1. Dual-Stack Handler Synchronization
 
-#### When a runtime error occurs in the VM:
-1. The VM checks if `vm->try_count > 0`.
-2. If a `TryFrame` exists:
-   * Any open upvalues pointing to stack slots above the `TryFrame`'s saved stack pointer are closed into heap storage via `uf_vm_close_upvalues`.
-   * The call frame stack is rewound to the saved frame depth.
-   * The operand stack pointer is restored to the saved pointer.
-   * The exception value is pushed onto the operand stack.
-   * The instruction pointer `ip` jumps to `catch_offset`.
-   * Execution resumes seamlessly inside the catch block.
-3. If no `TryFrame` exists:
-   * The VM prints an uncaught exception stack trace.
-   * Execution terminates with exit code `3`.
+Unfish programs can invoke native C functions (`UfNativeFn`) from bytecode, and bytecode functions can invoke other bytecode functions. When an error occurs—such as division by zero, array index out of bounds, or an explicit `error()` call inside a native builtin—the C runtime needs a reliable way to unwind back to the enclosing `try:` block without aborting the host process.
 
-### 5.2. Register VM Exception Unwinding (`src/vm2/uf_regvm.c`)
-In the 256-register VM:
-* `ROP_PUSH_TRY [reg_dest, catch_offset]`: Registers a try frame. If an exception triggers, the exception value is deposited directly into register `reg_dest`, and `PC` branches to `catch_offset`.
-* `ROP_POP_TRY`: Pops the active handler.
-* `ROP_RETHROW [reg_err]`: Re-raises the error stored in register `reg_err`.
+To achieve this with 100% deterministic safety, Unfish maintains two parallel, synchronized stacks:
+1. **The VM Handler Stack (`vm->handlers`)**:
+   Tracks the bytecode-level state for each active `try:` block:
+   * `frame_index`: Call frame index where the `try:` block was entered.
+   * `catch_ip`: Instruction pointer pointing directly to the catch block or finally block.
+   * `stack_top`: Operand stack pointer to restore when catching an exception.
+2. **The Runtime Handler Stack (`vm->rt->try_handlers`)**:
+   Tracks the C execution context using `setjmp`/`longjmp`:
+   * `jmp_buf jmp`: Environment buffer for `longjmp`.
+   * `scope_env`: Active environment pointer for lexical scoping and GC root tracing.
+   * `frame_count`: Call frame count on `rt`.
+   * `temp_root_count`: Number of GC temporary roots active at entry.
+
+Whenever `OP_PUSH_TRY` executes, both stacks push an entry. When `OP_POP_TRY` executes, both stacks pop an entry. When an error occurs:
+* `uf_runtime_raise` or `uf_runtime_error` sets `rt->current_error` and executes `longjmp(th->jmp, 1)`.
+* Control resumes inside `OP_PUSH_TRY` at `if (setjmp(th->jmp) != 0)`.
+* Any open upvalues pointing to call frame slots that are being discarded are closed via `close_upvalues(vm, cur_h->stack_top)`.
+* Call frames are popped down to `cur_h->frame_index`.
+* The operand stack top is restored to `cur_h->stack_top`, the error object is pushed, and `ip` jumps directly to `cur_h->catch_ip`.
+
+### 5.2. Edge Cases and Hardened Invariants
+
+#### 5.2.1. Early Return from Inside `try:` or `catch:`
+When a function executes `return <expr>` from within an active `try:` block:
+```unfish
+fn compute():
+    try:
+        return 42
+    catch e:
+        return -1
+```
+The compiler statically tracks the current `try_depth`. Before emitting `OP_RETURN` or `ROP_RETURN`, the compiler emits an `OP_POP_TRY` / `ROP_POP_TRY` for every active try block (`t < c->try_depth`). Furthermore, as a defensive runtime guarantee, `OP_RETURN` and `ROP_RETURN` verify that any remaining handlers belonging to the returning frame are purged:
+```c
+while (vm->handler_count > 0 && vm->handlers[vm->handler_count - 1].frame_index >= vm->frame_count - 1) {
+    vm->handler_count--;
+    if (vm->rt && vm->rt->try_handler_count > 0) vm->rt->try_handler_count--;
+}
+```
+This guarantees that returning from a `try:` block never leaves dangling handlers on the stack that could erroneously intercept future errors in callers (verified in `tests/conformance/65_try_return.unfish`).
+
+#### 5.2.2. Loop Control Flow: `break` and `continue` Inside `try:`
+When `break` or `continue` is invoked from inside a `try:` block located within a loop:
+```unfish
+while i < 10:
+    i = i + 1
+    try:
+        if i == 5:
+            break
+    catch e:
+        say "caught"
+```
+The compiler records `loop.try_depth` at loop initialization. When emitting `UF_STMT_BREAK` or `UF_STMT_CONTINUE`, the compiler emits `OP_POP_TRY` for every try block between `c->current_loop->try_depth` and `c->try_depth`. This ensures:
+1. Try handlers are cleanly popped before jumping to the break or continue target.
+2. In the Register VM, registers allocated for try handlers are not leaked.
+3. Subsequent statements after the loop execute with pristine exception stacks (verified in `tests/conformance/66_try_loop_control.unfish`).
+
+#### 5.2.3. Guaranteed `finally:` Execution
+Unfish guarantees that `finally:` blocks execute under all execution paths:
+1. **Normal Flow**: When the `try:` block completes without errors, control falls into the `finally:` block.
+2. **Handled Exception**: When an exception occurs and is caught by `catch:`, the `catch:` block completes and control flows into `finally:`.
+3. **Unhandled Exception**: When a `try:` block has a `finally:` but no `catch:` (or when `catch:` re-raises), the exception is temporarily captured, the `finally:` block executes, and then the original exception is rethrown (`OP_RETHROW` / `ROP_RETHROW`) to the next enclosing handler or top-level reporter.
+4. **Early Return**: Returning inside `try:` with an active `finally:` executes the `finally:` before the return value is handed back to the caller.
 
 ---
 
@@ -206,3 +244,19 @@ The following table catalogs the core error diagnostics verified in the Unfish t
 | `ERR_DESTRUCTURE_TYPE`| `err_destructure_type.unfish` | Destructuring non-array as array or non-map as map |
 | `ERR_ENUM_ARITY` | `err_enum_arity.unfish` | Enum variant constructed with mismatched payload arity |
 | `ERR_RAISE_AFTER_CATCH`| `err_raise_after_catch.unfish`| Exception re-raised within catch block without outer handler |
+
+---
+
+## 7. Conformance Test Matrix for Exception Handling
+
+The Unfish test harness includes automated tests dedicated to verifying every aspect of the exception model:
+
+* **`23_try_catch.unfish`**: Basic `try`/`catch` with standard errors and local variable scoping.
+* **`24_nested_try_catch.unfish`**: Nested `try`/`catch` blocks across multiple function frames.
+* **`25_user_errors.unfish`**: Custom error generation with `error(msg, kind)` and property extraction.
+* **`47_try_catch_finally.unfish`**: Comprehensive matrix of `finally:` combinations (normal, caught, rethrown).
+* **`64_stdlib_expanded.unfish`**: Built-in exception safety across filesystem, string, and buffer operations.
+* **`65_try_return.unfish`**: Early `return` statements inside `try:`, `catch:`, and nested blocks.
+* **`66_try_loop_control.unfish`**: `break` and `continue` inside `try:` across `while`, `repeat`, `for`, and `for-in`.
+* **`67_exception_diagnostics.unfish`**: Detailed inspection of `error.kind`, `error.message`, and multi-tier unwinding.
+
