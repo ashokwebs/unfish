@@ -1584,6 +1584,11 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                 rt->current_error = uf_val_null();
             }
 
+            /* An error still in flight once the catch clause is done with it:
+             * either there was no catch clause, or the catch clause raised. The
+             * finally block runs first and the error is rethrown afterwards. */
+            volatile bool rethrow_pending = had_exception && !stmt->as.try_catch.catch_block;
+
             if (had_exception) {
                 if (stmt->as.try_catch.catch_block) {
                     uf_runtime_push_temp_root(rt, caught_err);
@@ -1593,27 +1598,49 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                     }
                     UfEnv* prev_env = rt->current_env;
                     rt->current_env = catch_env;
-                    res = execute_statement(rt, catch_env, stmt->as.try_catch.catch_block);
+                    if (stmt->as.try_catch.finally_block && rt->try_handler_count < UF_MAX_TRY_HANDLERS) {
+                        /* Guard the catch clause so an error raised inside it
+                         * still runs the finally block before propagating,
+                         * rather than longjmp-ing straight past it. */
+                        UfTryHandler* guard = &rt->try_handlers[rt->try_handler_count++];
+                        guard->scope_env = catch_env;
+                        guard->frame_count = rt->frame_count;
+                        guard->temp_root_count = rt->temp_root_count;
+                        if (setjmp(guard->jmp) == 0) {
+                            res = execute_statement(rt, catch_env, stmt->as.try_catch.catch_block);
+                            if (rt->try_handler_count > 0 && &rt->try_handlers[rt->try_handler_count - 1] == guard) {
+                                rt->try_handler_count--;
+                            }
+                        } else {
+                            rethrow_pending = true;
+                            res = exec_ok();
+                            rt->had_runtime_error = false;
+                            caught_err = rt->current_error;
+                            rt->current_error = uf_val_null();
+                        }
+                    } else {
+                        res = execute_statement(rt, catch_env, stmt->as.try_catch.catch_block);
+                    }
                     rt->current_env = prev_env;
                     uf_runtime_pop_temp_roots(rt, 1);
-                    if (res.status == EXEC_OK || res.status == EXEC_RETURN) {
+                    if (!rethrow_pending && (res.status == EXEC_OK || res.status == EXEC_RETURN)) {
                         rt->had_runtime_error = false;
                     }
                 }
             }
 
             if (stmt->as.try_catch.finally_block) {
-                if (had_exception && !stmt->as.try_catch.catch_block) {
+                if (rethrow_pending) {
                     uf_runtime_push_temp_root(rt, caught_err);
                 }
                 ExecResult fin_res = execute_statement(rt, env, stmt->as.try_catch.finally_block);
-                if (had_exception && !stmt->as.try_catch.catch_block) {
+                if (rethrow_pending) {
                     uf_runtime_pop_temp_roots(rt, 1);
                 }
                 if (fin_res.status == EXEC_RETURN || fin_res.status == EXEC_ERROR ||
                     fin_res.status == EXEC_BREAK || fin_res.status == EXEC_CONTINUE) {
                     res = fin_res;
-                } else if (had_exception && !stmt->as.try_catch.catch_block) {
+                } else if (rethrow_pending) {
                     if (!rt->had_runtime_error) {
                         rt->had_runtime_error = true;
                         rt->current_error = caught_err;

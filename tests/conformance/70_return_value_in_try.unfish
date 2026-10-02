@@ -1,0 +1,44 @@
+# expect: caught TypeError
+# expect: caught DivisionByZero
+# expect: 7
+# expect: fin
+# expect: 3
+
+# The register VM popped a function's try handlers *before* evaluating its
+# return expression, so an error raised by the expression itself escaped the
+# very try it was written in.
+
+function f():
+    try:
+        return len(5)
+    catch e:
+        return "caught " + e.kind
+say f()
+
+function g(z):
+    try:
+        return 1 / z
+    catch e:
+        return "caught " + e.kind
+say g(0)
+
+# The value is fixed when `return` runs; the finally block cannot change it
+# by reassigning the variable it came from.
+function h():
+    let x = 7
+    try:
+        return x
+    finally:
+        x = 100
+say h()
+
+function k():
+    let total = 0
+    for i in range(3):
+        try:
+            total = total + 1
+        finally:
+            if i == 2:
+                say "fin"
+    return total
+say k()

@@ -354,9 +354,56 @@ static bool is_builtin_name(const char* name) {
 
 static const char* g_scope_vars[512];
 static size_t g_scope_var_count = 0;
+/* Enclosing try statements of the code being emitted, innermost last.
+ * `return`/`break`/`continue` leave them innermost-first: popping the catch
+ * frame if it is still pushed, then running the finally block inline, since
+ * the C jump bypasses the normal fall-through into it. g_loop_try_depth is
+ * the stack height at entry to the innermost loop. */
+#define UF_EMIT_MAX_TRY 64
+static const UfStmt* g_try_finally[UF_EMIT_MAX_TRY];
+static bool g_try_active[UF_EMIT_MAX_TRY];
+static int g_try_count = 0;
 static int g_loop_try_depth = 0;
 static int g_destruct_id = 0;
 static bool g_is_current_fn_async = false;
+
+static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_toplevel);
+static void emit_indent(FILE* out, int indent);
+
+static void try_context_push(const UfStmt* finally_block) {
+    if (g_try_count < UF_EMIT_MAX_TRY) {
+        g_try_finally[g_try_count] = finally_block;
+        g_try_active[g_try_count] = true;
+    }
+    g_try_count++;
+}
+
+static void try_context_pop(void) {
+    if (g_try_count > 0) g_try_count--;
+}
+
+/* Emit the exit path through every enclosing try above `floor`, innermost
+ * first. Each finally is emitted with only the try statements outside it in
+ * scope, so a `return` inside a finally does not re-run that same finally. */
+static void emit_try_exits(FILE* out, int floor, int indent) {
+    int saved = g_try_count;
+    for (int i = saved - 1; i >= floor; --i) {
+        g_try_count = i;
+        if (i >= UF_EMIT_MAX_TRY) continue;
+        if (g_try_active[i]) {
+            emit_indent(out, indent);
+            fputs("uf_catch_pop();\n", out);
+        }
+        if (g_try_finally[i]) {
+            emit_indent(out, indent);
+            fputs("{\n", out);
+            emit_stmt(out, g_try_finally[i], indent + 1, false);
+            emit_indent(out, indent);
+            fputs("}\n", out);
+        }
+    }
+    g_try_count = saved;
+}
 
 static void scope_push(const char* name) {
     if (name && g_scope_var_count < 512) {
@@ -1932,7 +1979,7 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             emit_expr(out, stmt->as.while_stmt.condition);
             fputs(")) {\n", out);
             int prev_loop_try_depth = g_loop_try_depth;
-            g_loop_try_depth = 0;
+            g_loop_try_depth = g_try_count;
             emit_stmt(out, stmt->as.while_stmt.body, indent + 1, false);
             g_loop_try_depth = prev_loop_try_depth;
             emit_indent(out, indent);
@@ -1951,7 +1998,7 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             emit_indent(out, indent + 1);
             fputs("for (long _rep = 0; _rep < _rep_limit; ++_rep) {\n", out);
             int prev_loop_try_depth = g_loop_try_depth;
-            g_loop_try_depth = 0;
+            g_loop_try_depth = g_try_count;
             emit_stmt(out, stmt->as.repeat_stmt.body, indent + 2, false);
             g_loop_try_depth = prev_loop_try_depth;
             emit_indent(out, indent + 1);
@@ -1980,7 +2027,7 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             size_t saved_scope = g_scope_var_count;
             scope_push(stmt->as.for_stmt.var_name);
             int prev_loop_try_depth = g_loop_try_depth;
-            g_loop_try_depth = 0;
+            g_loop_try_depth = g_try_count;
             emit_stmt(out, stmt->as.for_stmt.body, indent + 2, false);
             g_loop_try_depth = prev_loop_try_depth;
             g_scope_var_count = saved_scope;
@@ -1991,17 +2038,13 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             break;
         }
         case UF_STMT_BREAK:
+            emit_try_exits(out, g_loop_try_depth, indent);
             emit_indent(out, indent);
-            for (int t = 0; t < g_loop_try_depth; ++t) {
-                fputs("uf_catch_pop(); ", out);
-            }
             fputs("break;\n", out);
             break;
         case UF_STMT_CONTINUE:
+            emit_try_exits(out, g_loop_try_depth, indent);
             emit_indent(out, indent);
-            for (int t = 0; t < g_loop_try_depth; ++t) {
-                fputs("uf_catch_pop(); ", out);
-            }
             fputs("continue;\n", out);
             break;
         case UF_STMT_RETURN:
@@ -2019,6 +2062,7 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
                 if (stmt->as.return_stmt.value) emit_expr(out, stmt->as.return_stmt.value);
                 else fputs("uf_null()", out);
                 fputs(";\n", out);
+                emit_try_exits(out, 0, indent + 1);
                 emit_indent(out, indent + 1);
                 fputs("g_catch_stack = _fn_catch_entry;\n", out);
                 emit_indent(out, indent + 1);
@@ -2143,49 +2187,75 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
             break;
         }
         case UF_STMT_TRY_CATCH: {
+            const UfStmt* finally_block = stmt->as.try_catch.finally_block;
             emit_indent(out, indent);
             fputs("{\n", out);
             emit_indent(out, indent + 1);
             fputs("UfCatchFrame _frame; _frame.error = uf_null();\n", out);
+            if (finally_block) {
+                /* The error still in flight when the finally block runs, if
+                 * any: there was no catch clause, or the catch clause raised. */
+                emit_indent(out, indent + 1);
+                fputs("volatile UfVal _pending = uf_null(); volatile int _has_pending = 0;\n", out);
+            }
             emit_indent(out, indent + 1);
             fputs("uf_catch_push(&_frame);\n", out);
             emit_indent(out, indent + 1);
             fputs("if (setjmp(_frame.buf) == 0) {\n", out);
-            g_loop_try_depth++;
+            try_context_push(finally_block);
             emit_stmt(out, stmt->as.try_catch.try_block, indent + 2, false);
-            g_loop_try_depth--;
+            try_context_pop();
             emit_indent(out, indent + 2);
             fputs("uf_catch_pop();\n", out);
             emit_indent(out, indent + 1);
             fputs("} else {\n", out);
             if (stmt->as.try_catch.catch_block) {
+                int body_indent = indent + 2;
+                if (finally_block) {
+                    /* Guard the catch clause so an error raised inside it
+                     * still runs the finally block before propagating. */
+                    emit_indent(out, indent + 2);
+                    fputs("UfCatchFrame _guard; _guard.error = uf_null();\n", out);
+                    emit_indent(out, indent + 2);
+                    fputs("uf_catch_push(&_guard);\n", out);
+                    emit_indent(out, indent + 2);
+                    fputs("if (setjmp(_guard.buf) == 0) {\n", out);
+                    body_indent = indent + 3;
+                    try_context_push(finally_block);
+                }
                 size_t saved_scope = g_scope_var_count;
                 if (stmt->as.try_catch.catch_var) {
                     scope_push(stmt->as.try_catch.catch_var);
-                    emit_indent(out, indent + 2);
+                    emit_indent(out, body_indent);
                     if (is_boxed_name(stmt->as.try_catch.catch_var)) {
                         fprintf(out, "UfVal* uf_var_%s = uf_box_new(_frame.error);\n", stmt->as.try_catch.catch_var);
                     } else {
                         fprintf(out, "UfVal uf_var_%s = _frame.error;\n", stmt->as.try_catch.catch_var);
                     }
                 }
-                emit_stmt(out, stmt->as.try_catch.catch_block, indent + 2, false);
+                emit_stmt(out, stmt->as.try_catch.catch_block, body_indent, false);
                 g_scope_var_count = saved_scope;
+                if (finally_block) {
+                    try_context_pop();
+                    emit_indent(out, indent + 3);
+                    fputs("uf_catch_pop();\n", out);
+                    emit_indent(out, indent + 2);
+                    fputs("} else { _pending = _guard.error; _has_pending = 1; }\n", out);
+                }
+            } else if (finally_block) {
+                emit_indent(out, indent + 2);
+                fputs("_pending = _frame.error; _has_pending = 1;\n", out);
             }
             emit_indent(out, indent + 1);
             fputs("}\n", out);
-            if (stmt->as.try_catch.finally_block) {
-                emit_stmt(out, stmt->as.try_catch.finally_block, indent + 1, false);
-                if (!stmt->as.try_catch.catch_block) {
-                    emit_indent(out, indent + 1);
-                    fputs("if (_frame.error.kind != UF_RT_NULL) {\n", out);
-                    emit_indent(out, indent + 2);
-                    fputs("if (g_catch_stack) { g_catch_stack->error = _frame.error; longjmp(g_catch_stack->buf, 1); }\n", out);
-                    emit_indent(out, indent + 2);
-                    fputs("else { fprintf(stderr, \"Runtime Error: Uncaught exception\\n\"); exit(3); }\n", out);
-                    emit_indent(out, indent + 1);
-                    fputs("}\n", out);
-                }
+            if (finally_block) {
+                emit_indent(out, indent + 1);
+                fputs("{\n", out);
+                emit_stmt(out, finally_block, indent + 2, false);
+                emit_indent(out, indent + 1);
+                fputs("}\n", out);
+                emit_indent(out, indent + 1);
+                fputs("if (_has_pending) uf_throw(_pending);\n", out);
             }
             emit_indent(out, indent);
             fputs("}\n", out);
@@ -3249,6 +3319,7 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     g_emit_limit_exceeded = false;
     g_scope_var_count = 0;
     g_loop_try_depth = 0;
+    g_try_count = 0;
     g_ctx = NULL;
 
     /* UfModuleCollection and UfEmitContext are large fixed-capacity
@@ -3356,6 +3427,7 @@ bool uf_emit_c_program_with_path(const UfProgram* program, const char* source_pa
     free(prefixes);
     g_scope_var_count = 0;
     g_loop_try_depth = 0;
+    g_try_count = 0;
     g_ctx = NULL;
     return true;
 }

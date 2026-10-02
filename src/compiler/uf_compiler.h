@@ -44,6 +44,17 @@ typedef struct UfLoop {
     struct UfLoop* enclosing;
 } UfLoop;
 
+/* One enclosing `try` statement, as seen from the code being compiled inside
+ * it. `return`/`break`/`continue` leave these innermost-first: popping the
+ * runtime handler if one is still installed, then running the finally block
+ * inline, because the jump bypasses the normal fall-through into it. */
+typedef struct UfTryContext {
+    const struct UfStmt* finally_block; /* NULL when there is no finally */
+    bool handler_active;                /* an OP_PUSH_TRY is still in effect */
+} UfTryContext;
+
+#define UF_MAX_TRY_CONTEXTS 64
+
 typedef struct UfCompiler {
     struct UfCompiler* enclosing;
     FunctionType type;
@@ -58,7 +69,8 @@ typedef struct UfCompiler {
     UfLocal locals[256];
     int local_count;
     int scope_depth;
-    int try_depth;
+    int try_depth; /* number of entries in try_contexts */
+    UfTryContext try_contexts[UF_MAX_TRY_CONTEXTS];
 
     UfUpvalue upvalues[256];
     int upvalue_count;

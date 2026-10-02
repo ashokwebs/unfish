@@ -161,6 +161,49 @@ static void mark_initialized(UfCompiler* c) {
     c->locals[c->local_count - 1].depth = c->scope_depth;
 }
 
+static void compile_stmt(UfCompiler* c, const UfStmt* stmt);
+
+static void push_try_context(UfCompiler* c, const UfStmt* finally_block, int line) {
+    if (c->try_depth >= UF_MAX_TRY_CONTEXTS) {
+        compile_error(c, line, "Too many nested try statements in function '%s' (limit is %d)",
+                      c->fn_name ? c->fn_name : "<script>", UF_MAX_TRY_CONTEXTS);
+        return;
+    }
+    c->try_contexts[c->try_depth].finally_block = finally_block;
+    c->try_contexts[c->try_depth].handler_active = true;
+    c->try_depth++;
+}
+
+static void pop_try_context(UfCompiler* c) {
+    if (c->try_depth > 0) c->try_depth--;
+}
+
+/* Emit the exit path through every try statement above `floor`, innermost
+ * first: pop the handler if it is still installed, then inline the finally
+ * block. Each finally is compiled with only the try statements outside it in
+ * scope, so a `return` inside a finally does not re-run that same finally. */
+static void emit_try_exits(UfCompiler* c, int floor, int line) {
+    int saved = c->try_depth;
+    for (int i = saved - 1; i >= floor; --i) {
+        UfTryContext ctx = c->try_contexts[i];
+        c->try_depth = i;
+        if (ctx.handler_active) {
+            emit_byte(c, (uint8_t)OP_POP_TRY, line);
+        }
+        if (ctx.finally_block) {
+            compile_stmt(c, ctx.finally_block);
+        }
+    }
+    c->try_depth = saved;
+}
+
+static bool has_pending_finally(UfCompiler* c, int floor) {
+    for (int i = floor; i < c->try_depth; ++i) {
+        if (c->try_contexts[i].finally_block) return true;
+    }
+    return false;
+}
+
 static int resolve_local(UfCompiler* c, const char* name) {
     for (int i = c->local_count - 1; i >= 0; --i) {
         if (c->locals[i].name && strcmp(c->locals[i].name, name) == 0) {
@@ -1075,6 +1118,9 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                 compile_error(c, line, "'break' outside of a loop");
                 return;
             }
+            /* Run pending finally blocks while the loop's locals are still
+             * on the stack, so their slot numbering stays valid. */
+            emit_try_exits(c, c->current_loop->try_depth, line);
             /* Pop any locals inside current loop */
             for (int i = c->local_count - 1; i >= 0; --i) {
                 if (c->locals[i].depth > c->current_loop->scope_depth) {
@@ -1084,9 +1130,6 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         emit_byte(c, (uint8_t)OP_POP, line);
                     }
                 }
-            }
-            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
-                emit_byte(c, (uint8_t)OP_POP_TRY, line);
             }
             int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
             if (c->current_loop->break_count >= c->current_loop->break_capacity) {
@@ -1102,6 +1145,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                 compile_error(c, line, "'continue' outside of a loop");
                 return;
             }
+            emit_try_exits(c, c->current_loop->try_depth, line);
             for (int i = c->local_count - 1; i >= 0; --i) {
                 if (c->locals[i].depth > c->current_loop->scope_depth) {
                     if (c->locals[i].is_captured) {
@@ -1110,9 +1154,6 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
                         emit_byte(c, (uint8_t)OP_POP, line);
                     }
                 }
-            }
-            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
-                emit_byte(c, (uint8_t)OP_POP_TRY, line);
             }
             int jump = emit_jump(c, (uint8_t)OP_JUMP, line);
             if (c->current_loop->continue_count >= c->current_loop->continue_capacity) {
@@ -1193,8 +1234,16 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             } else {
                 emit_byte(c, (uint8_t)OP_NULL, line);
             }
-            for (int t = 0; t < c->try_depth; ++t) {
-                emit_byte(c, (uint8_t)OP_POP_TRY, line);
+            if (has_pending_finally(c, 0)) {
+                /* The return value sits on top of the stack while the finally
+                 * blocks run; give it a hidden slot so locals they declare are
+                 * numbered above it. OP_RETURN then consumes it directly. */
+                add_local(c, "", line);
+                mark_initialized(c);
+                emit_try_exits(c, 0, line);
+                c->local_count--;
+            } else {
+                emit_try_exits(c, 0, line);
             }
             emit_byte(c, (uint8_t)OP_RETURN, line);
             break;
@@ -1208,33 +1257,61 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
             break;
         }
         case UF_STMT_TRY_CATCH: {
+            const UfStmt* finally_block = stmt->as.try_catch.finally_block;
             int catch_jump = emit_jump(c, (uint8_t)OP_PUSH_TRY, line);
-            c->try_depth++;
+            push_try_context(c, finally_block, line);
 
             compile_stmt(c, stmt->as.try_catch.try_block);
 
             emit_byte(c, (uint8_t)OP_POP_TRY, line);
-            c->try_depth--;
+            pop_try_context(c);
             int try_success_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
 
             patch_jump(c, catch_jump);
 
             if (stmt->as.try_catch.catch_block) {
                 begin_scope(c);
-                if (stmt->as.try_catch.catch_var) {
-                    add_local(c, stmt->as.try_catch.catch_var, line);
-                    mark_initialized(c);
-                } else {
-                    emit_byte(c, (uint8_t)OP_POP, line);
-                }
+                /* The caught error is always on the stack here; keep it in a
+                 * slot (named or hidden) so the layout is known below. */
+                add_local(c, stmt->as.try_catch.catch_var ? stmt->as.try_catch.catch_var : "", line);
+                mark_initialized(c);
 
-                compile_stmt(c, stmt->as.try_catch.catch_block);
-                end_scope(c, line);
+                if (finally_block) {
+                    /* Guard the catch clause: an error raised inside it must
+                     * still run the finally block before propagating. */
+                    int guard_jump = emit_jump(c, (uint8_t)OP_PUSH_TRY, line);
+                    push_try_context(c, finally_block, line);
+                    compile_stmt(c, stmt->as.try_catch.catch_block);
+                    emit_byte(c, (uint8_t)OP_POP_TRY, line);
+                    pop_try_context(c);
+                    end_scope(c, line);
+                    int catch_done_jump = emit_jump(c, (uint8_t)OP_JUMP, line);
+
+                    /* Guard landing: stack holds the original error's slot and
+                     * the new error on top of it. */
+                    patch_jump(c, guard_jump);
+                    begin_scope(c);
+                    add_local(c, "", line);
+                    mark_initialized(c);
+                    add_local(c, "", line);
+                    mark_initialized(c);
+                    uint16_t err_slot = (uint16_t)(c->local_count - 1);
+                    compile_stmt(c, finally_block);
+                    emit_byte(c, (uint8_t)OP_LOAD_LOCAL, line);
+                    emit_u16(c, err_slot, line);
+                    emit_byte(c, (uint8_t)OP_RETHROW, line);
+                    end_scope(c, line);
+
+                    patch_jump(c, catch_done_jump);
+                } else {
+                    compile_stmt(c, stmt->as.try_catch.catch_block);
+                    end_scope(c, line);
+                }
 
                 patch_jump(c, try_success_jump);
 
-                if (stmt->as.try_catch.finally_block) {
-                    compile_stmt(c, stmt->as.try_catch.finally_block);
+                if (finally_block) {
+                    compile_stmt(c, finally_block);
                 }
             } else {
                 begin_scope(c);

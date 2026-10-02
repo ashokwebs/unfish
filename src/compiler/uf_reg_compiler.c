@@ -37,6 +37,17 @@ typedef enum {
     REG_FN_FUNCTION
 } RegFunctionType;
 
+/* One enclosing `try` statement, as seen from code compiled inside it.
+ * `return`/`break`/`continue` leave these innermost-first: popping the
+ * runtime handler if it is still installed, then running the finally block
+ * inline, because the jump bypasses the normal fall-through into it. */
+typedef struct {
+    const UfStmt* finally_block; /* NULL when there is no finally */
+    bool handler_active;         /* a ROP_PUSH_TRY is still in effect */
+} UfRegTryContext;
+
+#define UF_REG_MAX_TRY_CONTEXTS 64
+
 typedef struct UfRegCompiler {
     struct UfRegCompiler* enclosing;
     RegFunctionType type;
@@ -51,7 +62,8 @@ typedef struct UfRegCompiler {
     UfRegLocal locals[256];
     int local_count;
     int scope_depth;
-    int try_depth;
+    int try_depth; /* number of entries in try_contexts */
+    UfRegTryContext try_contexts[UF_REG_MAX_TRY_CONTEXTS];
 
     UfRegUpvalue upvalues[256];
     int upvalue_count;
@@ -224,6 +236,49 @@ static int add_local(UfRegCompiler* c, const char* name, int line) {
 static void mark_initialized(UfRegCompiler* c) {
     if (c->scope_depth == 0) return;
     c->locals[c->local_count - 1].depth = c->scope_depth;
+}
+
+static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt);
+
+static void push_try_context(UfRegCompiler* c, const UfStmt* finally_block, int line) {
+    if (c->try_depth >= UF_REG_MAX_TRY_CONTEXTS) {
+        compile_error(c, line, "Too many nested try statements in function '%s' (limit is %d)",
+                      c->fn_name ? c->fn_name : "<script>", UF_REG_MAX_TRY_CONTEXTS);
+        return;
+    }
+    c->try_contexts[c->try_depth].finally_block = finally_block;
+    c->try_contexts[c->try_depth].handler_active = true;
+    c->try_depth++;
+}
+
+static void pop_try_context(UfRegCompiler* c) {
+    if (c->try_depth > 0) c->try_depth--;
+}
+
+/* Emit the exit path through every try statement above `floor`, innermost
+ * first: pop the handler if it is still installed, then inline the finally
+ * block. Each finally is compiled with only the try statements outside it in
+ * scope, so a `return` inside a finally does not re-run that same finally. */
+static void emit_try_exits(UfRegCompiler* c, int floor, int line) {
+    int saved = c->try_depth;
+    for (int i = saved - 1; i >= floor; --i) {
+        UfRegTryContext ctx = c->try_contexts[i];
+        c->try_depth = i;
+        if (ctx.handler_active) {
+            emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
+        }
+        if (ctx.finally_block) {
+            compile_stmt(c, ctx.finally_block);
+        }
+    }
+    c->try_depth = saved;
+}
+
+static bool has_pending_finally(UfRegCompiler* c, int floor) {
+    for (int i = floor; i < c->try_depth; ++i) {
+        if (c->try_contexts[i].finally_block) return true;
+    }
+    return false;
 }
 
 static int resolve_local(UfRegCompiler* c, const char* name) {
@@ -1123,14 +1178,12 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
                 compile_error(c, line, "'break' outside of a loop");
                 return;
             }
+            emit_try_exits(c, c->current_loop->try_depth, line);
             for (int i = c->local_count - 1; i >= 0; --i) {
                 if (c->locals[i].depth <= c->current_loop->scope_depth) break;
                 if (c->locals[i].is_captured) {
                     emit_abc(c, ROP_CLOSE_UPVAL, c->locals[i].reg, 0, 0, line);
                 }
-            }
-            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
-                emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
             }
             if (c->current_loop->break_count >= c->current_loop->break_capacity) {
                 size_t old_cap = c->current_loop->break_capacity;
@@ -1149,14 +1202,12 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
                 compile_error(c, line, "'continue' outside of a loop");
                 return;
             }
+            emit_try_exits(c, c->current_loop->try_depth, line);
             for (int i = c->local_count - 1; i >= 0; --i) {
                 if (c->locals[i].depth <= c->current_loop->scope_depth) break;
                 if (c->locals[i].is_captured) {
                     emit_abc(c, ROP_CLOSE_UPVAL, c->locals[i].reg, 0, 0, line);
                 }
-            }
-            for (int t = c->current_loop->try_depth; t < c->try_depth; ++t) {
-                emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
             }
             if (c->current_loop->continue_count >= c->current_loop->continue_capacity) {
                 size_t old_cap = c->current_loop->continue_capacity;
@@ -1232,18 +1283,33 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
         }
 
         case UF_STMT_RETURN: {
-            for (int t = 0; t < c->try_depth; ++t) {
-                emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
-            }
+            /* Evaluate the value while the enclosing handlers are still
+             * installed: an error raised by the return expression itself must
+             * be caught by the try it is written in. */
+            uint8_t r_val;
             if (stmt->as.return_stmt.value) {
-                uint8_t r_val = compile_expr(c, stmt->as.return_stmt.value, -1);
+                r_val = compile_expr(c, stmt->as.return_stmt.value, -1);
+            } else {
+                r_val = alloc_reg(c);
+                emit_abc(c, ROP_LOAD_NULL, r_val, 0, 0, line);
+            }
+            if (has_pending_finally(c, 0)) {
+                /* Park the value in a hidden local so the finally blocks
+                 * neither clobber its register nor change what is returned
+                 * by reassigning the variable it came from. */
+                int slot = add_local(c, "", line);
+                if (slot < 0) break;
+                mark_initialized(c);
+                uint8_t r_ret = c->locals[slot].reg;
+                if (r_ret != r_val) emit_abc(c, ROP_MOVE, r_ret, r_val, 0, line);
+                emit_try_exits(c, 0, line);
+                emit_abc(c, ROP_RETURN, r_ret, 0, 0, line);
+                c->local_count--;
+                c->next_reg = (uint8_t)c->local_count;
+            } else {
+                emit_try_exits(c, 0, line);
                 emit_abc(c, ROP_RETURN, r_val, 0, 0, line);
                 free_reg(c, r_val);
-            } else {
-                uint8_t r_null = alloc_reg(c);
-                emit_abc(c, ROP_LOAD_NULL, r_null, 0, 0, line);
-                emit_abc(c, ROP_RETURN, r_null, 0, 0, line);
-                free_reg(c, r_null);
             }
             break;
         }
@@ -1258,14 +1324,15 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
         }
 
         case UF_STMT_TRY_CATCH: {
+            const UfStmt* finally_block = stmt->as.try_catch.finally_block;
             uint8_t r_err = alloc_reg(c);
             int try_jump = (int)c->chunk->code_count;
             emit_abx(c, ROP_PUSH_TRY, r_err, 0, line);
-            c->try_depth++;
+            push_try_context(c, finally_block, line);
 
             compile_stmt(c, stmt->as.try_catch.try_block);
             emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
-            c->try_depth--;
+            pop_try_context(c);
 
             int skip_catch = (int)c->chunk->code_count;
             emit_sax(c, ROP_JMP, 0, line);
@@ -1281,8 +1348,35 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
                     emit_abc(c, ROP_MOVE, c->locals[err_slot].reg, r_err, 0, line);
                     mark_initialized(c);
                 }
-                compile_stmt(c, stmt->as.try_catch.catch_block);
-                end_scope(c, line);
+                if (finally_block) {
+                    /* Guard the catch clause: an error raised inside it must
+                     * still run the finally block before propagating. */
+                    uint8_t r_guard_err = alloc_reg(c);
+                    int guard_jump = (int)c->chunk->code_count;
+                    emit_abx(c, ROP_PUSH_TRY, r_guard_err, 0, line);
+                    push_try_context(c, finally_block, line);
+                    compile_stmt(c, stmt->as.try_catch.catch_block);
+                    emit_abc(c, ROP_POP_TRY, 0, 0, 0, line);
+                    pop_try_context(c);
+                    end_scope(c, line);
+                    int catch_done = (int)c->chunk->code_count;
+                    emit_sax(c, ROP_JMP, 0, line);
+
+                    int guard_offset = (int)c->chunk->code_count - guard_jump - 1;
+                    c->chunk->code[guard_jump] = REG_ENCODE_ABx(ROP_PUSH_TRY, r_guard_err, (uint16_t)guard_offset);
+                    begin_scope(c);
+                    int pending_slot = add_local(c, "_rethrow_err", line);
+                    emit_abc(c, ROP_MOVE, c->locals[pending_slot].reg, r_guard_err, 0, line);
+                    mark_initialized(c);
+                    compile_stmt(c, finally_block);
+                    emit_abc(c, ROP_RETHROW, c->locals[pending_slot].reg, 0, 0, line);
+                    end_scope(c, line);
+
+                    patch_jump_ax_to_current(c, catch_done);
+                } else {
+                    compile_stmt(c, stmt->as.try_catch.catch_block);
+                    end_scope(c, line);
+                }
 
                 patch_jump_ax_to_current(c, skip_catch);
                 free_reg(c, r_err);

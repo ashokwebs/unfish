@@ -1,0 +1,146 @@
+# expect: fin r1
+# expect: r1
+# expect: fin r2
+# expect: r2 from catch
+# expect: 2
+# expect: fin inner
+# expect: fin outer
+# expect: inner
+# expect: body 0
+# expect: fin loop 0
+# expect: fin loop 1
+# expect: fin loop 2
+# expect: loop done
+# expect: fin r5 15
+# expect: 30
+# expect: fin r6
+# expect: outer caught from catch
+# expect: fin r7 1
+# expect: fin r7 2
+# expect: fin r7 3
+# expect: 3
+# expect: fin r8
+# expect: r8
+# expect: inner fin 0,0
+# expect: inner fin 0,1
+# expect: outer fin 0
+# expect: inner fin 1,0
+# expect: inner fin 1,1
+# expect: outer fin 1
+# expect: caught in finally
+
+# finally must run on every exit path, as docs/ERROR_MODEL.md section 5.2.3
+# guarantees. Previously only the interpreter honoured return/break/continue:
+# both VMs and the native backend popped the try handler and jumped straight
+# out, skipping the finally block, so a `return` inside `finally` could not
+# override either. And on every backend, an error raised inside a catch clause
+# skipped the finally block entirely (r6).
+
+function r1():
+    try:
+        return "r1"
+    finally:
+        say "fin r1"
+say r1()
+
+function r2():
+    try:
+        error("x")
+    catch e:
+        return "r2 from catch"
+    finally:
+        say "fin r2"
+say r2()
+
+function r3():
+    try:
+        return 1
+    finally:
+        return 2
+say r3()
+
+function r4():
+    try:
+        try:
+            return "inner"
+        finally:
+            say "fin inner"
+    finally:
+        say "fin outer"
+say r4()
+
+for i in range(3):
+    try:
+        if i == 1:
+            continue
+        if i == 2:
+            break
+        say "body " + i
+    finally:
+        say "fin loop " + i
+say "loop done"
+
+function r5():
+    let a = 10
+    try:
+        let b = 20
+        return a + b
+    finally:
+        let c = 5
+        say "fin r5 " + (a + c)
+say r5()
+
+function r6():
+    try:
+        try:
+            error("boom")
+        catch e:
+            error("from catch")
+        finally:
+            say "fin r6"
+    catch e2:
+        say "outer caught " + e2.message
+r6()
+
+function r7():
+    let x = 0
+    while true:
+        try:
+            x = x + 1
+            if x > 2:
+                return x
+        finally:
+            say "fin r7 " + x
+say r7()
+
+function r8():
+    try:
+        return "r8"
+    catch e:
+        say "never"
+    finally:
+        say "fin r8"
+say r8()
+
+function r9():
+    for i in range(2):
+        try:
+            for j in range(2):
+                try:
+                    if j == 1:
+                        break
+                finally:
+                    say "inner fin " + i + "," + j
+        finally:
+            say "outer fin " + i
+r9()
+
+function r10():
+    try:
+        return "r10"
+    finally:
+        error("in finally")
+try:
+    say r10()
+catch e:
+    say "caught " + e.message
