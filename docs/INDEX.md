@@ -19,6 +19,15 @@ This documentation suite is organized as a multi-volume, book-length technical c
 ================================================================================
 ```
 
+### Official PDF Publications & The Book Library
+All manuals and books can be compiled directly via `make pdfs` and are available in [`docs/pdf/`](file:///home/charizard/unfish/docs/pdf/):
+* [**The Book: The Unfish Programming Language**](file:///home/charizard/unfish/docs/pdf/The_Unfish_Book.pdf) (`docs/pdf/The_Unfish_Book.pdf`): Complete, publication-grade textbook covering pedagogy, language tour, systems programming, virtual machines, and formal grammar.
+* [**Executive Pitch Deck**](file:///home/charizard/unfish/docs/pdf/Unfish_Executive_Pitch_Deck.pdf) (`docs/pdf/Unfish_Executive_Pitch_Deck.pdf`): High-impact presentation on the educational crisis, the unbroken continuum, 5-engine architecture, and market strategy.
+* [**Beginner's Guide & Tutorial**](file:///home/charizard/unfish/docs/pdf/Unfish_Beginners_Guide.pdf) (`docs/pdf/Unfish_Beginners_Guide.pdf`): Step-by-step tutorial from first code to the School of Fish simulation and practical challenges.
+* [**Technical Architecture Specification**](file:///home/charizard/unfish/docs/pdf/Unfish_Technical_Specification.pdf) (`docs/pdf/Unfish_Technical_Specification.pdf`): Deep systems engineering manual detailing the 57-opcode Stack VM, 256-register RegVM, memory arenas, mark-sweep GC, and endian byte buffers.
+
+---
+
 ### Volume I: Philosophy, Vision & System Architecture
 * [**Chapter 1: Vision & Pedagogical Philosophy**](file:///home/charizard/unfish/docs/VISION.md)
   * The crisis in introductory computer science education

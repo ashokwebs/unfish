@@ -6,7 +6,7 @@ It is designed to provide an unbroken path of intellectual ascent: from visual b
 
 > *"Hide complexity until the learner is ready — never hide it forever."*
 
-[**🚀 Try Online Compiler**](https://ashokwebs.github.io/unfish/playground.html) • [**📚 Documentation &amp; Tutorials**](https://ashokwebs.github.io/unfish/learn.html) • [**💻 Studio IDE**](https://ashokwebs.github.io/unfish/studio.html)
+[**🚀 Try Online Compiler**](https://ashokwebs.github.io/unfish/playground.html) • [**📚 Documentation &amp; Tutorials**](https://ashokwebs.github.io/unfish/learn.html) • [**💻 Studio IDE**](https://ashokwebs.github.io/unfish/studio.html) • [**📖 The Unfish Book (PDF)**](docs/pdf/The_Unfish_Book.pdf) • [**📑 Pitch Deck (PDF)**](docs/pdf/Unfish_Executive_Pitch_Deck.pdf)
 
 ---
 
@@ -106,6 +106,14 @@ make bench
 
 The complete, book-length technical documentation suite is cataloged in the [**Master Documentation Index**](docs/INDEX.md):
 
+### 📖 Official Publications & The Book Library (PDF)
+Compile all books and publications locally with `make pdfs` (requires `pandoc` and `pdflatex`):
+- [**`docs/pdf/The_Unfish_Book.pdf`**](docs/pdf/The_Unfish_Book.pdf) — **The Unfish Programming Language**: The definitive, publication-grade textbook covering language design, pedagogy, systems programming, and virtual machines.
+- [**`docs/pdf/Unfish_Executive_Pitch_Deck.pdf`**](docs/pdf/Unfish_Executive_Pitch_Deck.pdf) — **Executive Pitch Deck**: The multi-billion dollar CS education crisis, the unbroken continuum, and technical moats.
+- [**`docs/pdf/Unfish_Beginners_Guide.pdf`**](docs/pdf/Unfish_Beginners_Guide.pdf) — **Unfish from Scratch**: Complete beginner's guide with step-by-step tutorials and challenges.
+- [**`docs/pdf/Unfish_Technical_Specification.pdf`**](docs/pdf/Unfish_Technical_Specification.pdf) — **Technical Architecture Specification**: Systems manual detailing the dual VMs, Pratt parser, memory arenas, and endian buffers.
+
+### 📚 Markdown Systems Compendium
 - [**`docs/INDEX.md`**](docs/INDEX.md) — Grand Master Table of Contents & Technical Manual Index.
 - [**`docs/VISION.md`**](docs/VISION.md) — Pedagogical philosophy, "Glass Box" paradigm, and curriculum integration.
 - [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) — Decoupled 5-backend pipeline, memory boundaries, and subsystem inventory.

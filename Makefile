@@ -49,9 +49,12 @@ CLI_SRC = src/cli/main.c
 
 BIN_DIR = bin
 
-.PHONY: all asan test test-asan bench clean
+.PHONY: all asan test test-asan bench pdfs clean
 
 all: $(BIN_DIR)/unfish
+
+pdfs:
+	@python3 tools/pdf/build_all_pdfs.py
 
 bench: $(BIN_DIR)/unfish
 	@./tools/run_benchmarks.sh $(BIN_DIR)/unfish
