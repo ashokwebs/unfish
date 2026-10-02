@@ -24,6 +24,16 @@
 #define HUGE_VAL (__builtin_huge_val())
 #endif
 
+/* Raising never returns: uf_throw either longjmps to a catch frame or exits.
+ * Telling the compiler lets error paths end a non-void function cleanly. */
+#if defined(__GNUC__) || defined(__clang__)
+#define UF_NORETURN __attribute__((noreturn))
+#else
+#define UF_NORETURN
+#endif
+
+static void uf_rt_error(const char* fmt, ...) UF_NORETURN;
+
 #if defined(__wasm__) || defined(__wasi__)
 /* Builtin compiler-rt helpers needed by WASI libc (intscan.o, clock_nanosleep.o) when linking with -nodefaultlibs */
 typedef unsigned __int128 __uf_u128;
@@ -502,8 +512,7 @@ static inline UfVal* uf_box_new(UfVal v) {
 
 static inline UfVal uf_instance_new(const char* name, const char** field_names, size_t field_count, const char** method_names, struct UfRtClosure** method_closures, size_t method_count, size_t argc, UfVal* args) {
     if (argc != field_count) {
-        fprintf(stderr, "Runtime Error: Struct '%s' expects %zu fields, but %zu provided\n", name, field_count, argc);
-        exit(3);
+        uf_rt_error("Struct '%s' expects %zu fields, but %zu provided", name, field_count, argc);
     }
     UfRtInstance* inst = (UfRtInstance*)uf_rt_alloc(UF_RT_INSTANCE, sizeof(UfRtInstance));
     inst->name = name;
@@ -610,9 +619,8 @@ static inline UfVal uf_call_val(UfVal callee, size_t argc, ...) {
             size_t expected = ev->def->variant_field_counts[ev->tag];
             if (argc != expected) {
                 if (args != stack_args) free(args);
-                fprintf(stderr, "TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided\n",
+                uf_rt_error("TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided",
                         ev->variant_name, expected, expected == 1 ? "" : "s", argc);
-                exit(3);
             }
             UfVal result = uf_enum_val_new(ev->def, ev->tag, ev->variant_name, argc, args);
             if (args != stack_args) free(args);
@@ -620,8 +628,7 @@ static inline UfVal uf_call_val(UfVal callee, size_t argc, ...) {
         }
     }
     if (args != stack_args) free(args);
-    fprintf(stderr, "Runtime Error: Attempted to call non-callable value\n");
-    exit(3);
+    uf_rt_error("Attempted to call non-callable value");
 }
 
 /* Constructors */
@@ -659,7 +666,7 @@ static inline UfVal uf_val_error(UfVal message, UfVal kind) {
     return v;
 }
 
-static inline void uf_throw(UfVal err) {
+static inline UF_NORETURN void uf_throw(UfVal err) {
     if (g_catch_stack) {
         UfCatchFrame* target = g_catch_stack;
         g_catch_stack = target->prev;
@@ -677,10 +684,30 @@ static inline void uf_throw(UfVal err) {
     exit(3);
 }
 
-static inline void uf_raise(const char* msg, const char* kind) {
+static inline UF_NORETURN void uf_raise(const char* msg, const char* kind) {
     UfVal m = uf_str(msg ? msg : "");
     UfVal k = uf_str(kind ? kind : "RuntimeError");
     uf_throw(uf_val_error(m, k));
+}
+
+/* A runtime error raised by the runtime itself, as a catchable exception
+ * whose `kind` is derived from the message exactly as the interpreter and
+ * VMs derive it (uf_runtime_error in src/runtime/uf_runtime.c), so `try`
+ * behaves the same on every backend. */
+static void uf_rt_error(const char* fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    const char* kind = "RuntimeError";
+    if (strncmp(msg, "Division by zero", 16) == 0) kind = "DivisionByZero";
+    else if (strncmp(msg, "IndexOutOfBounds", 16) == 0) kind = "IndexOutOfBounds";
+    else if (strncmp(msg, "StackOverflowError", 18) == 0) kind = "StackOverflowError";
+    else if (strncmp(msg, "AssertionError", 14) == 0) kind = "AssertionError";
+    else if (strstr(msg, "domain error") != NULL) kind = "DomainError";
+    else if (strstr(msg, "expects") != NULL || strstr(msg, "Cannot") != NULL || strstr(msg, "must be") != NULL) kind = "TypeError";
+    uf_raise(msg, kind);
 }
 
 static inline void uf_rt_check_stack(void) {
@@ -1287,18 +1314,17 @@ static inline UfVal uf_add(UfVal a, UfVal b) {
         for (size_t i = 0; i < b.as.array->count; ++i) uf_array_push(res, b.as.array->elements[i]);
         return res;
     }
-    fprintf(stderr, "Runtime Error: Cannot add types\n");
-    exit(3);
+    uf_rt_error("Cannot add types");
 }
 
 static inline UfVal uf_sub(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) return uf_num(a.as.number - b.as.number);
-    fprintf(stderr, "Runtime Error: Operands to '-' must be numbers\n"); exit(3);
+    uf_rt_error("Operands to '-' must be numbers");
 }
 
 static inline UfVal uf_mul(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) return uf_num(a.as.number * b.as.number);
-    fprintf(stderr, "Runtime Error: Operands to '*' must be numbers\n"); exit(3);
+    uf_rt_error("Operands to '*' must be numbers");
 }
 
 static inline UfVal uf_div(UfVal a, UfVal b) {
@@ -1321,7 +1347,7 @@ static inline UfVal uf_mod(UfVal a, UfVal b) {
 
 static inline UfVal uf_neg(UfVal a) {
     if (a.kind == UF_RT_NUMBER) return uf_num(-a.as.number);
-    fprintf(stderr, "Runtime Error: Operand to '-' must be a number\n"); exit(3);
+    uf_rt_error("Operand to '-' must be a number");
 }
 
 static inline UfVal uf_not(UfVal a) {
@@ -1331,25 +1357,25 @@ static inline UfVal uf_not(UfVal a) {
 static inline UfVal uf_lt(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) return uf_bool(a.as.number < b.as.number);
     if (a.kind == UF_RT_STRING && b.kind == UF_RT_STRING) return uf_bool(strcmp(a.as.string->chars, b.as.string->chars) < 0);
-    fprintf(stderr, "Runtime Error: Operands must be comparable\n"); exit(3);
+    uf_rt_error("Operands must be comparable");
 }
 
 static inline UfVal uf_lte(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) return uf_bool(a.as.number <= b.as.number);
     if (a.kind == UF_RT_STRING && b.kind == UF_RT_STRING) return uf_bool(strcmp(a.as.string->chars, b.as.string->chars) <= 0);
-    fprintf(stderr, "Runtime Error: Operands must be comparable\n"); exit(3);
+    uf_rt_error("Operands must be comparable");
 }
 
 static inline UfVal uf_gt(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) return uf_bool(a.as.number > b.as.number);
     if (a.kind == UF_RT_STRING && b.kind == UF_RT_STRING) return uf_bool(strcmp(a.as.string->chars, b.as.string->chars) > 0);
-    fprintf(stderr, "Runtime Error: Operands must be comparable\n"); exit(3);
+    uf_rt_error("Operands must be comparable");
 }
 
 static inline UfVal uf_gte(UfVal a, UfVal b) {
     if (a.kind == UF_RT_NUMBER && b.kind == UF_RT_NUMBER) return uf_bool(a.as.number >= b.as.number);
     if (a.kind == UF_RT_STRING && b.kind == UF_RT_STRING) return uf_bool(strcmp(a.as.string->chars, b.as.string->chars) >= 0);
-    fprintf(stderr, "Runtime Error: Operands must be comparable\n"); exit(3);
+    uf_rt_error("Operands must be comparable");
 }
 
 static inline UfVal uf_len(UfVal v) {
@@ -1357,7 +1383,7 @@ static inline UfVal uf_len(UfVal v) {
     if (v.kind == UF_RT_ARRAY) return uf_num((double)v.as.array->count);
     if (v.kind == UF_RT_MAP) return uf_num((double)v.as.map->count);
     if (v.kind == UF_RT_BUFFER) return uf_num((double)v.as.buffer->size);
-    fprintf(stderr, "Runtime Error: 'len()' expects string, array, map, or buffer\n"); exit(3);
+    uf_rt_error("'len()' expects string, array, map, or buffer");
 }
 
 static inline UfVal uf_type_of(UfVal v) {
@@ -1437,8 +1463,7 @@ static inline UfVal uf_get(UfVal target, UfVal index) {
     }
     if (target.kind == UF_RT_INSTANCE) {
         if (index.kind != UF_RT_STRING) {
-            fprintf(stderr, "Runtime Error: Struct field access expects a string name\n");
-            exit(3);
+            uf_rt_error("Struct field access expects a string name");
         }
         const char* fname = index.as.string->chars;
         UfRtInstance* inst = target.as.instance;
@@ -1452,8 +1477,7 @@ static inline UfVal uf_get(UfVal target, UfVal index) {
                 return uf_bound_method_new(target, inst->method_closures[i]);
             }
         }
-        fprintf(stderr, "Runtime Error: Struct '%s' has no field or method '%s'\n", inst->name, fname);
-        exit(3);
+        uf_rt_error("Struct '%s' has no field or method '%s'", inst->name, fname);
     }
     if (target.kind == UF_RT_ARRAY) {
         if (index.kind != UF_RT_NUMBER) { uf_raise("Array index must be a number", "TypeError"); return uf_null(); }
@@ -1496,14 +1520,13 @@ static inline UfVal uf_get(UfVal target, UfVal index) {
                                         index.as.string->length);
         return e ? e->value : uf_null();
     }
-    fprintf(stderr, "Runtime Error: Cannot index value of this type\n"); exit(3);
+    uf_rt_error("Cannot index value of this type");
 }
 
 static inline void uf_set(UfVal target, UfVal index, UfVal value) {
     if (target.kind == UF_RT_INSTANCE) {
         if (index.kind != UF_RT_STRING) {
-            fprintf(stderr, "Runtime Error: Struct field name must be a string\n");
-            exit(3);
+            uf_rt_error("Struct field name must be a string");
         }
         const char* fname = index.as.string->chars;
         UfRtInstance* inst = target.as.instance;
@@ -1513,8 +1536,7 @@ static inline void uf_set(UfVal target, UfVal index, UfVal value) {
                 return;
             }
         }
-        fprintf(stderr, "Runtime Error: Struct '%s' has no field '%s'\n", inst->name, fname);
-        exit(3);
+        uf_rt_error("Struct '%s' has no field '%s'", inst->name, fname);
     }
     if (target.kind == UF_RT_ARRAY) {
         if (index.kind != UF_RT_NUMBER) { uf_raise("Array index must be a number", "TypeError"); return; }
@@ -1544,7 +1566,7 @@ static inline void uf_set(UfVal target, UfVal index, UfVal value) {
         return;
     }
     if (target.kind == UF_RT_MAP) {
-        if (index.kind != UF_RT_STRING) { fprintf(stderr, "Runtime Error: Map key must be string\n"); exit(3); }
+        if (index.kind != UF_RT_STRING) { uf_rt_error("Map key must be string"); }
         UfRtMap* m = target.as.map;
         uint32_t hash = uf_map_key_hash(index);
         const char* kchars = index.as.string->chars;
@@ -1575,7 +1597,7 @@ static inline void uf_set(UfVal target, UfVal index, UfVal value) {
         m->order_keys[m->order_count++] = index;
         return;
     }
-    fprintf(stderr, "Runtime Error: Cannot assign to index of this type\n"); exit(3);
+    uf_rt_error("Cannot assign to index of this type");
 }
 
 /* Spread and Rest Helpers */
@@ -1811,15 +1833,13 @@ static inline UfVal uf_call_val_spread(UfVal callee, UfVal args_arr) {
         if (ev->def && (size_t)ev->tag < ev->def->variant_count) {
             size_t expected = ev->def->variant_field_counts[ev->tag];
             if (a->count != expected) {
-                fprintf(stderr, "TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided\n",
+                uf_rt_error("TypeError: Enum variant '%s' expects %zu argument%s, but %zu provided",
                         ev->variant_name, expected, expected == 1 ? "" : "s", a->count);
-                exit(3);
             }
             return uf_enum_val_new(ev->def, ev->tag, ev->variant_name, a->count, a->elements);
         }
     }
-    fprintf(stderr, "Runtime Error: Attempted to call non-callable value\n");
-    exit(3);
+    uf_rt_error("Attempted to call non-callable value");
 }
 
 /* Buffer Primitives */
@@ -1892,7 +1912,7 @@ static inline UfVal uf_buffer_slice(UfVal b, UfVal start_v, UfVal len_v) {
 static inline UfVal uf_buffer_read_u16_le(UfVal b, UfVal off) {
     if (b.kind != UF_RT_BUFFER || off.kind != UF_RT_NUMBER) return uf_null();
     long o = (long)off.as.number;
-    if (o < 0 || (size_t)(o + 2) > b.as.buffer->size) { fprintf(stderr, "IndexOutOfBounds\n"); exit(3); }
+    if (o < 0 || (size_t)(o + 2) > b.as.buffer->size) { uf_rt_error("IndexOutOfBounds: Buffer access out of range"); }
     uint16_t v = (uint16_t)(b.as.buffer->data[o] | (b.as.buffer->data[o+1] << 8));
     return uf_num((double)v);
 }
@@ -1900,7 +1920,7 @@ static inline UfVal uf_buffer_read_u16_le(UfVal b, UfVal off) {
 static inline UfVal uf_buffer_write_u16_le(UfVal b, UfVal off, UfVal val) {
     if (b.kind != UF_RT_BUFFER || off.kind != UF_RT_NUMBER || val.kind != UF_RT_NUMBER) return uf_null();
     long o = (long)off.as.number;
-    if (o < 0 || (size_t)(o + 2) > b.as.buffer->size) { fprintf(stderr, "IndexOutOfBounds\n"); exit(3); }
+    if (o < 0 || (size_t)(o + 2) > b.as.buffer->size) { uf_rt_error("IndexOutOfBounds: Buffer access out of range"); }
     uint16_t v = (uint16_t)(int64_t)val.as.number;
     b.as.buffer->data[o] = (uint8_t)(v & 0xff);
     b.as.buffer->data[o+1] = (uint8_t)((v >> 8) & 0xff);
@@ -1910,7 +1930,7 @@ static inline UfVal uf_buffer_write_u16_le(UfVal b, UfVal off, UfVal val) {
 static inline UfVal uf_buffer_read_u32_le(UfVal b, UfVal off) {
     if (b.kind != UF_RT_BUFFER || off.kind != UF_RT_NUMBER) return uf_null();
     long o = (long)off.as.number;
-    if (o < 0 || (size_t)(o + 4) > b.as.buffer->size) { fprintf(stderr, "IndexOutOfBounds\n"); exit(3); }
+    if (o < 0 || (size_t)(o + 4) > b.as.buffer->size) { uf_rt_error("IndexOutOfBounds: Buffer access out of range"); }
     uint32_t v = (uint32_t)(b.as.buffer->data[o] | (b.as.buffer->data[o+1] << 8) | (b.as.buffer->data[o+2] << 16) | (b.as.buffer->data[o+3] << 24));
     return uf_num((double)v);
 }
@@ -1918,7 +1938,7 @@ static inline UfVal uf_buffer_read_u32_le(UfVal b, UfVal off) {
 static inline UfVal uf_buffer_write_u32_le(UfVal b, UfVal off, UfVal val) {
     if (b.kind != UF_RT_BUFFER || off.kind != UF_RT_NUMBER || val.kind != UF_RT_NUMBER) return uf_null();
     long o = (long)off.as.number;
-    if (o < 0 || (size_t)(o + 4) > b.as.buffer->size) { fprintf(stderr, "IndexOutOfBounds\n"); exit(3); }
+    if (o < 0 || (size_t)(o + 4) > b.as.buffer->size) { uf_rt_error("IndexOutOfBounds: Buffer access out of range"); }
     uint32_t v = (uint32_t)(int64_t)val.as.number;
     b.as.buffer->data[o] = (uint8_t)(v & 0xff);
     b.as.buffer->data[o+1] = (uint8_t)((v >> 8) & 0xff);
@@ -1930,7 +1950,7 @@ static inline UfVal uf_buffer_write_u32_le(UfVal b, UfVal off, UfVal val) {
 static inline UfVal uf_buffer_read_i32_le(UfVal b, UfVal off) {
     if (b.kind != UF_RT_BUFFER || off.kind != UF_RT_NUMBER) return uf_null();
     long o = (long)off.as.number;
-    if (o < 0 || (size_t)(o + 4) > b.as.buffer->size) { fprintf(stderr, "IndexOutOfBounds\n"); exit(3); }
+    if (o < 0 || (size_t)(o + 4) > b.as.buffer->size) { uf_rt_error("IndexOutOfBounds: Buffer access out of range"); }
     int32_t v = (int32_t)((uint32_t)(b.as.buffer->data[o] | (b.as.buffer->data[o+1] << 8) | (b.as.buffer->data[o+2] << 16) | (b.as.buffer->data[o+3] << 24)));
     return uf_num((double)v);
 }
@@ -2062,8 +2082,7 @@ static inline UfVal uf_send(UfVal ch_val, UfVal val) {
     if (ch_val.kind != UF_RT_CHANNEL || !ch_val.as.channel) return uf_bool(false);
     UfRtChannel* ch = ch_val.as.channel;
     if (ch->closed) {
-        fprintf(stderr, "Runtime Error: Cannot send on closed channel\n");
-        exit(3);
+        uf_rt_error("Cannot send on closed channel");
     }
     if (ch->capacity > 0 && ch->count < ch->capacity) {
         ch->buffer[ch->tail] = val;
@@ -2630,8 +2649,7 @@ static inline UfVal uf_str_count(UfVal s, UfVal sub) {
 /* Collection and Array Builtins */
 static inline UfVal uf_array_pop(UfVal arr) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'pop()' expects an array\n");
-        exit(3);
+        uf_rt_error("'pop()' expects an array");
     }
     UfRtArray* a = arr.as.array;
     if (a->count == 0) return uf_null();
@@ -2640,8 +2658,7 @@ static inline UfVal uf_array_pop(UfVal arr) {
 
 static inline UfVal uf_range(size_t argc, ...) {
     if (argc == 0) {
-        fprintf(stderr, "Runtime Error: 'range()' expects at least 1 argument\n");
-        exit(3);
+        uf_rt_error("'range()' expects at least 1 argument");
     }
     va_list va;
     va_start(va, argc);
@@ -2655,14 +2672,14 @@ static inline UfVal uf_range(size_t argc, ...) {
     double end = 0;
     double step = 1;
     if (argc == 1) {
-        if (args[0].kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: 'range()' argument must be a number\n"); exit(3); }
+        if (args[0].kind != UF_RT_NUMBER) { uf_rt_error("'range()' argument must be a number"); }
         end = args[0].as.number;
     } else {
-        if (args[0].kind != UF_RT_NUMBER || args[1].kind != UF_RT_NUMBER) { fprintf(stderr, "Runtime Error: 'range()' arguments must be numbers\n"); exit(3); }
+        if (args[0].kind != UF_RT_NUMBER || args[1].kind != UF_RT_NUMBER) { uf_rt_error("'range()' arguments must be numbers"); }
         start = args[0].as.number;
         end = args[1].as.number;
         if (argc >= 3) {
-            if (args[2].kind != UF_RT_NUMBER || args[2].as.number == 0) { fprintf(stderr, "Runtime Error: 'range()' step must be a non-zero number\n"); exit(3); }
+            if (args[2].kind != UF_RT_NUMBER || args[2].as.number == 0) { uf_rt_error("'range()' step must be a non-zero number"); }
             step = args[2].as.number;
         }
     }
@@ -2690,8 +2707,7 @@ static inline UfVal uf_range(size_t argc, ...) {
 
 static inline UfVal uf_map_keys(UfVal target) {
     if (target.kind != UF_RT_MAP) {
-        fprintf(stderr, "Runtime Error: 'keys()' expects a map\n");
-        exit(3);
+        uf_rt_error("'keys()' expects a map");
     }
     UfRtMap* m = target.as.map;
     UfVal arr = uf_array_new(m->order_count);
@@ -2703,8 +2719,7 @@ static inline UfVal uf_map_keys(UfVal target) {
 
 static inline UfVal uf_map_values(UfVal target) {
     if (target.kind != UF_RT_MAP) {
-        fprintf(stderr, "Runtime Error: 'values()' expects a map\n");
-        exit(3);
+        uf_rt_error("'values()' expects a map");
     }
     UfRtMap* m = target.as.map;
     UfVal arr = uf_array_new(m->order_count);
@@ -2756,8 +2771,7 @@ static inline UfVal uf_iter_get(UfVal target, long idx) {
 
 static inline UfVal uf_array_map(UfVal arr, UfVal fn) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'map()' expects an array\n");
-        exit(3);
+        uf_rt_error("'map()' expects an array");
     }
     UfRtArray* a = arr.as.array;
     UfVal res = uf_array_new(a->count);
@@ -2770,8 +2784,7 @@ static inline UfVal uf_array_map(UfVal arr, UfVal fn) {
 
 static inline UfVal uf_array_filter(UfVal arr, UfVal fn) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'filter()' expects an array\n");
-        exit(3);
+        uf_rt_error("'filter()' expects an array");
     }
     UfRtArray* a = arr.as.array;
     UfVal res = uf_array_new(a->count);
@@ -2786,8 +2799,7 @@ static inline UfVal uf_array_filter(UfVal arr, UfVal fn) {
 
 static inline UfVal uf_array_reduce(size_t argc, ...) {
     if (argc < 2) {
-        fprintf(stderr, "Runtime Error: 'reduce()' expects an array and a function\n");
-        exit(3);
+        uf_rt_error("'reduce()' expects an array and a function");
     }
     va_list va;
     va_start(va, argc);
@@ -2798,8 +2810,7 @@ static inline UfVal uf_array_reduce(size_t argc, ...) {
     va_end(va);
 
     if (args[0].kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'reduce()' expects an array and a function\n");
-        exit(3);
+        uf_rt_error("'reduce()' expects an array and a function");
     }
     UfRtArray* a = args[0].as.array;
     UfVal fn = args[1];
@@ -2833,8 +2844,7 @@ static inline int uf_default_compare(UfVal a, UfVal b) {
 
 static inline UfVal uf_array_sort(size_t argc, ...) {
     if (argc < 1) {
-        fprintf(stderr, "Runtime Error: 'sort()' expects an array\n");
-        exit(3);
+        uf_rt_error("'sort()' expects an array");
     }
     va_list va;
     va_start(va, argc);
@@ -2845,8 +2855,7 @@ static inline UfVal uf_array_sort(size_t argc, ...) {
     va_end(va);
 
     if (args[0].kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'sort()' expects an array\n");
-        exit(3);
+        uf_rt_error("'sort()' expects an array");
     }
     UfRtArray* src = args[0].as.array;
     UfVal res = uf_array_new(src->count);
@@ -2885,8 +2894,7 @@ static inline UfVal uf_array_sort(size_t argc, ...) {
 
 static inline UfVal uf_array_reverse(UfVal arr) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'reverse()' expects an array\n");
-        exit(3);
+        uf_rt_error("'reverse()' expects an array");
     }
     UfRtArray* src = arr.as.array;
     UfVal res = uf_array_new(src->count);
@@ -2898,8 +2906,7 @@ static inline UfVal uf_array_reverse(UfVal arr) {
 
 static inline UfVal uf_array_find(UfVal arr, UfVal fn) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'find()' expects an array\n");
-        exit(3);
+        uf_rt_error("'find()' expects an array");
     }
     UfRtArray* a = arr.as.array;
     for (size_t i = 0; i < a->count; ++i) {
@@ -2912,8 +2919,7 @@ static inline UfVal uf_array_find(UfVal arr, UfVal fn) {
 
 static inline UfVal uf_array_every(UfVal arr, UfVal fn) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'every()' expects an array\n");
-        exit(3);
+        uf_rt_error("'every()' expects an array");
     }
     UfRtArray* a = arr.as.array;
     for (size_t i = 0; i < a->count; ++i) {
@@ -2926,8 +2932,7 @@ static inline UfVal uf_array_every(UfVal arr, UfVal fn) {
 
 static inline UfVal uf_array_some(UfVal arr, UfVal fn) {
     if (arr.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'some()' expects an array\n");
-        exit(3);
+        uf_rt_error("'some()' expects an array");
     }
     UfRtArray* a = arr.as.array;
     for (size_t i = 0; i < a->count; ++i) {
@@ -2940,8 +2945,7 @@ static inline UfVal uf_array_some(UfVal arr, UfVal fn) {
 
 static inline UfVal uf_array_concat(UfVal a1, UfVal a2) {
     if (a1.kind != UF_RT_ARRAY || a2.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'concat()' expects two arrays\n");
-        exit(3);
+        uf_rt_error("'concat()' expects two arrays");
     }
     UfRtArray* arr1 = a1.as.array;
     UfRtArray* arr2 = a2.as.array;
@@ -2953,8 +2957,7 @@ static inline UfVal uf_array_concat(UfVal a1, UfVal a2) {
 
 static inline UfVal uf_array_flatten(UfVal a) {
     if (a.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'flatten()' expects an array\n");
-        exit(3);
+        uf_rt_error("'flatten()' expects an array");
     }
     UfRtArray* arr = a.as.array;
     UfVal res = uf_array_new(arr->count);
@@ -2973,8 +2976,7 @@ static inline UfVal uf_array_flatten(UfVal a) {
 
 static inline UfVal uf_array_fill(UfVal a, UfVal val) {
     if (a.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'fill()' expects an array\n");
-        exit(3);
+        uf_rt_error("'fill()' expects an array");
     }
     UfRtArray* arr = a.as.array;
     for (size_t i = 0; i < arr->count; ++i) {
@@ -2985,8 +2987,7 @@ static inline UfVal uf_array_fill(UfVal a, UfVal val) {
 
 static inline UfVal uf_array_zip(UfVal a1, UfVal a2) {
     if (a1.kind != UF_RT_ARRAY || a2.kind != UF_RT_ARRAY) {
-        fprintf(stderr, "Runtime Error: 'zip()' expects two arrays\n");
-        exit(3);
+        uf_rt_error("'zip()' expects two arrays");
     }
     UfRtArray* arr1 = a1.as.array;
     UfRtArray* arr2 = a2.as.array;

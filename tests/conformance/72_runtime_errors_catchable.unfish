@@ -1,0 +1,65 @@
+# expect: len: TypeError
+# expect: sub: TypeError
+# expect: mul: TypeError
+# expect: neg: TypeError
+# expect: pop: TypeError
+# expect: range: TypeError
+# expect: range step: TypeError
+# expect: keys: TypeError
+# expect: values: TypeError
+# expect: map: TypeError
+# expect: filter: TypeError
+# expect: reduce: TypeError
+# expect: sort: TypeError
+# expect: reverse: TypeError
+# expect: flatten: TypeError
+# expect: fill: TypeError
+# expect: zip: TypeError
+# expect: concat: TypeError
+# expect: struct field: RuntimeError
+# expect: buffer read: IndexOutOfBounds
+# expect: buffer write: IndexOutOfBounds
+# expect: assign index: TypeError
+# expect: done
+
+# Errors raised by the native C99 runtime itself (type errors in operators
+# and builtins, bad struct fields, out-of-range buffer access) printed a
+# message and called exit(3), so `try` could not catch them in compiled
+# programs even though it caught them under the interpreter and both VMs.
+# They are now thrown like any other error, with the same err.kind.
+
+fn attempt(label, f):
+    try:
+        f()
+        say label + ": no error"
+    catch err:
+        say label + ": " + err.kind
+
+attempt("len", function(): return len(5))
+attempt("sub", function(): return "a" - 1)
+attempt("mul", function(): return [1] * 2)
+attempt("neg", function(): return -"a")
+attempt("pop", function(): return pop(5))
+attempt("range", function(): return range("a"))
+attempt("range step", function(): return range(0, 5, 0))
+attempt("keys", function(): return keys([1]))
+attempt("values", function(): return values(1))
+attempt("map", function(): return map(1, function(x): return x))
+attempt("filter", function(): return filter(1, function(x): return x))
+attempt("reduce", function(): return reduce(1, function(a, b): return a))
+attempt("sort", function(): return sort(1))
+attempt("reverse", function(): return reverse(1))
+attempt("flatten", function(): return flatten(1))
+attempt("fill", function(): return fill(1, 0))
+attempt("zip", function(): return zip(1, [1]))
+attempt("concat", function(): return concat(1, [1]))
+struct P:
+    x: Number
+attempt("struct field", function(): return P(1).nope)
+attempt("buffer read", function(): return buffer_read_u32_le(buffer(2), 0))
+attempt("buffer write", function(): return buffer_write_u16_le(buffer(1), 0, 1))
+attempt("assign index", function():
+    let n = 5
+    n[0] = 1
+)
+say "done"
