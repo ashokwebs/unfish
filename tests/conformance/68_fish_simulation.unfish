@@ -2,6 +2,7 @@
 # expect: Fish #1: pos=(10, 20) • distance to reef=22
 # expect: Fish #2: pos=(14, 22) • distance to reef=26
 # expect: Fish #3: pos=(8, 19) • distance to reef=21
+# expect:
 # expect: 🏊 A current pushes the school by (dx=5, dy=3):
 # expect: Fish #1: now at (17.5, 24.5) • new distance=30
 # expect: Fish #2: now at (20, 25.6) • new distance=32
