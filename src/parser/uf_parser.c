@@ -1,4 +1,5 @@
 #include "uf_parser.h"
+#include <ctype.h>
 
 typedef enum {
     PREC_NONE,
@@ -30,6 +31,7 @@ static UfStmt* parse_statement(UfParser* parser);
 static UfStmt* parse_block(UfParser* parser);
 static UfPattern* parse_pattern(UfParser* parser);
 static UfPattern* expr_to_pattern(UfArena* arena, const UfExpr* expr);
+static UfExpr* parse_function_expr_async(UfParser* parser, bool is_async, SourceLoc start);
 
 static inline UfToken peek(UfParser* parser) {
     if (!parser->has_peek) {
@@ -146,8 +148,51 @@ static UfExpr* parse_literal(UfParser* parser) {
     }
 }
 
+static bool is_fn_lambda(UfParser* parser) {
+    const char* p = parser->current.lexeme;
+    if (!p) return false;
+    if (check(parser, UF_TOK_IDENTIFIER)) {
+        while (*p && (isalnum((unsigned char)*p) || *p == '_')) p++;
+        while (*p && isspace((unsigned char)*p)) p++;
+    }
+    if (*p != '(') return false;
+    int depth = 0;
+    while (*p) {
+        if (*p == '(') depth++;
+        else if (*p == ')') {
+            depth--;
+            if (depth == 0) {
+                p++;
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (*p == '-' && *(p + 1) == '>') {
+                    p += 2;
+                    while (*p && isspace((unsigned char)*p)) p++;
+                    while (*p && (isalnum((unsigned char)*p) || *p == '_' || *p == '[' || *p == ']')) p++;
+                    while (*p && isspace((unsigned char)*p)) p++;
+                }
+                return (*p == ':');
+            }
+        } else if (*p == '"') {
+            p++;
+            while (*p && *p != '"') {
+                if (*p == '\\' && *(p + 1)) p++;
+                p++;
+            }
+            if (!*p) break;
+        }
+        p++;
+    }
+    return false;
+}
+
 static UfExpr* parse_identifier(UfParser* parser) {
     UfToken tok = parser->previous;
+    if (tok.as.string_val && strcmp(tok.as.string_val, "fn") == 0 &&
+        (check(parser, UF_TOK_LPAREN) ||
+         (check(parser, UF_TOK_IDENTIFIER) && peek(parser).kind == UF_TOK_LPAREN)) &&
+        is_fn_lambda(parser)) {
+        return parse_function_expr_async(parser, false, tok.span.start);
+    }
     return uf_expr_identifier(parser->arena, tok.span, tok.as.string_val);
 }
 

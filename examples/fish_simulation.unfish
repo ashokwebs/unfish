@@ -1,0 +1,29 @@
+## 🐠 School of Fish Simulation
+## Simulating fish movement, vectors and distance in the ocean!
+
+struct Fish:
+    id
+    x
+    y
+    speed
+
+    fn swim(self, dx, dy):
+        return Fish(self.id, self.x + dx * self.speed, self.y + dy * self.speed, self.speed)
+
+    fn distance_from_reef(self):
+        return sqrt(pow(self.x, 2) + pow(self.y, 2))
+
+let school = [
+    Fish(1, 10, 20, 1.5),
+    Fish(2, 14, 22, 1.2),
+    Fish(3, 8,  19, 1.8)
+]
+
+say "🌊 Initial Fish Positions in the Lagoon:"
+for f in school:
+    say f"Fish #{f.id}: pos=({f.x}, {f.y}) • distance to reef={round(f.distance_from_reef())}"
+
+say "\n🏊 A current pushes the school by (dx=5, dy=3):"
+let moved_school = map(school, fn(f): f.swim(5, 3))
+for f in moved_school:
+    say f"Fish #{f.id}: now at ({f.x}, {f.y}) • new distance={round(f.distance_from_reef())}"
