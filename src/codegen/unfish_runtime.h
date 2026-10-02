@@ -353,6 +353,7 @@ typedef struct UfCatchFrame {
     jmp_buf buf;
     UfVal error;
     struct UfCatchFrame* prev;
+    int call_depth; /* g_uf_call_depth when the frame was pushed */
 } UfCatchFrame;
 
 static UfCatchFrame* g_catch_stack = NULL;
@@ -375,9 +376,23 @@ static uintptr_t g_uf_stack_base = 0;
  * with room left for uf_raise() itself to build and throw the error. */
 #define UF_RT_STACK_LIMIT_BYTES ((uintptr_t)4 * 1024 * 1024)
 
+/* Call depth, capped at the interpreter's and VMs' limit so a program's
+ * recursion limit does not depend on the backend. The byte budget above is
+ * not enough on its own: under WebAssembly most of a frame lives on the
+ * engine's native stack rather than the linear-memory stack it measures, so
+ * the engine aborts the module long before the budget is reached.
+ *
+ * A counter needs a decrement on every exit path. Normal returns get it from
+ * a cleanup variable (UF_RT_ENTER_FRAME); uf_throw longjmps past those, so
+ * each catch frame records the depth it was pushed at and uf_throw restores
+ * it. Compilers without the cleanup attribute keep only the byte budget. */
+#define UF_RT_MAX_CALL_DEPTH 512
+static int g_uf_call_depth = 0;
+
 static inline void uf_catch_push(UfCatchFrame* frame) {
     frame->prev = g_catch_stack;
     frame->error.kind = UF_RT_NULL;
+    frame->call_depth = g_uf_call_depth;
     g_catch_stack = frame;
 }
 
@@ -649,6 +664,7 @@ static inline void uf_throw(UfVal err) {
         UfCatchFrame* target = g_catch_stack;
         g_catch_stack = target->prev;
         target->error = err;
+        g_uf_call_depth = target->call_depth;
         longjmp(target->buf, 1);
     }
     if (err.kind == UF_RT_ERROR) {
@@ -677,6 +693,27 @@ static inline void uf_rt_check_stack(void) {
                  "StackOverflowError");
     }
 }
+
+static inline int uf_rt_enter_frame(void) {
+    uf_rt_check_stack();
+    if (g_uf_call_depth >= UF_RT_MAX_CALL_DEPTH) {
+        uf_raise("StackOverflowError: Maximum call stack depth exceeded (512 frames)",
+                 "StackOverflowError");
+    }
+    g_uf_call_depth++;
+    return 0;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+static inline void uf_rt_leave_frame(int* token) {
+    (void)token;
+    g_uf_call_depth--;
+}
+#define UF_RT_ENTER_FRAME() \
+    int _uf_frame_token __attribute__((cleanup(uf_rt_leave_frame), unused)) = uf_rt_enter_frame()
+#else
+#define UF_RT_ENTER_FRAME() uf_rt_check_stack()
+#endif
 
 static inline UfVal uf_array_new(size_t capacity) {
     UfRtArray* arr = (UfRtArray*)uf_rt_alloc(UF_RT_ARRAY, sizeof(UfRtArray));

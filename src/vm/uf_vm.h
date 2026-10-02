@@ -8,8 +8,14 @@
 #include "../interpreter/uf_interpreter.h"
 #include <stdbool.h>
 
-#define UF_VM_FRAMES_MAX 256
-#define UF_VM_STACK_MAX 4096
+/* Same call depth as the AST interpreter's UF_MAX_CALL_FRAMES, so a program's
+ * recursion limit does not depend on which engine runs it. */
+/* Function frames allowed, matching UF_MAX_CALL_FRAMES; the frames array
+ * holds one more for the top-level script, which the interpreter does not
+ * count as a call. */
+#define UF_VM_FRAMES_MAX_CALLS 512
+#define UF_VM_FRAMES_MAX (UF_VM_FRAMES_MAX_CALLS + 1)
+#define UF_VM_STACK_MAX 16384
 
 struct UfUpvalueCell {
     UfObj obj;

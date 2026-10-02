@@ -1,0 +1,48 @@
+# expect: 511
+# expect: StackOverflowError
+# expect: 400
+# expect: StackOverflowError
+# expect: 7
+
+# Both VMs capped the call stack at 256 frames while the AST interpreter
+# allows 512, so a recursion 300 deep ran under `unfish run` and died with
+# StackOverflowError under --vm and --regvm. Native and WebAssembly measured
+# bytes of C stack instead, and under WebAssembly the engine's own stack ran
+# out first, aborting the module. Every backend now allows exactly 512 frames.
+
+function depth(n):
+    if n == 0:
+        return 0
+    return 1 + depth(n - 1)
+say depth(511)
+try:
+    depth(512)
+catch err:
+    say err.kind
+
+# A frame with a wider register/stack window per call.
+function wide(n):
+    let a = n
+    let b = n + 1
+    let c = [a, b]
+    let d = {"k": c}
+    if n == 0:
+        return 0
+    return 1 + wide(n - 1) + len(d) - 1
+say wide(400)
+
+function forever(n):
+    return forever(n + 1)
+try:
+    forever(0)
+catch err:
+    say err.kind
+
+# After a caught overflow the depth must be fully restored: plenty of
+# ordinary calls still work.
+function small(n):
+    return n + 1
+let acc = 0
+for i in range(600):
+    acc = small(i)
+say len(to_string(acc)) + 4

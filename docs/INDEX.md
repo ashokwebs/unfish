@@ -158,7 +158,7 @@ All manuals and books can be compiled directly via `make pdfs` and are available
 * [**Chapter 16: Security Model, Sandboxing & Resource Limits**](file:///home/charizard/unfish/docs/SECURITY.md)
   * Threat model: untrusted educational code execution and multi-tenant hosting
   * Memory safety guarantees in pure C99 with bounds checking
-  * Resource quotas: recursion depth limits (`UF_MAX_CALL_DEPTH`), memory allocation caps
+  * Resource quotas: recursion depth limits (`UF_MAX_CALL_FRAMES`, 512 frames), memory allocation caps
   * Execution gas and instruction count limits
   * Capability-based I/O permissions and filesystem path jailing
   * WebAssembly browser sandbox guarantees

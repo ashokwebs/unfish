@@ -16,7 +16,7 @@ Every execution engine in Unfish (the AST interpreter, the Stack VM, and the Reg
 │ • Garbage Collector: bytes_allocated, next_gc_threshold, mark stack    │
 │ • Root Stacks: rt->temp_roots (evaluation scratch root protection)     │
 │ • Scope Context: rt->global_env (top-level), rt->current_env (active)  │
-│ • Call Depth Counter: recursion guard tracking UF_MAX_CALL_DEPTH       │
+│ • Call Depth Counter: recursion guard tracking UF_MAX_CALL_FRAMES      │
 │ • Fiber Scheduler: Run queue of cooperative UfFiber instances          │
 │ • Module Registry: Cache of imported module instances                  │
 └────────────────────────────────────────────────────────────────────────┘

@@ -141,7 +141,7 @@ static bool call_value(UfVM* vm, UfValue callee, size_t argc) {
 
         if (vm->frame_count >= UF_VM_FRAMES_MAX) {
             vm_runtime_error(vm, "StackOverflowError: Maximum call stack depth exceeded (%d frames)",
-                    UF_VM_FRAMES_MAX);
+                    UF_VM_FRAMES_MAX_CALLS);
             vm->had_error = true;
             return false;
         }

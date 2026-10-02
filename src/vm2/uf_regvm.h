@@ -78,9 +78,17 @@ typedef struct {
     uint8_t dest_reg;
 } UfRegFrame;
 
-#define UF_REGVM_FRAMES_MAX   256
+/* Same call depth as the AST interpreter's UF_MAX_CALL_FRAMES, so a program's
+ * recursion limit does not depend on which engine runs it. The register file
+ * is shared by all frames (each window starts at its caller's argument base)
+ * and is bounds-checked on every call. */
+/* Function frames allowed, matching UF_MAX_CALL_FRAMES; the frames array
+ * holds one more for the top-level script, which the interpreter does not
+ * count as a call. */
+#define UF_REGVM_FRAMES_MAX_CALLS 512
+#define UF_REGVM_FRAMES_MAX (UF_REGVM_FRAMES_MAX_CALLS + 1)
 #define UF_REGVM_HANDLERS_MAX  64
-#define UF_REGVM_STACK_MAX     (256 * UF_REGVM_FRAMES_MAX)
+#define UF_REGVM_STACK_MAX     65536
 
 typedef struct {
     int frame_index;

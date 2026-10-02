@@ -51,17 +51,17 @@ The entire Unfish test suite (95+ differential tests, stress tests, and unit tes
 
 To prevent untrusted scripts from exhausting server resources, Unfish enforces strict resource limits:
 
-### 3.1. Call Stack Recursion Guard (`UF_MAX_CALL_DEPTH`)
-Uncontrolled recursion is blocked by an explicit depth counter:
+### 3.1. Call Stack Recursion Guard (`UF_MAX_CALL_FRAMES`)
+Uncontrolled recursion is blocked by an explicit frame limit of 512, enforced identically by every backend (`src/runtime/uf_runtime.c`):
 ```c
-#define UF_MAX_CALL_DEPTH 500
+#define UF_MAX_CALL_FRAMES 512
 
-if (rt->call_depth >= UF_MAX_CALL_DEPTH) {
-    uf_runtime_error(rt, span, "Call stack overflow: exceeded maximum recursion depth of 500");
-    return uf_val_null();
+if (rt->frame_count >= UF_MAX_CALL_FRAMES) {
+    uf_runtime_error(rt, call_span, "StackOverflowError: Maximum call stack depth exceeded (%d frames)", UF_MAX_CALL_FRAMES);
+    return false;
 }
 ```
-This guarantees that infinite recursive functions cannot exhaust the host C thread stack or crash the host process with a `SIGSEGV`.
+The stack VM and register VM use the same limit (`UF_VM_FRAMES_MAX_CALLS`, `UF_REGVM_FRAMES_MAX_CALLS`), and native/WebAssembly binaries count frames in `uf_rt_enter_frame()` with an additional 4 MB C-stack budget. The error is a catchable `StackOverflowError`, and this guarantees that infinite recursive functions cannot exhaust the host C thread stack or crash the host process with a `SIGSEGV`.
 
 ### 3.2. Execution Gas & Instruction Counting
 For multi-tenant playground hosting, Unfish supports instruction gas metering:

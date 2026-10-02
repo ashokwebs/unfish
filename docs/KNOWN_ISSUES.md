@@ -49,13 +49,14 @@ Rather than hiding design trade-offs, we document them thoroughly so educators, 
 
 ## 4. Recursion & Tail Call Optimization (TCO)
 
-### 4.1. Recursion Depth Limit (`UF_MAX_CALL_DEPTH`)
-* **Current Behavior**: To prevent host process stack overflows and crashes, the runtime enforces an explicit maximum call depth limit of **500 frames** (`UF_MAX_CALL_DEPTH`).
+### 4.1. Recursion Depth Limit (512 frames)
+* **Current Behavior**: To prevent host process stack overflows and crashes, every backend — AST interpreter (`UF_MAX_CALL_FRAMES`), both bytecode VMs, native C99 and WebAssembly — enforces the same maximum call depth of **512 frames**. A call chain up to 512 frames deep runs identically everywhere; the 513th nested call raises a catchable `StackOverflowError`. (Native and WebAssembly binaries additionally stop at 4 MB of C stack, which only matters for unusually large frames.)
 * **Tail Call Optimization Status**: Unfish does not currently perform automatic tail call elimination (TCO) in either the AST interpreter or the bytecode virtual machines.
 * **Impact**: Deeply recursive functions (such as naive traversal of a 10,000-element linked list or deep tree) will trigger a runtime error:
   ```
-  Runtime Error: Call stack overflow: exceeded maximum recursion depth of 500
+  Runtime Error: StackOverflowError: Maximum call stack depth exceeded (512 frames)
   ```
+  The error can be caught like any other: `catch err:` sees `err.kind == "StackOverflowError"`.
 * **Workaround**: Rewrite deeply recursive algorithms using iterative loops (`while` or `for`) and an explicit heap-allocated array stack:
   ```unfish
   # Instead of deep recursion:

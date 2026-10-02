@@ -167,9 +167,12 @@ test-asan:
 
 	@$(BIN_DIR)/test_stress
 	@echo "=== Running Conformance Tests with ASan/UBSan ==="
-	@./tools/run_conformance_tests.sh
+	@# ASan frames are several times larger, so the interpreter's C stack runs
+	@# out near 185 Unfish frames under the default 8 MB limit, well short of
+	@# the 512-frame language limit the conformance suite exercises.
+	@ulimit -s unlimited 2>/dev/null || ulimit -s 262144 2>/dev/null || true; ./tools/run_conformance_tests.sh
 	@echo "=== Running Differential Tests with ASan/UBSan ==="
-	@./tools/run_differential_tests.sh
+	@ulimit -s unlimited 2>/dev/null || ulimit -s 262144 2>/dev/null || true; ./tools/run_differential_tests.sh
 
 clean:
 	rm -rf $(BIN_DIR)

@@ -277,7 +277,14 @@ static bool regvm_call_value(UfRegVM* vm, UfValue callee, size_t argc, uint8_t b
 
         if (vm->frame_count >= UF_REGVM_FRAMES_MAX) {
             regvm_runtime_error(vm, "StackOverflowError: Maximum call stack depth exceeded (%d frames)",
-                                UF_REGVM_FRAMES_MAX);
+                                UF_REGVM_FRAMES_MAX_CALLS);
+            return false;
+        }
+        /* The callee's register window starts at the caller's `base` register.
+         * The register file is not sized for every frame using its maximum
+         * window, so check it rather than writing past the end. */
+        if (caller_frame->regs + base + cl->function->max_regs + 16 > vm->stack + UF_REGVM_STACK_MAX) {
+            regvm_runtime_error(vm, "StackOverflowError: Register stack overflow (%d slots)", UF_REGVM_STACK_MAX);
             return false;
         }
 
@@ -1832,7 +1839,7 @@ UfValue uf_regvm_run_closure(UfRegVM* vm, UfRegClosure* closure, size_t argc, Uf
 
     if (vm->frame_count >= UF_REGVM_FRAMES_MAX) {
         regvm_runtime_error(vm, "StackOverflowError: Maximum call stack depth exceeded (%d frames)",
-                            UF_REGVM_FRAMES_MAX);
+                            UF_REGVM_FRAMES_MAX_CALLS);
         return uf_val_null();
     }
 
