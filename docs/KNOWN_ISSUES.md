@@ -86,3 +86,18 @@ Rather than hiding design trade-offs, we document them thoroughly so educators, 
   import "./utils/helpers.unfish" as helpers
   ```
   The module resolver automatically normalizes forward slashes to native Windows separators when running on Windows hosts.
+
+---
+
+## 7. The Browser Engine (Website Playground)
+
+The website runs programs on the real interpreter and VMs compiled to WebAssembly (`web/unfish.wasm`), inside a sandbox. Output matches `unfish run`, with these differences.
+
+### 7.1. Interpreter Recursion Depth
+* **Current Behavior**: The tree-walking interpreter recurses in C for every Unfish call, and a browser worker's native stack runs out at about 250 levels in Chrome, before the 512-frame language limit. The page then reports `StackOverflowError` and suggests the VM.
+* **Workaround**: Choose the stack VM or register VM engine, which keep their call stack in memory and allow the full 512 frames. The quick-run buttons use the stack VM by default.
+
+### 7.2. Sandbox
+* **Current Behavior**: `sys.exec` returns -1, `time.sleep` returns at once, stdin is empty, and files written with the `fs` module live in an in-memory filesystem that lasts for one run. Programs still stopped after 10 seconds are terminated. `inspect()` reports 32-bit object sizes.
+* **Workaround**: Use the command-line `unfish` for programs that need processes, real time, input or lasting files.
+

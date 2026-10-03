@@ -224,6 +224,7 @@ All manuals and books can be compiled directly via `make pdfs` and are available
   * Floating-point precision bounds and 64-bit integer ranges
   * Tail call optimization status and deep recursion workarounds
   * Gradual typing dynamic boundary checks
+  * Browser engine limits: interpreter recursion depth and the sandbox
 
 * [**Chapter 25: Engineering Roadmap & Future Horizons**](file:///home/charizard/unfish/docs/ROADMAP.md)
   * Milestone retrospective: Phase 0 through Phase 10 completion
@@ -234,8 +235,14 @@ All manuals and books can be compiled directly via `make pdfs` and are available
 * [**Chapter 26: Codebase Inventory, Census & Health Metrics**](file:///home/charizard/unfish/docs/PROJECT_STATE.md)
   * Complete source code census: lines of code, file counts, and component breakdown
   * Subsystem completion matrix: 100% verified status across all components
-  * Conformance test results (95/95 passing differential tests)
+  * Conformance test results (104/104 passing differential tests)
   * Target platform support: Linux x86_64/ARM64, macOS, Windows MinGW, WASI WebAssembly, ARM Cortex-M
+
+* [**Engineering Report: October 2026**](ENGINEERING_REPORT_2026-10.md)
+  * Backend parity fixes across the interpreter, both VMs and native C
+  * Garbage-collector rooting bugs found with `UNFISH_GC_STRESS=1`, and `make test-gc-stress`
+  * The website running the real engine via WebAssembly, and the content fixes it exposed
+  * Verification results, known limits and the open v2.1.0 release decision
 
 ---
 
