@@ -37,6 +37,16 @@ struct UfExpr {
     union {
         bool bool_val;
         double number_val;
+
+        /* A number literal: `value` aliases number_val. For prefixed
+         * literals such as 0xFF, `text` keeps the source spelling so the
+         * formatter can preserve it; otherwise it is NULL. Code that turns a
+         * node into a number literal must clear it (see uf_expr_set_number). */
+        struct {
+            double value;
+            const char* text;
+            size_t length;
+        } number_lit;
         const char* string_val;
         const char* identifier_name;
 
@@ -347,6 +357,8 @@ typedef struct {
 UfExpr* uf_expr_literal_null(UfArena* arena, SourceSpan span);
 UfExpr* uf_expr_literal_bool(UfArena* arena, SourceSpan span, bool val);
 UfExpr* uf_expr_literal_number(UfArena* arena, SourceSpan span, double val);
+/* Turns `expr` into a number literal in place (e.g. after constant folding). */
+void uf_expr_set_number(UfExpr* expr, double val);
 UfExpr* uf_expr_literal_string(UfArena* arena, SourceSpan span, const char* str);
 UfExpr* uf_expr_identifier(UfArena* arena, SourceSpan span, const char* name);
 UfExpr* uf_expr_unary(UfArena* arena, SourceSpan span, UfTokenKind op, UfExpr* operand);

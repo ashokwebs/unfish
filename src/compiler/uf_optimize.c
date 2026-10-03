@@ -16,8 +16,7 @@ static void fold_expr(UfExpr* expr, UfRuntime* rt) {
             fold_expr(expr->as.unary.operand, rt);
             UfExpr* op = expr->as.unary.operand;
             if (expr->as.unary.op == UF_TOK_MINUS && op->kind == UF_EXPR_LITERAL_NUMBER) {
-                expr->kind = UF_EXPR_LITERAL_NUMBER;
-                expr->as.number_val = -op->as.number_val;
+                uf_expr_set_number(expr, -op->as.number_val);
             } else if (expr->as.unary.op == UF_TOK_NOT && op->kind == UF_EXPR_LITERAL_BOOL) {
                 expr->kind = UF_EXPR_LITERAL_BOOL;
                 expr->as.bool_val = !op->as.bool_val;
@@ -35,27 +34,22 @@ static void fold_expr(UfExpr* expr, UfRuntime* rt) {
                 double b = right->as.number_val;
                 switch (expr->as.binary.op) {
                     case UF_TOK_PLUS:
-                        expr->kind = UF_EXPR_LITERAL_NUMBER;
-                        expr->as.number_val = a + b;
+                        uf_expr_set_number(expr, a + b);
                         break;
                     case UF_TOK_MINUS:
-                        expr->kind = UF_EXPR_LITERAL_NUMBER;
-                        expr->as.number_val = a - b;
+                        uf_expr_set_number(expr, a - b);
                         break;
                     case UF_TOK_STAR:
-                        expr->kind = UF_EXPR_LITERAL_NUMBER;
-                        expr->as.number_val = a * b;
+                        uf_expr_set_number(expr, a * b);
                         break;
                     case UF_TOK_SLASH:
                         if (b != 0.0) {
-                            expr->kind = UF_EXPR_LITERAL_NUMBER;
-                            expr->as.number_val = a / b;
+                            uf_expr_set_number(expr, a / b);
                         }
                         break;
                     case UF_TOK_PERCENT:
                         if (b != 0.0) {
-                            expr->kind = UF_EXPR_LITERAL_NUMBER;
-                            expr->as.number_val = fmod(a, b);
+                            uf_expr_set_number(expr, fmod(a, b));
                         }
                         break;
                     case UF_TOK_EQEQ:

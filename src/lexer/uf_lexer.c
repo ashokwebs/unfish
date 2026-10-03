@@ -346,6 +346,49 @@ static UfToken scan_fstring(UfLexer* lexer, bool is_multiline) {
 }
 
 static UfToken scan_number(UfLexer* lexer) {
+    /* Prefixed integer literals (LANGUAGE_SPEC §2.6): 0x/0X hexadecimal,
+     * 0b/0B binary and 0o/0O octal. Like every Unfish number the value is a
+     * double; digits past 2^53 round as they would in a decimal literal. */
+    if (lexer->start[0] == '0' && lexer->current == lexer->start + 1) {
+        char prefix = peek(lexer);
+        int base = (prefix == 'x' || prefix == 'X') ? 16
+                 : (prefix == 'b' || prefix == 'B') ? 2
+                 : (prefix == 'o' || prefix == 'O') ? 8 : 0;
+        if (base != 0) {
+            advance(lexer); /* consume the prefix letter */
+            double val = 0.0;
+            size_t digits = 0;
+            for (;;) {
+                int c = (unsigned char)peek(lexer);
+                int d = isdigit(c) ? c - '0' : isxdigit(c) ? tolower(c) - 'a' + 10 : -1;
+                if (d < 0 || d >= base) break;
+                val = val * base + d;
+                advance(lexer);
+                digits++;
+            }
+            if (digits == 0 || isalnum((unsigned char)peek(lexer)) || peek(lexer) == '_') {
+                while (isalnum((unsigned char)peek(lexer)) || peek(lexer) == '_') advance(lexer);
+                if (base == 16) {
+                    return error_token(lexer, "Invalid hexadecimal literal",
+                                       "Hexadecimal digits are 0-9 and a-f, e.g. 0xFF");
+                }
+                if (base == 2) {
+                    return error_token(lexer, "Invalid binary literal",
+                                       "Binary digits are 0 and 1, e.g. 0b1010");
+                }
+                return error_token(lexer, "Invalid octal literal", "Octal digits are 0-7, e.g. 0o755");
+            }
+
+            UfToken token;
+            token.kind = UF_TOK_NUMBER;
+            token.span = make_span(lexer);
+            token.lexeme = lexer->start;
+            token.length = (size_t)(lexer->current - lexer->start);
+            token.as.number_val = val;
+            return finish_token(lexer, token);
+        }
+    }
+
     while (isdigit((unsigned char)peek(lexer))) {
         advance(lexer);
     }

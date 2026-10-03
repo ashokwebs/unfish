@@ -17,10 +17,16 @@ UfExpr* uf_expr_literal_bool(UfArena* arena, SourceSpan span, bool val) {
 
 UfExpr* uf_expr_literal_number(UfArena* arena, SourceSpan span, double val) {
     UfExpr* expr = (UfExpr*)uf_arena_alloc(arena, sizeof(UfExpr));
-    expr->kind = UF_EXPR_LITERAL_NUMBER;
     expr->span = span;
-    expr->as.number_val = val;
+    uf_expr_set_number(expr, val);
     return expr;
+}
+
+void uf_expr_set_number(UfExpr* expr, double val) {
+    expr->kind = UF_EXPR_LITERAL_NUMBER;
+    expr->as.number_lit.value = val;
+    expr->as.number_lit.text = NULL;
+    expr->as.number_lit.length = 0;
 }
 
 UfExpr* uf_expr_literal_string(UfArena* arena, SourceSpan span, const char* str) {

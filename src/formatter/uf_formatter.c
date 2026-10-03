@@ -59,9 +59,15 @@ static void emit_string_literal(FILE* out, const char* str) {
     fputc('"', out);
 }
 
-static void emit_number(FILE* out, double val) {
+static void emit_number(FILE* out, const UfExpr* expr) {
+    if (expr->as.number_lit.text) {
+        /* Prefixed literals (0xFF, 0b1010, 0o755) keep their spelling. */
+        fwrite(expr->as.number_lit.text, 1, expr->as.number_lit.length, out);
+        return;
+    }
+    double val = expr->as.number_val;
     if (val == (double)(int64_t)val && fabs(val) < 9e15) {
-        fprintf(out, "%ld", (long)(int64_t)val);
+        fprintf(out, "%lld", (long long)val); /* long is 32-bit on wasm32/ARM */
     } else {
         char buf[64];
         snprintf(buf, sizeof(buf), "%.14g", val);
@@ -151,7 +157,7 @@ static void emit_expr(FILE* out, const UfExpr* expr, int indent) {
             fputs(expr->as.bool_val ? "true" : "false", out);
             break;
         case UF_EXPR_LITERAL_NUMBER:
-            emit_number(out, expr->as.number_val);
+            emit_number(out, expr);
             break;
         case UF_EXPR_LITERAL_STRING:
             emit_string_literal(out, expr->as.string_val);

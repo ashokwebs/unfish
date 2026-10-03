@@ -139,8 +139,20 @@ static UfExpr* parse_literal(UfParser* parser) {
             return uf_expr_literal_bool(parser->arena, tok.span, true);
         case UF_TOK_FALSE:
             return uf_expr_literal_bool(parser->arena, tok.span, false);
-        case UF_TOK_NUMBER:
-            return uf_expr_literal_number(parser->arena, tok.span, tok.as.number_val);
+        case UF_TOK_NUMBER: {
+            UfExpr* lit = uf_expr_literal_number(parser->arena, tok.span, tok.as.number_val);
+            /* Keep the spelling of 0x/0b/0o literals for the formatter. Copy
+             * it into the arena: an f-string's expressions are lexed from a
+             * temporary buffer that is freed once they are parsed. */
+            if (tok.length > 2 && tok.lexeme[0] == '0' && isalpha((unsigned char)tok.lexeme[1])) {
+                char* text = (char*)uf_arena_alloc(parser->arena, tok.length + 1);
+                memcpy(text, tok.lexeme, tok.length);
+                text[tok.length] = '\0';
+                lit->as.number_lit.text = text;
+                lit->as.number_lit.length = tok.length;
+            }
+            return lit;
+        }
         case UF_TOK_STRING:
             return uf_expr_literal_string(parser->arena, tok.span, tok.as.string_val);
         default:

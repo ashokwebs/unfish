@@ -1,0 +1,17 @@
+# expect: 255 255 3735928559
+# expect: 10 1 0
+# expect: 493 8
+# expect: 3840
+# expect: [1, 3, 7]
+# expect: 1000 0.5 7
+
+# LANGUAGE_SPEC §2.6 documents 0x hexadecimal, 0b binary and 0o octal
+# literals, but the lexer only ever accepted decimal, so `0xFF` was a syntax
+# error on every backend. They are plain numbers once lexed.
+
+say f"{0xFF} {0Xff} {0xDEADBEEF}"
+say f"{0b1010} {0B1} {0b0}"
+say f"{0o755} {0o10}"
+say band(0xFF00, 0x0FF0)
+say [0x1, 0b11, 0o7]
+say f"{1e3} {0.5} {007}"

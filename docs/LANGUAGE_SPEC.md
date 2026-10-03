@@ -89,7 +89,7 @@ A logical statement automatically spans multiple physical lines without triggeri
 ### 2.6. Numeric Literals
 Numbers in Unfish are represented internally as IEEE 754 64-bit double-precision floating-point values (`double`), providing 53 bits of mantissa precision ($\pm 9,007,199,254,740,991$ exact integer range):
 * **Decimal Integers**: `0`, `42`, `1000000`
-* **Floating-Point**: `3.141592653589793`, `0.5`, `.125`
+* **Floating-Point**: `3.141592653589793`, `0.5`, `0.125` (a digit is required before the point, since `.` also introduces member access)
 * **Scientific Exponential**: `1e6`, `2.5e-3`, `6.022e23`, `1.0E+10`
 * **Hexadecimal**: Prefixed with `0x` or `0X` (`0xFF`, `0xDEADBEEF`, `0x1A2B`)
 * **Binary**: Prefixed with `0b` or `0B` (`0b1010`, `0b11110000`)
