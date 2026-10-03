@@ -200,3 +200,5 @@ Run sanitizer tests with:
 ```bash
 make test-asan
 ```
+
+`make test-gc-stress` additionally runs the conformance suite with `UNFISH_GC_STRESS=1`, which collects on every allocation, so any object left unrooted across an allocation is caught deterministically (see `docs/TESTING.md`).

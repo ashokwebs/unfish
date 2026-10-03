@@ -92,6 +92,12 @@ make test-asan
 2. **LeakSanitizer (LSan, `-fsanitize=leak`)**: Asserts that during runtime termination (`uf_runtime_free()`), every single heap-allocated `UfObj` and arena chunk is completely freed with **zero memory leaks**.
 3. **UndefinedBehaviorSanitizer (UBSan, `-fsanitize=undefined`)**: Detects signed integer overflows, misaligned pointer accesses, null pointer dereferences, and invalid bit shift operations.
 
+### GC Stress Mode:
+```bash
+make test-gc-stress
+```
+Setting `UNFISH_GC_STRESS=1` makes every allocation run a full collection. An object that native code holds only in a C local across an allocation (instead of on a temp root, the VM stack or an environment) is then freed at once, so a GC rooting bug fails on its first run under ASan instead of only when a large program crosses the collection threshold at an unlucky moment. The target builds a separate sanitizer binary, `bin/unfish-gcstress`, and runs the conformance suite in this mode on the interpreter, `--vm` and `--regvm`. Run it after touching the runtime, either VM, the compilers or any builtin that allocates.
+
 ---
 
 ## 5. Pillar 4: Stress & Fuzz Testing

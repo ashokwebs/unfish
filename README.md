@@ -96,6 +96,9 @@ make test
 # Run full test suite under AddressSanitizer and UndefinedBehaviorSanitizer
 make test-asan
 
+# Run the conformance suite on every engine with a GC on every allocation (ASan)
+make test-gc-stress
+
 # Run multi-tier performance benchmarks comparing AST vs VM vs Native
 make bench
 ```
