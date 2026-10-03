@@ -1,0 +1,131 @@
+# expect: pair 2
+# expect: nested 123
+# expect: head 1 rest 2
+# expect: head 9 rest 0
+# expect: empty array
+# expect: map 3
+# expect: map null
+# expect: map null
+# expect: map null
+# expect: map null
+# expect: map null
+# expect: map null
+# expect: map null
+# expect: big circle
+# expect: circle 2
+# expect: square 3
+# expect: rect 3x4
+# expect: dot
+# expect: str
+# expect: other
+# expect: null
+# expect: true
+# expect: other
+# expect: other
+# expect: other
+# expect: a pair 12 others 2
+# expect: no
+# expect: list of n 7 +2
+# expect: list of n null +0
+# expect: no
+
+# Match patterns must test the value's shape, as the interpreter always has:
+# an array pattern needs an array of exactly that length (at least, with
+# ...rest), a map pattern a map or struct instance, and sub-patterns nest.
+# Both VMs only compared top-level literal elements -- `when [1, x]` matched
+# [1, 2, 3], `when {"k": y}` crashed on a string ("String index must be a
+# number"), and nested patterns were ignored -- while the register VM also
+# lost bindings in nested patterns and native C ignored map-value literals
+# and could not compile a map ...rest pattern.
+
+struct Point:
+    x: Number
+    y: Number
+
+struct Line:
+    a: Point
+    b: Point
+
+enum Shape:
+    Circle(r)
+    Rect(w, h)
+    Dot
+
+function g(v):
+    match v:
+        when [1, x]:
+            return "pair " + x
+        when [[a, b], c]:
+            return "nested " + a + b + c
+        when [first, ...rest]:
+            return "head " + first + " rest " + len(rest)
+        when {"k": y}:
+            return "map " + y
+        when {"kind": "circle", "r": r}:
+            return "circle map " + r
+        when Point(0, 0):
+            return "origin"
+        when Point(x, 0):
+            return "on x axis at " + x
+        when Line(Point(0, 0), Point(px, py)):
+            return "ray to " + px + "," + py
+        when Circle(r) if r > 10:
+            return "big circle"
+        when Circle(r):
+            return "circle " + r
+        when Rect(w, w2) if w == w2:
+            return "square " + w
+        when Rect(w, h):
+            return "rect " + w + "x" + h
+        when Dot:
+            return "dot"
+        when "s":
+            return "str"
+        when null:
+            return "null"
+        when true:
+            return "true"
+        when []:
+            return "empty array"
+        else:
+            return "other"
+
+say g([1, 2])
+say g([[1, 2], 3])
+say g([1, 2, 3])
+say g([9])
+say g([])
+say g({"k": 3})
+say g({"z": 1})
+say g({"kind": "circle", "r": 4})
+say g(Point(0, 0))
+say g(Point(5, 0))
+say g(Point(5, 5))
+say g(Line(Point(0, 0), Point(3, 4)))
+say g(Line(Point(1, 0), Point(3, 4)))
+say g(Shape.Circle(20))
+say g(Shape.Circle(2))
+say g(Shape.Rect(3, 3))
+say g(Shape.Rect(3, 4))
+say g(Shape.Dot)
+say g("s")
+say g("t")
+say g(null)
+say g(true)
+say g(false)
+say g(1)
+say g(Point)
+
+function h(v):
+    match v:
+        when {"a": [x, y], ...others}:
+            return "a pair " + x + y + " others " + len(others)
+        when [{"n": n}, ...more]:
+            return "list of n " + n + " +" + len(more)
+        else:
+            return "no"
+say h({"a": [1, 2], "b": 3, "c": 4})
+say h({"a": [1], "b": 3})
+say h([{"n": 7}, 1, 2])
+say h([{"m": 7}])
+say h("a")

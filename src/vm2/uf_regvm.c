@@ -497,7 +497,9 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
         [ROP_PUSH_TRY]       = &&do_ROP_PUSH_TRY,
         [ROP_POP_TRY]        = &&do_ROP_POP_TRY,
         [ROP_RETHROW]        = &&do_ROP_RETHROW,
-        [ROP_AWAIT]          = &&do_ROP_AWAIT
+        [ROP_AWAIT]          = &&do_ROP_AWAIT,
+        [ROP_MATCH_SHAPE]    = &&do_ROP_MATCH_SHAPE,
+        [ROP_MATCH_FIELD]    = &&do_ROP_MATCH_FIELD
     };
 #define DISPATCH() do { \
     instr = *ip++; \
@@ -1561,11 +1563,21 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
             uint8_t key_reg = REG_GET_C(instr);
             UfValue m = regs[map_reg];
             UfValue k = regs[key_reg];
+            UfValue found = uf_val_null();
             if (m.kind == UF_VAL_MAP) {
-                regs[dest] = uf_map_get(m.as.map, k);
-            } else {
-                regs[dest] = uf_val_null();
+                found = uf_map_get(m.as.map, k);
+            } else if (m.kind == UF_VAL_INSTANCE && m.as.instance && m.as.instance->def && k.kind == UF_VAL_STRING) {
+                /* Map patterns also match struct instances by field name, as
+                 * in the interpreter and the stack VM. */
+                UfInstanceObject* inst = m.as.instance;
+                for (size_t f = 0; f < inst->field_count; ++f) {
+                    if (strcmp(inst->def->field_names[f], k.as.string->chars) == 0) {
+                        found = inst->fields[f];
+                        break;
+                    }
+                }
             }
+            regs[dest] = found;
             DISPATCH();
         }
 
@@ -1797,6 +1809,70 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
                 val = uf_promise_await(vm->rt, val.as.promise);
             }
             regs[a] = val;
+            DISPATCH();
+        }
+
+#if UF_USE_COMPUTED_GOTO
+        do_ROP_MATCH_SHAPE:
+#else
+        case ROP_MATCH_SHAPE:
+#endif
+        {
+            uint8_t dest = REG_GET_A(instr);
+            UfValue target = regs[REG_GET_B(instr)];
+            uint8_t shape = REG_GET_C(instr);
+            uint16_t operand = REG_GET_Bx(*ip);
+            ip++;
+            bool ok = false;
+            switch (shape) {
+                case REG_MATCH_ARRAY_EXACT:
+                    ok = target.kind == UF_VAL_ARRAY && target.as.array->count == operand;
+                    break;
+                case REG_MATCH_ARRAY_AT_LEAST:
+                    ok = target.kind == UF_VAL_ARRAY && target.as.array->count >= operand;
+                    break;
+                case REG_MATCH_MAP:
+                    ok = target.kind == UF_VAL_MAP || target.kind == UF_VAL_INSTANCE;
+                    break;
+                case REG_MATCH_FIELD_COUNT:
+                    if (target.kind == UF_VAL_INSTANCE && target.as.instance) {
+                        ok = target.as.instance->field_count == operand;
+                    } else if (target.kind == UF_VAL_ENUM_VAL && target.as.enum_val) {
+                        ok = target.as.enum_val->field_count == operand;
+                    }
+                    break;
+                case REG_MATCH_NAMED: {
+                    const char* name = chunk->constants[operand].as.string->chars;
+                    if (target.kind == UF_VAL_INSTANCE && target.as.instance && target.as.instance->def) {
+                        ok = strcmp(target.as.instance->def->name, name) == 0;
+                    } else if (target.kind == UF_VAL_ENUM_VAL && target.as.enum_val && target.as.enum_val->variant_name) {
+                        ok = strcmp(target.as.enum_val->variant_name, name) == 0;
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+            regs[dest] = uf_val_bool(ok);
+            DISPATCH();
+        }
+
+#if UF_USE_COMPUTED_GOTO
+        do_ROP_MATCH_FIELD:
+#else
+        case ROP_MATCH_FIELD:
+#endif
+        {
+            uint8_t dest = REG_GET_A(instr);
+            UfValue target = regs[REG_GET_B(instr)];
+            uint8_t idx = REG_GET_C(instr);
+            UfValue field = uf_val_null();
+            if (target.kind == UF_VAL_INSTANCE && target.as.instance && idx < target.as.instance->field_count) {
+                field = target.as.instance->fields[idx];
+            } else if (target.kind == UF_VAL_ENUM_VAL && target.as.enum_val && idx < target.as.enum_val->field_count) {
+                field = target.as.enum_val->fields[idx];
+            }
+            regs[dest] = field;
             DISPATCH();
         }
 

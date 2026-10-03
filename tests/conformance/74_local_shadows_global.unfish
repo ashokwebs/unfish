@@ -1,0 +1,23 @@
+# expect: 3
+# expect: 12
+# expect: global helper
+# expect: 100
+
+# A local (parameter, let, loop or pattern variable) shadows a top-level
+# function or global of the same name. The native backend resolved the
+# global first, so `helper + total` inside f() used the top-level function
+# and variable instead of f's own parameters.
+
+let total = 100
+function helper():
+    return "global helper"
+function f(helper, total):
+    return helper + total
+say f(1, 2)
+function g():
+    let helper = 5
+    for total in [7]:
+        say helper + total
+g()
+say helper()
+say total

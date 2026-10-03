@@ -27,8 +27,10 @@
  * v4: compilers properly emit OP_POP_TRY on loop break/continue and early returns.
  * v5: return/break/continue run pending finally blocks, catch clauses are
  *     guarded so finally still runs when they raise, and the register
- *     compiler evaluates a return value before popping its try handler. */
-#define UFC_VERSION     5
+ *     compiler evaluates a return value before popping its try handler.
+ * v6: match patterns check their shape (OP_MATCH_SHAPE / ROP_MATCH_SHAPE)
+ *     and nest recursively. */
+#define UFC_VERSION     6
 
 uint64_t uf_cache_hash_source(const char* source, size_t length) {
     uint64_t hash = 14695981039346656037ULL;

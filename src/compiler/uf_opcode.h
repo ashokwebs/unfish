@@ -89,8 +89,18 @@ typedef enum {
     OP_RETHROW,
 
     /* Async / Concurrency */
-    OP_AWAIT
+    OP_AWAIT,
+
+    /* Pattern matching (appended to keep earlier opcode numbers stable) */
+    OP_MATCH_SHAPE,     /* [u8 shape, u16 count] pops value, pushes bool */
+    OP_MATCH_FIELD      /* [u16 index] pops instance/enum, pushes field or null */
 } UfOpcode;
+
+/* Shapes tested by OP_MATCH_SHAPE. */
+#define UF_MATCH_ARRAY_EXACT    0 /* array with exactly `count` elements */
+#define UF_MATCH_ARRAY_AT_LEAST 1 /* array with at least `count` elements */
+#define UF_MATCH_MAP            2 /* map or struct instance */
+#define UF_MATCH_FIELD_COUNT    3 /* instance or enum value with `count` fields */
 
 const char* uf_opcode_name(UfOpcode op);
 

@@ -62,6 +62,8 @@ const char* uf_opcode_name(UfOpcode op) {
         case OP_POP_TRY: return "OP_POP_TRY";
         case OP_RETHROW: return "OP_RETHROW";
         case OP_AWAIT: return "OP_AWAIT";
+        case OP_MATCH_SHAPE: return "OP_MATCH_SHAPE";
+        case OP_MATCH_FIELD: return "OP_MATCH_FIELD";
         default: return "OP_UNKNOWN";
     }
 }
@@ -306,6 +308,15 @@ size_t uf_disassemble_instruction(const UfChunk* chunk, size_t offset, FILE* out
             return simple_instruction("OP_RETHROW", offset, out);
         case OP_AWAIT:
             return simple_instruction("OP_AWAIT", offset, out);
+        case OP_MATCH_SHAPE: {
+            static const char* shapes[] = { "array==", "array>=", "map", "fields==" };
+            uint8_t shape = chunk->code[offset + 1];
+            uint16_t count = (uint16_t)((chunk->code[offset + 2] << 8) | chunk->code[offset + 3]);
+            fprintf(out, "%-16s %s %u\n", "OP_MATCH_SHAPE", shape < 4 ? shapes[shape] : "?", count);
+            return offset + 4;
+        }
+        case OP_MATCH_FIELD:
+            return u16_instruction("OP_MATCH_FIELD", chunk, offset, out);
         default:
             fprintf(out, "Unknown opcode %d\n", instruction);
             return offset + 1;

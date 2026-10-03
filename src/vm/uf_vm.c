@@ -1068,6 +1068,46 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 PUSH(READ_CONSTANT(const_idx));
                 break;
             }
+            case OP_MATCH_SHAPE: {
+                uint8_t shape = READ_BYTE();
+                uint16_t count = READ_U16();
+                UfValue target = POP();
+                bool ok = false;
+                switch (shape) {
+                    case UF_MATCH_ARRAY_EXACT:
+                        ok = target.kind == UF_VAL_ARRAY && target.as.array->count == count;
+                        break;
+                    case UF_MATCH_ARRAY_AT_LEAST:
+                        ok = target.kind == UF_VAL_ARRAY && target.as.array->count >= count;
+                        break;
+                    case UF_MATCH_MAP:
+                        ok = target.kind == UF_VAL_MAP || target.kind == UF_VAL_INSTANCE;
+                        break;
+                    case UF_MATCH_FIELD_COUNT:
+                        if (target.kind == UF_VAL_INSTANCE && target.as.instance) {
+                            ok = target.as.instance->field_count == count;
+                        } else if (target.kind == UF_VAL_ENUM_VAL && target.as.enum_val) {
+                            ok = target.as.enum_val->field_count == count;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+                PUSH(uf_val_bool(ok));
+                break;
+            }
+            case OP_MATCH_FIELD: {
+                uint16_t idx = READ_U16();
+                UfValue target = POP();
+                UfValue field = uf_val_null();
+                if (target.kind == UF_VAL_INSTANCE && target.as.instance && idx < target.as.instance->field_count) {
+                    field = target.as.instance->fields[idx];
+                } else if (target.kind == UF_VAL_ENUM_VAL && target.as.enum_val && idx < target.as.enum_val->field_count) {
+                    field = target.as.enum_val->fields[idx];
+                }
+                PUSH(field);
+                break;
+            }
             case OP_INSTANCE: {
                 uint16_t c_idx = READ_U16();
                 const char* sname = READ_CONSTANT(c_idx).as.string->chars;

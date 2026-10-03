@@ -5,6 +5,7 @@
 #include "../semantic/uf_semantic.h"
 #include "../common/uf_diagnostic.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -409,6 +410,16 @@ static void scope_push(const char* name) {
     if (name && g_scope_var_count < 512) {
         g_scope_vars[g_scope_var_count++] = name;
     }
+}
+
+/* A name bound in the current function (parameter, local, loop or pattern
+ * variable). It shadows a top-level function or global of the same name. */
+static bool is_scope_local(const char* name) {
+    if (!name) return false;
+    for (size_t i = g_scope_var_count; i > 0; --i) {
+        if (strcmp(g_scope_vars[i - 1], name) == 0) return true;
+    }
+    return false;
 }
 
 static bool is_locally_shadowed(const char* name) {
@@ -938,6 +949,12 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
                 fputs("uf_num(2.71828182845904523536)", out);
             } else if (strcmp(expr->as.identifier_name, "INFINITY") == 0) {
                 fputs("uf_num(HUGE_VAL)", out);
+            } else if (is_scope_local(expr->as.identifier_name)) {
+                if (is_boxed_name(expr->as.identifier_name)) {
+                    fprintf(out, "(*uf_var_%s)", expr->as.identifier_name);
+                } else {
+                    fprintf(out, "uf_var_%s", expr->as.identifier_name);
+                }
             } else if (is_declared_function(expr->as.identifier_name)) {
                 fprintf(out, "%swrap_fn_%s()", g_ctx->prefix, expr->as.identifier_name);
             } else if (is_declared_var(expr->as.identifier_name)) {
@@ -1494,30 +1511,69 @@ static void emit_expr(FILE* out, const UfExpr* expr) {
     }
 }
 
+/* Match patterns mirror match_pattern_and_bind() in the interpreter: an
+ * array pattern needs an array of exactly the right length (at least, with a
+ * rest element), a map pattern a map or struct instance, and sub-patterns
+ * nest to any depth. A sub-value is addressed by a side-effect-free C
+ * accessor expression built from its parent's. */
+static char* pattern_expr(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    char* buf = (char*)malloc((size_t)n + 1);
+    if (!buf) return NULL;
+    va_start(ap, fmt);
+    vsnprintf(buf, (size_t)n + 1, fmt, ap);
+    va_end(ap);
+    return buf;
+}
+
+static size_t pattern_array_fixed_count(const UfPattern* pat) {
+    if (!pat->as.array_pat.has_rest) return pat->as.array_pat.count;
+    return pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0;
+}
+
+/* `uf_map_rest(val, n, (const char*[]){...})` for a map pattern's rest. */
+static char* map_rest_expr(const UfPattern* pat, const char* val_expr) {
+    size_t len = 64 + strlen(val_expr);
+    for (size_t j = 0; j < pat->as.map_pat.count; ++j) len += strlen(pat->as.map_pat.keys[j]) + 4;
+    char* buf = (char*)malloc(len);
+    if (!buf) return NULL;
+    int off = snprintf(buf, len, "uf_map_rest(%s, %zu, (const char*[]){", val_expr, pat->as.map_pat.count);
+    if (pat->as.map_pat.count == 0) {
+        off += snprintf(buf + off, len - (size_t)off, "NULL");
+    }
+    for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
+        off += snprintf(buf + off, len - (size_t)off, "%s\"%s\"", j > 0 ? ", " : "", pat->as.map_pat.keys[j]);
+    }
+    snprintf(buf + off, len - (size_t)off, "})");
+    return buf;
+}
+
 static bool pattern_has_condition(const UfPattern* pat) {
     if (!pat) return false;
     switch (pat->kind) {
         case UF_PAT_WILDCARD:
             return false;
         case UF_PAT_VARIABLE:
-            if (is_declared_unit_enum_variant(pat->as.var_name)) return true;
-            return false;
+            return is_declared_unit_enum_variant(pat->as.var_name);
         case UF_PAT_LITERAL:
-            return true;
         case UF_PAT_STRUCT:
-            return true;
         case UF_PAT_ARRAY:
-            return true;
         case UF_PAT_MAP:
             return true;
         case UF_PAT_REST:
-            return false;
+            return pattern_has_condition(pat->as.rest_pat.subpattern);
     }
     return false;
 }
 
 static void emit_pattern_condition(FILE* out, const UfPattern* pat, const char* val_expr) {
-    if (!pat) return;
+    if (!pat) {
+        fputs("1", out);
+        return;
+    }
     switch (pat->kind) {
         case UF_PAT_WILDCARD:
             fputs("1", out);
@@ -1534,49 +1590,58 @@ static void emit_pattern_condition(FILE* out, const UfPattern* pat, const char* 
             emit_expr(out, pat->as.literal);
             fputc(')', out);
             break;
+        case UF_PAT_REST:
+            emit_pattern_condition(out, pat->as.rest_pat.subpattern, val_expr);
+            break;
         case UF_PAT_STRUCT:
             fprintf(out, "(uf_pat_match_variant(%s, \"%s\", %zu)",
                     val_expr, pat->as.struct_pat.struct_name, pat->as.struct_pat.field_count);
             for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
-                if (pattern_has_condition(pat->as.struct_pat.field_patterns[i])) {
-                    char field_expr[256];
-                    snprintf(field_expr, sizeof(field_expr), "uf_pat_get_field(%s, %zu)", val_expr, i);
-                    fputs(" && ", out);
-                    emit_pattern_condition(out, pat->as.struct_pat.field_patterns[i], field_expr);
-                }
+                if (!pattern_has_condition(pat->as.struct_pat.field_patterns[i])) continue;
+                char* field_expr = pattern_expr("uf_pat_get_field(%s, %zu)", val_expr, i);
+                fputs(" && ", out);
+                emit_pattern_condition(out, pat->as.struct_pat.field_patterns[i], field_expr);
+                free(field_expr);
             }
             fputc(')', out);
             break;
         case UF_PAT_ARRAY: {
-            size_t normal_count = pat->as.array_pat.has_rest
-                ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0)
-                : pat->as.array_pat.count;
-            if (pat->as.array_pat.has_rest) {
-                fprintf(out, "(%s.kind == UF_RT_ARRAY && %s.as.array->count >= %zu",
-                        val_expr, val_expr, normal_count);
-            } else {
-                fprintf(out, "(%s.kind == UF_RT_ARRAY && %s.as.array->count == %zu",
-                        val_expr, val_expr, normal_count);
+            size_t fixed = pattern_array_fixed_count(pat);
+            fprintf(out, "(%s.kind == UF_RT_ARRAY && %s.as.array->count %s %zu",
+                    val_expr, val_expr, pat->as.array_pat.has_rest ? ">=" : "==", fixed);
+            for (size_t i = 0; i < fixed; ++i) {
+                if (!pattern_has_condition(pat->as.array_pat.elements[i])) continue;
+                char* elem_expr = pattern_expr("%s.as.array->elements[%zu]", val_expr, i);
+                fputs(" && ", out);
+                emit_pattern_condition(out, pat->as.array_pat.elements[i], elem_expr);
+                free(elem_expr);
             }
-            for (size_t i = 0; i < normal_count; ++i) {
-                const UfPattern* ep = pat->as.array_pat.elements[i];
-                if (ep && ep->kind == UF_PAT_LITERAL) {
-                    char elem_expr[256];
-                    snprintf(elem_expr, sizeof(elem_expr),
-                             "(%s.as.array->count > %zu ? %s.as.array->elements[%zu] : uf_null())",
-                             val_expr, i, val_expr, i);
-                    fputs(" && ", out);
-                    emit_pattern_condition(out, ep, elem_expr);
-                }
+            if (pat->as.array_pat.has_rest && fixed < pat->as.array_pat.count &&
+                pattern_has_condition(pat->as.array_pat.elements[fixed])) {
+                char* rest_expr = pattern_expr("uf_array_slice(%s, %zu)", val_expr, fixed);
+                fputs(" && ", out);
+                emit_pattern_condition(out, pat->as.array_pat.elements[fixed], rest_expr);
+                free(rest_expr);
             }
             fputc(')', out);
             break;
         }
         case UF_PAT_MAP:
-            fprintf(out, "(%s.kind == UF_RT_MAP || %s.kind == UF_RT_INSTANCE)", val_expr, val_expr);
-            break;
-        case UF_PAT_REST:
-            fputs("1", out);
+            fprintf(out, "((%s.kind == UF_RT_MAP || %s.kind == UF_RT_INSTANCE)", val_expr, val_expr);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                if (!pattern_has_condition(pat->as.map_pat.values[i])) continue;
+                char* key_expr = pattern_expr("uf_destructure_get_key(%s, \"%s\")", val_expr, pat->as.map_pat.keys[i]);
+                fputs(" && ", out);
+                emit_pattern_condition(out, pat->as.map_pat.values[i], key_expr);
+                free(key_expr);
+            }
+            if (pat->as.map_pat.has_rest && pattern_has_condition(pat->as.map_pat.rest_pattern)) {
+                char* rest_expr = map_rest_expr(pat, val_expr);
+                fputs(" && ", out);
+                emit_pattern_condition(out, pat->as.map_pat.rest_pattern, rest_expr);
+                free(rest_expr);
+            }
+            fputc(')', out);
             break;
     }
 }
@@ -1598,84 +1663,41 @@ static void emit_pattern_bindings(FILE* out, const UfPattern* pat, const char* v
                 fprintf(out, "UfVal uf_var_%s = %s;\n", pat->as.var_name, val_expr);
             }
             break;
+        case UF_PAT_REST:
+            emit_pattern_bindings(out, pat->as.rest_pat.subpattern, val_expr, indent);
+            break;
         case UF_PAT_STRUCT:
             for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
-                char field_expr[256];
-                snprintf(field_expr, sizeof(field_expr), "uf_pat_get_field(%s, %zu)", val_expr, i);
+                char* field_expr = pattern_expr("uf_pat_get_field(%s, %zu)", val_expr, i);
                 emit_pattern_bindings(out, pat->as.struct_pat.field_patterns[i], field_expr, indent);
+                free(field_expr);
             }
             break;
         case UF_PAT_ARRAY: {
-            size_t normal_count = pat->as.array_pat.has_rest
-                ? (pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0)
-                : pat->as.array_pat.count;
-            for (size_t i = 0; i < normal_count; ++i) {
-                const UfPattern* ep = pat->as.array_pat.elements[i];
-                if (!ep || ep->kind == UF_PAT_WILDCARD || ep->kind == UF_PAT_LITERAL) continue;
-                char elem_expr[256];
-                snprintf(elem_expr, sizeof(elem_expr),
-                         "(%s.as.array->count > %zu ? %s.as.array->elements[%zu] : uf_null())",
-                         val_expr, i, val_expr, i);
-                emit_pattern_bindings(out, ep, elem_expr, indent);
+            size_t fixed = pattern_array_fixed_count(pat);
+            for (size_t i = 0; i < fixed; ++i) {
+                char* elem_expr = pattern_expr("(%s.as.array->count > %zu ? %s.as.array->elements[%zu] : uf_null())",
+                                               val_expr, i, val_expr, i);
+                emit_pattern_bindings(out, pat->as.array_pat.elements[i], elem_expr, indent);
+                free(elem_expr);
             }
-            if (pat->as.array_pat.has_rest) {
-                const UfPattern* rp = pat->as.array_pat.elements[normal_count];
-                if (rp && rp->kind == UF_PAT_REST) rp = rp->as.rest_pat.subpattern;
-                if (rp && rp->kind == UF_PAT_VARIABLE) {
-                    char rest_expr[256];
-                    snprintf(rest_expr, sizeof(rest_expr), "uf_array_slice(%s, %zu)", val_expr, normal_count);
-                    emit_indent(out, indent);
-                    if (is_boxed_name(rp->as.var_name)) {
-                        fprintf(out, "UfVal* uf_var_%s = uf_box_new(%s);\n", rp->as.var_name, rest_expr);
-                    } else {
-                        fprintf(out, "UfVal uf_var_%s = %s;\n", rp->as.var_name, rest_expr);
-                    }
-                }
+            if (pat->as.array_pat.has_rest && fixed < pat->as.array_pat.count) {
+                char* rest_expr = pattern_expr("uf_array_slice(%s, %zu)", val_expr, fixed);
+                emit_pattern_bindings(out, pat->as.array_pat.elements[fixed], rest_expr, indent);
+                free(rest_expr);
             }
             break;
         }
-        case UF_PAT_MAP: {
+        case UF_PAT_MAP:
             for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
-                const UfPattern* vp = pat->as.map_pat.values[i];
-                if (!vp || vp->kind == UF_PAT_WILDCARD || vp->kind == UF_PAT_LITERAL) continue;
-                char key_expr[256];
-                snprintf(key_expr, sizeof(key_expr),
-                         "uf_destructure_get_key(%s, \"%s\")", val_expr, pat->as.map_pat.keys[i]);
-                emit_pattern_bindings(out, vp, key_expr, indent);
+                char* key_expr = pattern_expr("uf_destructure_get_key(%s, \"%s\")", val_expr, pat->as.map_pat.keys[i]);
+                emit_pattern_bindings(out, pat->as.map_pat.values[i], key_expr, indent);
+                free(key_expr);
             }
             if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
-                const UfPattern* rp = pat->as.map_pat.rest_pattern;
-                if (rp->kind == UF_PAT_VARIABLE) {
-                    emit_indent(out, indent);
-                    /* Declare the variable BEFORE the exclude-keys block */
-                    if (is_boxed_name(rp->as.var_name)) {
-                        fprintf(out, "UfVal* uf_var_%s;\n", rp->as.var_name);
-                        emit_indent(out, indent);
-                        fprintf(out, "{ const char* _excl_keys_%s[] = {", rp->as.var_name);
-                        for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
-                            if (j > 0) fputs(", ", out);
-                            fprintf(out, "\"%s\"", pat->as.map_pat.keys[j]);
-                        }
-                        fprintf(out, "}; uf_var_%s = uf_box_new(uf_map_rest(%s, %zu, _excl_keys_%s)); }\n",
-                                rp->as.var_name, val_expr, pat->as.map_pat.count, rp->as.var_name);
-                    } else {
-                        fprintf(out, "UfVal uf_var_%s;\n", rp->as.var_name);
-                        emit_indent(out, indent);
-                        fprintf(out, "{ const char* _excl_keys_%s[] = {", rp->as.var_name);
-                        for (size_t j = 0; j < pat->as.map_pat.count; ++j) {
-                            if (j > 0) fputs(", ", out);
-                            fprintf(out, "\"%s\"", pat->as.map_pat.keys[j]);
-                        }
-                        fprintf(out, "}; uf_var_%s = uf_map_rest(%s, %zu, _excl_keys_%s); }\n",
-                                rp->as.var_name, val_expr, pat->as.map_pat.count, rp->as.var_name);
-                    }
-                }
-            }
-            break;
-        }
-        case UF_PAT_REST:
-            if (pat->as.rest_pat.subpattern) {
-                emit_pattern_bindings(out, pat->as.rest_pat.subpattern, val_expr, indent);
+                char* rest_expr = map_rest_expr(pat, val_expr);
+                emit_pattern_bindings(out, pat->as.map_pat.rest_pattern, rest_expr, indent);
+                free(rest_expr);
             }
             break;
     }
@@ -2143,6 +2165,16 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
                 fputs(") {\n", out);
 
                 emit_pattern_bindings(out, arm->pattern, mval_str, indent + 2);
+                /* The arm's bindings shadow globals of the same name (a
+                 * top-level function `h` versus a bound `h`) in its guard and
+                 * body, so they must be in scope while those are emitted. */
+                size_t saved_arm_scope = g_scope_var_count;
+                {
+                    const char* arm_locals[64];
+                    size_t arm_local_count = 0;
+                    collect_pattern_locals(arm->pattern, arm_locals, &arm_local_count);
+                    for (size_t l = 0; l < arm_local_count; ++l) scope_push(arm_locals[l]);
+                }
 
                 if (arm->guard) {
                     emit_indent(out, indent + 2);
@@ -2170,6 +2202,7 @@ static void emit_stmt(FILE* out, const UfStmt* stmt, int indent, bool is_topleve
                     fputs("}\n", out);
                 }
 
+                g_scope_var_count = saved_arm_scope;
                 emit_indent(out, indent + 1);
                 fputs("}\n", out);
             }

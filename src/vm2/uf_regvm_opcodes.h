@@ -85,7 +85,19 @@ typedef enum {
     /* Async / Await */
     ROP_AWAIT,           /* A = await B            Await promise B into register A */
 
+    /* Pattern matching */
+    ROP_MATCH_SHAPE,     /* A = B has shape C; the next word's Bx is the count, or
+                          * for REG_MATCH_NAMED the struct/variant name constant */
+    ROP_MATCH_FIELD,     /* A = positional field C of instance/enum B, or null */
+
     ROP_COUNT            /* Total number of register opcodes */
 } UfRegOpcode;
+
+/* Shapes tested by ROP_MATCH_SHAPE (the first four as in the stack VM). */
+#define REG_MATCH_ARRAY_EXACT    0 /* array with exactly `count` elements */
+#define REG_MATCH_ARRAY_AT_LEAST 1 /* array with at least `count` elements */
+#define REG_MATCH_MAP            2 /* map or struct instance */
+#define REG_MATCH_FIELD_COUNT    3 /* instance or enum value with `count` fields */
+#define REG_MATCH_NAMED          4 /* instance of struct / value of variant named K[Bx] */
 
 #endif /* UF_REGVM_OPCODES_H */

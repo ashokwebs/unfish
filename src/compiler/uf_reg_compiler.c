@@ -891,6 +891,264 @@ static UfRegFunction* compile_reg_method_helper(UfRegCompiler* c, UfStmt* method
 
 /* --- Statement Compilation --- */
 
+/* --- Match patterns ----------------------------------------------------
+ * Mirrors match_pattern_and_bind() in the interpreter. A sub-value of the
+ * match subject is reached by replaying a path of safe accessors. */
+typedef enum {
+    REG_STEP_INDEX,
+    REG_STEP_KEY,
+    REG_STEP_FIELD,
+    REG_STEP_SLICE,
+    REG_STEP_MAP_REST
+} UfRegMatchStepKind;
+
+typedef struct {
+    UfRegMatchStepKind kind;
+    uint16_t index;
+    const char* key;
+    const UfPattern* map_pattern;
+} UfRegMatchStep;
+
+#define UF_REG_MATCH_MAX_DEPTH 32
+
+typedef struct {
+    UfRegMatchStep steps[UF_REG_MATCH_MAX_DEPTH];
+    int count;
+} UfRegMatchPath;
+
+static bool reg_match_push(UfRegCompiler* c, UfRegMatchPath* path, UfRegMatchStep step, int line) {
+    if (path->count >= UF_REG_MATCH_MAX_DEPTH) {
+        compile_error(c, line, "Match pattern nested too deeply (limit is %d levels)", UF_REG_MATCH_MAX_DEPTH);
+        return false;
+    }
+    if (step.kind == REG_STEP_FIELD && step.index > 255) {
+        compile_error(c, line, "Match pattern field position too large (limit is 255)");
+        return false;
+    }
+    path->steps[path->count++] = step;
+    return true;
+}
+
+/* Load the value at `path` into `dest`, stepping in place. */
+static void reg_match_load(UfRegCompiler* c, uint8_t target_reg, const UfRegMatchPath* path, uint8_t dest, int line) {
+    uint8_t src = target_reg;
+    if (path->count == 0) {
+        if (dest != target_reg) emit_abc(c, ROP_MOVE, dest, target_reg, 0, line);
+        return;
+    }
+    for (int i = 0; i < path->count; ++i) {
+        const UfRegMatchStep* st = &path->steps[i];
+        switch (st->kind) {
+            case REG_STEP_INDEX:
+            case REG_STEP_SLICE: {
+                uint8_t r_num = alloc_reg(c);
+                emit_abx(c, ROP_LOAD_K, r_num, (uint16_t)make_constant(c, uf_val_number((double)st->index)), line);
+                emit_abc(c, st->kind == REG_STEP_INDEX ? ROP_ARRAY_GET_SAFE : ROP_ARRAY_SLICE, dest, src, r_num, line);
+                free_reg(c, r_num);
+                break;
+            }
+            case REG_STEP_KEY: {
+                uint8_t r_key = alloc_reg(c);
+                emit_abx(c, ROP_LOAD_K, r_key, (uint16_t)make_constant(c, uf_val_string_cstr(c->rt, st->key)), line);
+                emit_abc(c, ROP_MAP_GET_SAFE, dest, src, r_key, line);
+                free_reg(c, r_key);
+                break;
+            }
+            case REG_STEP_FIELD:
+                emit_abc(c, ROP_MATCH_FIELD, dest, src, (uint8_t)st->index, line);
+                break;
+            case REG_STEP_MAP_REST: {
+                const UfPattern* mp = st->map_pattern;
+                size_t count = mp->as.map_pat.count;
+                if (count > 255) {
+                    compile_error(c, line, "Map pattern has too many keys (limit is 255)");
+                    return;
+                }
+                emit_abc(c, ROP_MAP_REST, dest, src, (uint8_t)count, line);
+                for (size_t k = 0; k < count; ++k) {
+                    uint16_t k_idx = (uint16_t)make_constant(c, uf_val_string_cstr(c->rt, mp->as.map_pat.keys[k]));
+                    emit_abx(c, ROP_LOAD_K, 0, k_idx, line);
+                }
+                break;
+            }
+        }
+        src = dest;
+    }
+}
+
+static void reg_match_fail_if_false(UfRegCompiler* c, uint8_t r_bool, int* fail_jumps, size_t* fail_count, int line) {
+    if (*fail_count < 256) {
+        fail_jumps[(*fail_count)++] = emit_jump(c, ROP_JMP_FALSE, r_bool, line);
+    } else {
+        compile_error(c, line,
+                      "Match arm has too many pattern tests (limit is 256); "
+                      "simplify the pattern or split the match");
+    }
+}
+
+static void reg_match_shape(UfRegCompiler* c, uint8_t target_reg, const UfRegMatchPath* path, uint8_t shape,
+                            uint16_t operand, int* fail_jumps, size_t* fail_count, int line) {
+    uint8_t r = alloc_reg(c);
+    reg_match_load(c, target_reg, path, r, line);
+    emit_abc(c, ROP_MATCH_SHAPE, r, r, shape, line);
+    emit_abx(c, ROP_LOAD_K, 0, operand, line); /* operand word, skipped by the VM */
+    reg_match_fail_if_false(c, r, fail_jumps, fail_count, line);
+    free_reg(c, r);
+}
+
+static bool reg_pattern_is_unit_variant(UfRegCompiler* c, const UfPattern* pat, UfValue* out) {
+    UfValue existing = uf_val_null();
+    if (pat->kind == UF_PAT_VARIABLE &&
+        uf_env_lookup(c->rt->global_env, pat->as.var_name, &existing) &&
+        existing.kind == UF_VAL_ENUM_VAL && existing.as.enum_val && existing.as.enum_val->field_count == 0) {
+        *out = existing;
+        return true;
+    }
+    return false;
+}
+
+static size_t reg_array_fixed_count(const UfPattern* pat) {
+    if (!pat->as.array_pat.has_rest) return pat->as.array_pat.count;
+    return pat->as.array_pat.count > 0 ? pat->as.array_pat.count - 1 : 0;
+}
+
+static void reg_pattern_tests(UfRegCompiler* c, const UfPattern* pat, uint8_t target_reg, UfRegMatchPath* path,
+                              int* fail_jumps, size_t* fail_count, int line) {
+    if (!pat) return;
+    UfValue variant;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+            break;
+        case UF_PAT_VARIABLE:
+        case UF_PAT_LITERAL: {
+            bool is_variant = reg_pattern_is_unit_variant(c, pat, &variant);
+            if (pat->kind == UF_PAT_VARIABLE && !is_variant) break;
+            uint8_t r_val = alloc_reg(c);
+            reg_match_load(c, target_reg, path, r_val, line);
+            uint8_t r_cmp;
+            if (is_variant) {
+                r_cmp = alloc_reg(c);
+                emit_abx(c, ROP_LOAD_K, r_cmp, (uint16_t)make_constant(c, variant), line);
+            } else {
+                r_cmp = compile_expr(c, pat->as.literal, -1);
+            }
+            emit_abc(c, ROP_EQ, r_val, r_val, r_cmp, line);
+            free_reg(c, r_cmp);
+            reg_match_fail_if_false(c, r_val, fail_jumps, fail_count, line);
+            free_reg(c, r_val);
+            break;
+        }
+        case UF_PAT_REST:
+            reg_pattern_tests(c, pat->as.rest_pat.subpattern, target_reg, path, fail_jumps, fail_count, line);
+            break;
+        case UF_PAT_STRUCT:
+            reg_match_shape(c, target_reg, path, REG_MATCH_NAMED,
+                            identifier_constant(c, pat->as.struct_pat.struct_name), fail_jumps, fail_count, line);
+            reg_match_shape(c, target_reg, path, REG_MATCH_FIELD_COUNT,
+                            (uint16_t)pat->as.struct_pat.field_count, fail_jumps, fail_count, line);
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                UfRegMatchStep st = { .kind = REG_STEP_FIELD, .index = (uint16_t)i };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_tests(c, pat->as.struct_pat.field_patterns[i], target_reg, path, fail_jumps, fail_count, line);
+                path->count--;
+            }
+            break;
+        case UF_PAT_ARRAY: {
+            size_t fixed = reg_array_fixed_count(pat);
+            reg_match_shape(c, target_reg, path,
+                            pat->as.array_pat.has_rest ? REG_MATCH_ARRAY_AT_LEAST : REG_MATCH_ARRAY_EXACT,
+                            (uint16_t)fixed, fail_jumps, fail_count, line);
+            for (size_t i = 0; i < fixed; ++i) {
+                UfRegMatchStep st = { .kind = REG_STEP_INDEX, .index = (uint16_t)i };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_tests(c, pat->as.array_pat.elements[i], target_reg, path, fail_jumps, fail_count, line);
+                path->count--;
+            }
+            if (pat->as.array_pat.has_rest && fixed < pat->as.array_pat.count) {
+                UfRegMatchStep st = { .kind = REG_STEP_SLICE, .index = (uint16_t)fixed };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_tests(c, pat->as.array_pat.elements[fixed], target_reg, path, fail_jumps, fail_count, line);
+                path->count--;
+            }
+            break;
+        }
+        case UF_PAT_MAP:
+            reg_match_shape(c, target_reg, path, REG_MATCH_MAP, 0, fail_jumps, fail_count, line);
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                UfRegMatchStep st = { .kind = REG_STEP_KEY, .key = pat->as.map_pat.keys[i] };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_tests(c, pat->as.map_pat.values[i], target_reg, path, fail_jumps, fail_count, line);
+                path->count--;
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                UfRegMatchStep st = { .kind = REG_STEP_MAP_REST, .map_pattern = pat };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_tests(c, pat->as.map_pat.rest_pattern, target_reg, path, fail_jumps, fail_count, line);
+                path->count--;
+            }
+            break;
+    }
+}
+
+static void reg_pattern_binds(UfRegCompiler* c, const UfPattern* pat, uint8_t target_reg, UfRegMatchPath* path, int line) {
+    if (!pat) return;
+    UfValue variant;
+    switch (pat->kind) {
+        case UF_PAT_WILDCARD:
+        case UF_PAT_LITERAL:
+            break;
+        case UF_PAT_VARIABLE:
+            if (!reg_pattern_is_unit_variant(c, pat, &variant)) {
+                int slot = add_local(c, pat->as.var_name, line);
+                if (slot < 0) return;
+                reg_match_load(c, target_reg, path, c->locals[slot].reg, line);
+                mark_initialized(c);
+            }
+            break;
+        case UF_PAT_REST:
+            reg_pattern_binds(c, pat->as.rest_pat.subpattern, target_reg, path, line);
+            break;
+        case UF_PAT_STRUCT:
+            for (size_t i = 0; i < pat->as.struct_pat.field_count; ++i) {
+                UfRegMatchStep st = { .kind = REG_STEP_FIELD, .index = (uint16_t)i };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_binds(c, pat->as.struct_pat.field_patterns[i], target_reg, path, line);
+                path->count--;
+            }
+            break;
+        case UF_PAT_ARRAY: {
+            size_t fixed = reg_array_fixed_count(pat);
+            for (size_t i = 0; i < fixed; ++i) {
+                UfRegMatchStep st = { .kind = REG_STEP_INDEX, .index = (uint16_t)i };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_binds(c, pat->as.array_pat.elements[i], target_reg, path, line);
+                path->count--;
+            }
+            if (pat->as.array_pat.has_rest && fixed < pat->as.array_pat.count) {
+                UfRegMatchStep st = { .kind = REG_STEP_SLICE, .index = (uint16_t)fixed };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_binds(c, pat->as.array_pat.elements[fixed], target_reg, path, line);
+                path->count--;
+            }
+            break;
+        }
+        case UF_PAT_MAP:
+            for (size_t i = 0; i < pat->as.map_pat.count; ++i) {
+                UfRegMatchStep st = { .kind = REG_STEP_KEY, .key = pat->as.map_pat.keys[i] };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_binds(c, pat->as.map_pat.values[i], target_reg, path, line);
+                path->count--;
+            }
+            if (pat->as.map_pat.has_rest && pat->as.map_pat.rest_pattern) {
+                UfRegMatchStep st = { .kind = REG_STEP_MAP_REST, .map_pattern = pat };
+                if (!reg_match_push(c, path, st, line)) return;
+                reg_pattern_binds(c, pat->as.map_pat.rest_pattern, target_reg, path, line);
+                path->count--;
+            }
+            break;
+    }
+}
+
 static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
     if (!stmt || c->had_error) return;
     int line = (int)stmt->span.start.line;
@@ -1589,161 +1847,15 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
 
                 begin_scope(c);
 
-                if (arm->pattern->kind == UF_PAT_LITERAL) {
-                    uint8_t r_pat = compile_expr(c, arm->pattern->as.literal, -1);
-                    uint8_t r_eq = alloc_reg(c);
-                    emit_abc(c, ROP_EQ, r_eq, target_reg, r_pat, line);
-                    free_reg(c, r_pat);
-                    fail_jumps[fail_jump_count++] = emit_jump(c, ROP_JMP_FALSE, r_eq, line);
-                    free_reg(c, r_eq);
-                } else if (arm->pattern->kind == UF_PAT_VARIABLE) {
-                    UfValue existing = uf_val_null();
-                    if (uf_env_lookup(c->rt->global_env, arm->pattern->as.var_name, &existing) &&
-                        existing.kind == UF_VAL_ENUM_VAL && existing.as.enum_val && existing.as.enum_val->field_count == 0) {
-                        uint16_t c_idx = (uint16_t)make_constant(c, existing);
-                        uint8_t r_enum = alloc_reg(c);
-                        emit_abx(c, ROP_LOAD_K, r_enum, c_idx, line);
-                        uint8_t r_eq = alloc_reg(c);
-                        emit_abc(c, ROP_EQ, r_eq, target_reg, r_enum, line);
-                        free_reg(c, r_enum);
-                        fail_jumps[fail_jump_count++] = emit_jump(c, ROP_JMP_FALSE, r_eq, line);
-                        free_reg(c, r_eq);
-                    } else {
-                        int vslot = add_local(c, arm->pattern->as.var_name, line);
-                        emit_abc(c, ROP_MOVE, c->locals[vslot].reg, target_reg, 0, line);
-                        mark_initialized(c);
-                    }
-                } else if (arm->pattern->kind == UF_PAT_WILDCARD) {
-                    /* Matches unconditionally */
-                } else if (arm->pattern->kind == UF_PAT_STRUCT) {
-                    uint16_t s_idx = identifier_constant(c, arm->pattern->as.struct_pat.struct_name);
-                    uint8_t r_match = alloc_reg(c);
-                    emit_abc(c, ROP_INSTANCE, r_match, target_reg, (uint8_t)s_idx, line);
-                    fail_jumps[fail_jump_count++] = emit_jump(c, ROP_JMP_FALSE, r_match, line);
-                    free_reg(c, r_match);
-
-                    const char** field_names_lookup = NULL;
-                    size_t field_names_count = 0;
-                    UfValue val_lookup;
-                    if (uf_env_lookup(c->rt->global_env, arm->pattern->as.struct_pat.struct_name, &val_lookup)) {
-                        if (val_lookup.kind == UF_VAL_STRUCT_DEF) {
-                            field_names_lookup = val_lookup.as.struct_def->field_names;
-                            field_names_count = val_lookup.as.struct_def->field_count;
-                        } else if (val_lookup.kind == UF_VAL_ENUM_VAL && val_lookup.as.enum_val && val_lookup.as.enum_val->def) {
-                            UfEnumValObject* ev = val_lookup.as.enum_val;
-                            if (ev->def->variant_field_names && (size_t)ev->tag < ev->def->variant_count) {
-                                field_names_lookup = ev->def->variant_field_names[ev->tag];
-                                field_names_count = ev->def->variant_field_counts[ev->tag];
-                            }
-                        }
-                    }
-
-                    for (size_t f = 0; f < arm->pattern->as.struct_pat.field_count; ++f) {
-                        UfPattern* fp = arm->pattern->as.struct_pat.field_patterns[f];
-                        const char* fname = (field_names_lookup && f < field_names_count) ? field_names_lookup[f] : "";
-
-                        uint8_t r_fval = alloc_reg(c);
-                        uint8_t r_fidx = alloc_reg(c);
-                        if (fname && fname[0] != '\0') {
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_string_cstr(c->rt, fname));
-                            emit_abx(c, ROP_LOAD_K, r_fidx, k, line);
-                        } else {
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_number((double)f));
-                            emit_abx(c, ROP_LOAD_K, r_fidx, k, line);
-                        }
-                        emit_abc(c, ROP_INDEX_GET, r_fval, target_reg, r_fidx, line);
-                        free_reg(c, r_fidx);
-
-                        if (fp->kind == UF_PAT_VARIABLE) {
-                            int fslot = add_local(c, fp->as.var_name, line);
-                            emit_abc(c, ROP_MOVE, c->locals[fslot].reg, r_fval, 0, line);
-                            mark_initialized(c);
-                            free_reg(c, r_fval);
-                        } else if (fp->kind == UF_PAT_LITERAL) {
-                            uint8_t r_lit = compile_expr(c, fp->as.literal, -1);
-                            uint8_t r_feq = alloc_reg(c);
-                            emit_abc(c, ROP_EQ, r_feq, r_fval, r_lit, line);
-                            free_reg(c, r_lit);
-                            free_reg(c, r_fval);
-                            fail_jumps[fail_jump_count++] = emit_jump(c, ROP_JMP_FALSE, r_feq, line);
-                            free_reg(c, r_feq);
-                        } else {
-                            free_reg(c, r_fval);
-                        }
-                    }
-                } else if (arm->pattern->kind == UF_PAT_ARRAY) {
-                    size_t normal_count = arm->pattern->as.array_pat.has_rest
-                                              ? (arm->pattern->as.array_pat.count > 0 ? arm->pattern->as.array_pat.count - 1 : 0)
-                                              : arm->pattern->as.array_pat.count;
-                    for (size_t f = 0; f < normal_count; ++f) {
-                        UfPattern* ep = arm->pattern->as.array_pat.elements[f];
-                        if (ep->kind == UF_PAT_VARIABLE) {
-                            int fslot = add_local(c, ep->as.var_name, line);
-                            mark_initialized(c);
-                            uint8_t r_fidx = alloc_reg(c);
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_number((double)f));
-                            emit_abx(c, ROP_LOAD_K, r_fidx, k, line);
-                            emit_abc(c, ROP_INDEX_GET, c->locals[fslot].reg, target_reg, r_fidx, line);
-                            free_reg(c, r_fidx);
-                        } else if (ep->kind == UF_PAT_LITERAL) {
-                            uint8_t r_fval = alloc_reg(c);
-                            uint8_t r_fidx = alloc_reg(c);
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_number((double)f));
-                            emit_abx(c, ROP_LOAD_K, r_fidx, k, line);
-                            emit_abc(c, ROP_INDEX_GET, r_fval, target_reg, r_fidx, line);
-                            free_reg(c, r_fidx);
-
-                            uint8_t r_lit = compile_expr(c, ep->as.literal, -1);
-                            uint8_t r_feq = alloc_reg(c);
-                            emit_abc(c, ROP_EQ, r_feq, r_fval, r_lit, line);
-                            free_reg(c, r_lit);
-                            free_reg(c, r_fval);
-                            fail_jumps[fail_jump_count++] = emit_jump(c, ROP_JMP_FALSE, r_feq, line);
-                            free_reg(c, r_feq);
-                        }
-                    }
-                    if (arm->pattern->as.array_pat.has_rest) {
-                        UfPattern* rp = arm->pattern->as.array_pat.elements[normal_count];
-                        if (rp->kind == UF_PAT_REST) rp = rp->as.rest_pat.subpattern;
-                        if (rp && rp->kind == UF_PAT_VARIABLE) {
-                            int rslot = add_local(c, rp->as.var_name, line);
-                            mark_initialized(c);
-                            uint8_t r_start = alloc_reg(c);
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_number((double)normal_count));
-                            emit_abx(c, ROP_LOAD_K, r_start, k, line);
-                            emit_abc(c, ROP_ARRAY_SLICE, c->locals[rslot].reg, target_reg, r_start, line);
-                            free_reg(c, r_start);
-                        }
-                    }
-                } else if (arm->pattern->kind == UF_PAT_MAP) {
-                    for (size_t f = 0; f < arm->pattern->as.map_pat.count; ++f) {
-                        UfPattern* vp = arm->pattern->as.map_pat.values[f];
-                        if (vp->kind == UF_PAT_VARIABLE) {
-                            int vslot = add_local(c, vp->as.var_name, line);
-                            mark_initialized(c);
-                            uint8_t r_fidx = alloc_reg(c);
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_string_cstr(c->rt, arm->pattern->as.map_pat.keys[f]));
-                            emit_abx(c, ROP_LOAD_K, r_fidx, k, line);
-                            emit_abc(c, ROP_INDEX_GET, c->locals[vslot].reg, target_reg, r_fidx, line);
-                            free_reg(c, r_fidx);
-                        } else if (vp->kind == UF_PAT_LITERAL) {
-                            uint8_t r_fval = alloc_reg(c);
-                            uint8_t r_fidx = alloc_reg(c);
-                            uint16_t k = (uint16_t)make_constant(c, uf_val_string_cstr(c->rt, arm->pattern->as.map_pat.keys[f]));
-                            emit_abx(c, ROP_LOAD_K, r_fidx, k, line);
-                            emit_abc(c, ROP_INDEX_GET, r_fval, target_reg, r_fidx, line);
-                            free_reg(c, r_fidx);
-
-                            uint8_t r_lit = compile_expr(c, vp->as.literal, -1);
-                            uint8_t r_feq = alloc_reg(c);
-                            emit_abc(c, ROP_EQ, r_feq, r_fval, r_lit, line);
-                            free_reg(c, r_lit);
-                            free_reg(c, r_fval);
-                            fail_jumps[fail_jump_count++] = emit_jump(c, ROP_JMP_FALSE, r_feq, line);
-                            free_reg(c, r_feq);
-                        }
-                    }
+                /* Pass 1 tests shape and literals using temporaries only;
+                 * pass 2 extracts each bound variable straight into its own
+                 * register. Binding mid-test would let add_local() hand out
+                 * the register still holding a parent value. */
+                UfRegMatchPath path = { .count = 0 };
+                if (fail_jump_count < 256) {
+                    reg_pattern_tests(c, arm->pattern, target_reg, &path, fail_jumps, &fail_jump_count, line);
                 }
+                reg_pattern_binds(c, arm->pattern, target_reg, &path, line);
 
                 if (arm->guard) {
                     uint8_t r_guard = compile_expr(c, arm->guard, -1);
