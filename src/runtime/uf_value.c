@@ -385,18 +385,25 @@ UfValue uf_val_error(UfRuntime* rt, const char* message, const char* kind, Sourc
     err->obj.marked = false;
     err->obj.next = NULL;
 
+    /* Each allocation below may run the GC, and until the error object is
+     * registered nothing reaches its strings: root them meanwhile, or the
+     * collector frees them and the error keeps dangling pointers (reading
+     * err.kind after enough caught errors then read freed memory). */
     UfValue msg_val = uf_val_string(rt, message ? message : "", message ? strlen(message) : 0);
     err->message = msg_val.as.string;
+    if (rt) uf_runtime_push_temp_root(rt, msg_val);
 
     const char* k = kind ? kind : "Error";
     UfValue kind_val = uf_val_string(rt, k, strlen(k));
     err->kind = kind_val.as.string;
+    if (rt) uf_runtime_push_temp_root(rt, kind_val);
 
     err->line = (int)span.start.line;
     err->file = span.start.file ? span.start.file : "<unknown>";
 
     if (rt) {
         uf_runtime_register_obj(rt, (UfObj*)err, sizeof(UfErrorObject));
+        uf_runtime_pop_temp_roots(rt, 2);
     }
 
     UfValue v;

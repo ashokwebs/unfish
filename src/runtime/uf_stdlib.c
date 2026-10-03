@@ -1329,7 +1329,11 @@ static UfValue std_inspect(UfRuntime* rt, int argc, UfValue* args) {
     uf_runtime_push_temp_root(rt, map_val);
     UfMapObject* map = map_val.as.map;
 
-    uf_map_set(rt, map, uf_val_string_cstr(rt, "type"), uf_val_string_cstr(rt, uf_val_type_name(v)));
+    /* Root the type name: allocating the key may collect. */
+    UfValue type_name = uf_val_string_cstr(rt, uf_val_type_name(v));
+    uf_runtime_push_temp_root(rt, type_name);
+    uf_map_set(rt, map, uf_val_string_cstr(rt, "type"), type_name);
+    uf_runtime_pop_temp_root(rt);
 
     size_t sz = sizeof(UfValue);
     bool marked = false;

@@ -504,16 +504,45 @@ void uf_runtime_pop_temp_roots(UfRuntime* rt, size_t count) {
     }
 }
 
+/* UNFISH_GC_STRESS=1 collects on every allocation. Any value held only in a
+ * C local across an allocation (not on a temp root, the stack or in an
+ * environment) is then freed immediately, so rooting bugs that otherwise
+ * strike only when a threshold happens to land badly reproduce
+ * deterministically, especially under ASan. */
+static bool gc_stress_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* v = getenv("UNFISH_GC_STRESS");
+        enabled = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+    return enabled == 1;
+}
+
 void uf_runtime_register_obj(UfRuntime* rt, UfObj* obj, size_t size) {
     obj->size = size;
     rt->bytes_allocated += size;
 
-    if (rt->bytes_allocated > rt->next_gc_threshold) {
+    if (rt->gc_pause_depth == 0 &&
+        (rt->bytes_allocated > rt->next_gc_threshold || gc_stress_enabled())) {
         uf_gc_collect(rt);
+        /* The object may already be reachable (e.g. an upvalue cell linked
+         * into the open list before registering) and so got marked by that
+         * collection, but it wasn't on all_objects for the sweep to clear the
+         * bit. A stale mark makes the next collection treat it as already
+         * traced and skip its children. */
+        obj->marked = false;
     }
 
     obj->next = rt->all_objects;
     rt->all_objects = obj;
+}
+
+void uf_gc_pause(UfRuntime* rt) {
+    if (rt) rt->gc_pause_depth++;
+}
+
+void uf_gc_resume(UfRuntime* rt) {
+    if (rt && rt->gc_pause_depth > 0) rt->gc_pause_depth--;
 }
 
 void uf_gc_mark_value(UfValue val) {
@@ -591,8 +620,14 @@ void uf_gc_mark_value(UfValue val) {
     } else if (val.kind == UF_VAL_INSTANCE) {
         if (val.as.instance && !val.as.instance->obj.marked) {
             val.as.instance->obj.marked = true;
-            if (val.as.instance->def && !val.as.instance->def->obj.marked) {
-                val.as.instance->def->obj.marked = true;
+            if (val.as.instance->def) {
+                /* Trace through the definition rather than just setting its
+                 * mark bit: a definition first reached via an instance would
+                 * otherwise never have its method closures marked. */
+                UfValue def;
+                def.kind = UF_VAL_STRUCT_DEF;
+                def.as.struct_def = val.as.instance->def;
+                uf_gc_mark_value(def);
             }
             for (size_t i = 0; i < val.as.instance->field_count; ++i) {
                 uf_gc_mark_value(val.as.instance->fields[i]);
@@ -925,6 +960,9 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     rt->bytes_allocated = 0;
     rt->next_gc_threshold = UF_GC_INITIAL_THRESHOLD;
     rt->gc_count = 0;
+    /* Nothing below is reachable from the roots until init finishes (and the
+     * roots themselves are still being set up), so don't collect yet. */
+    rt->gc_pause_depth = 1;
 
     rt->global_env = uf_env_create(rt, NULL);
     rt->current_env = rt->global_env;
@@ -951,6 +989,7 @@ void uf_runtime_init(UfRuntime* rt, UfDiagnosticReporter* reporter) {
     register_builtins(rt);
     uf_stdlib_register_runtime(rt);
     uf_module_init(rt);
+    rt->gc_pause_depth = 0;
 }
 
 void uf_runtime_set_args(UfRuntime* rt, int argc, char** argv) {

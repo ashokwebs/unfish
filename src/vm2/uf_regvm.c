@@ -688,6 +688,11 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
             UfRegFunction* fn = chunk->constants[bx].as.reg_fn;
             SYNC_FRAME();
             UfRegClosure* cl = uf_reg_closure_new(vm->rt, fn);
+            /* Publish the closure before capturing: each capture allocates
+             * and may collect, and a closure held only in this C local would
+             * be freed. Captures are by location, so a closure capturing its
+             * own register still sees itself. */
+            regs[a] = uf_val_reg_closure(vm->rt, cl);
             for (size_t i = 0; i < cl->upvalue_count; ++i) {
                 if (fn->upvalues[i].is_local) {
                     cl->upvalues[i] = capture_upvalue(vm, &regs[fn->upvalues[i].index]);
@@ -695,7 +700,6 @@ static UfValue run_regvm_frames(UfRegVM* vm, int target_frame_count) {
                     cl->upvalues[i] = frame->closure->upvalues[fn->upvalues[i].index];
                 }
             }
-            regs[a] = uf_val_reg_closure(vm->rt, cl);
             DISPATCH();
         }
 
@@ -1891,9 +1895,13 @@ UfInterpretResult uf_regvm_run(UfRegVM* vm, UfRegFunction* function) {
 
     vm->frame_count = 0;
     vm->stack_top = vm->stack;
+    /* Nothing references the compiled script until its closure is in a
+     * frame, and allocating that closure may collect. */
+    if (vm->rt) uf_runtime_push_temp_root(vm->rt, uf_val_reg_fn(vm->rt, function));
     UfRegClosure* closure = uf_reg_closure_new(vm->rt, function);
     UfRegFrame* frame = &vm->frames[vm->frame_count++];
     frame->closure = closure;
+    if (vm->rt) uf_runtime_pop_temp_root(vm->rt);
     frame->ip = closure->function->chunk.code;
     frame->regs = vm->stack;
     frame->argc = 0;
@@ -1923,6 +1931,16 @@ UfValue uf_regvm_run_closure(UfRegVM* vm, UfRegClosure* closure, size_t argc, Uf
     UfValue* frame_regs = vm->stack_top;
     UfRegFunction* fn = closure->function;
 
+    size_t needed = 1 + fn->max_regs + 16;
+    if (frame_regs + needed > vm->stack + UF_REGVM_STACK_MAX) {
+        regvm_runtime_error(vm, "StackOverflowError: Register stack overflow (%d slots)", UF_REGVM_STACK_MAX);
+        return uf_val_null();
+    }
+    /* Raise stack_top before filling the frame so the GC sees the closure
+     * and arguments while the rest array is allocated. */
+    UfValue* prev_stack_top = vm->stack_top;
+    vm->stack_top = frame_regs + needed;
+
     /* Slot 0 is reserved for closure */
     frame_regs[0] = uf_val_reg_closure(vm->rt, closure);
 
@@ -1949,14 +1967,6 @@ UfValue uf_regvm_run_closure(UfRegVM* vm, UfRegClosure* closure, size_t argc, Uf
         }
     }
 
-    size_t needed = 1 + fn->max_regs + 16;
-    if (frame_regs + needed > vm->stack + UF_REGVM_STACK_MAX) {
-        regvm_runtime_error(vm, "StackOverflowError: Register stack overflow (%d slots)", UF_REGVM_STACK_MAX);
-        return uf_val_null();
-    }
-    UfValue* prev_stack_top = vm->stack_top;
-    vm->stack_top = frame_regs + needed;
-
     UfRegFrame* frame = &vm->frames[vm->frame_count++];
     frame->closure = closure;
     frame->ip = fn->chunk.code;
@@ -1965,6 +1975,12 @@ UfValue uf_regvm_run_closure(UfRegVM* vm, UfRegClosure* closure, size_t argc, Uf
     frame->dest_reg = 0;
 
     UfValue ret = run_regvm_frames(vm, target_frame_count);
+    /* Null the registers handed back: stack_top only otherwise grows, and a
+     * later call that raises it again must not expose stale values whose
+     * objects the GC has since freed. */
+    for (UfValue* slot = prev_stack_top; slot < vm->stack_top; ++slot) {
+        *slot = uf_val_null();
+    }
     vm->stack_top = prev_stack_top;
     return ret;
 }

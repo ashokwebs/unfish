@@ -213,10 +213,15 @@ static UfValue parse_object(UfRuntime* rt, JsonParser* p) {
             break;
         }
 
+        /* The key is unreachable until it is stored, and parsing the value
+         * allocates. */
+        uf_runtime_push_temp_root(rt, key);
         UfValue val = parse_value(rt, p);
+        if (!p->has_error) {
+            uf_map_set(rt, map.as.map, key, val);
+        }
+        uf_runtime_pop_temp_root(rt);
         if (p->has_error) break;
-
-        uf_map_set(rt, map.as.map, key, val);
 
         skip_whitespace(p);
         if (peek(p) == ',') {

@@ -663,6 +663,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     vm->handler_count--;
                     if (vm->rt && vm->rt->try_handler_count > 0) vm->rt->try_handler_count--;
                 }
+                SYNC_VM(); /* keep the result rooted while the promise is allocated */
                 UfValue result = POP();
                 if (frame->closure && frame->closure->function && frame->closure->function->is_async) {
                     UfPromiseObject* p = uf_promise_create(vm->rt);
@@ -870,6 +871,11 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_INDEX_GET: {
+                /* Sync before popping: several branches allocate (bound
+                 * methods, error/enum properties), and the operands must stay
+                 * below vm->stack_top, and so rooted, until the result
+                 * replaces them. */
+                SYNC_VM();
                 UfValue index = POP();
                 UfValue target = POP();
 
@@ -1128,6 +1134,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                 break;
             }
             case OP_ITER_GET: {
+                SYNC_VM(); /* see OP_INDEX_GET */
                 UfValue index = POP();
                 UfValue target = POP();
                 if (index.kind != UF_VAL_NUMBER) {
@@ -1184,6 +1191,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     stack_top = cur_h->stack_top;
                     *stack_top++ = err;
                     ip = cur_h->catch_ip;
+                    SYNC_VM(); /* the GC must see the unwound stack, not the faulting one */
                     vm->handler_count--;
                     vm->had_error = false;
                     vm->rt->had_runtime_error = false;
@@ -1210,6 +1218,7 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
                     stack_top = cur_h->stack_top;
                     *stack_top++ = err;
                     ip = cur_h->catch_ip;
+                    SYNC_VM(); /* the GC must see the unwound stack, not the faulting one */
                     vm->handler_count--;
                     vm->had_error = false;
                     vm->rt->had_runtime_error = false;
@@ -1266,8 +1275,12 @@ static UfValue run_vm_frames(UfVM* vm, int target_frame_count) {
 UfInterpretResult uf_vm_run(UfVM* vm, UfBytecodeFunction* function) {
     if (!function || !vm) return UF_INTERPRET_RUNTIME_ERROR;
 
+    /* Nothing references the compiled script until its closure is on the
+     * stack, and allocating that closure may collect. */
+    if (vm->rt) uf_runtime_push_temp_root(vm->rt, uf_val_bytecode_fn(vm->rt, function));
     UfClosureObject* root_closure = uf_closure_new(vm->rt, function);
     uf_vm_push(vm, uf_val_closure(vm->rt, root_closure));
+    if (vm->rt) uf_runtime_pop_temp_root(vm->rt);
 
     UfVMFrame* frame = &vm->frames[vm->frame_count++];
     frame->closure = root_closure;

@@ -434,7 +434,11 @@ UfBytecodeFunction* uf_cache_read_stack(UfRuntime* rt, const char* cache_path, u
         return NULL;
     }
 
+    /* The functions and constants being read aren't reachable from any root
+     * until the caller runs them, so a collection here would free them. */
+    uf_gc_pause(rt);
     UfBytecodeFunction* fn = read_bytecode_fn(f, rt);
+    uf_gc_resume(rt);
     fclose(f);
     return fn;
 }
@@ -666,7 +670,11 @@ UfRegFunction* uf_cache_read_reg(UfRuntime* rt, const char* cache_path, uint64_t
         return NULL;
     }
 
+    /* The functions and constants being read aren't reachable from any root
+     * until the caller runs them, so a collection here would free them. */
+    uf_gc_pause(rt);
     UfRegFunction* fn = read_reg_fn(f, rt);
+    uf_gc_resume(rt);
     fclose(f);
     return fn;
 }

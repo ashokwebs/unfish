@@ -49,7 +49,7 @@ CLI_SRC = src/cli/main.c
 
 BIN_DIR = bin
 
-.PHONY: all asan test test-asan bench pdfs clean
+.PHONY: all asan test test-asan test-gc-stress bench pdfs clean
 
 all: $(BIN_DIR)/unfish
 
@@ -173,6 +173,21 @@ test-asan:
 	@ulimit -s unlimited 2>/dev/null || ulimit -s 262144 2>/dev/null || true; ./tools/run_conformance_tests.sh
 	@echo "=== Running Differential Tests with ASan/UBSan ==="
 	@ulimit -s unlimited 2>/dev/null || ulimit -s 262144 2>/dev/null || true; ./tools/run_differential_tests.sh
+
+# Run the conformance suite on all three engines under ASan/UBSan with
+# UNFISH_GC_STRESS=1, which collects on every allocation: any object held only
+# in a C local across an allocation is freed at once, so GC rooting bugs fail
+# deterministically instead of only when a large program crosses a threshold.
+# Uses its own binary so bin/unfish stays a release build.
+test-gc-stress:
+	@mkdir -p $(BIN_DIR)
+	$(CC) $(CFLAGS) $(ASAN_FLAGS) $(SRCS) $(CLI_SRC) $(LDFLAGS) -o $(BIN_DIR)/unfish-gcstress
+	@ulimit -s unlimited 2>/dev/null || ulimit -s 262144 2>/dev/null || true; \
+	for mode in "" --vm --regvm; do \
+		echo "=== Conformance Tests under GC stress ($${mode:-interpreter}) ==="; \
+		UNFISH_BIN=$(BIN_DIR)/unfish-gcstress UNFISH_GC_STRESS=1 EXTRA_FLAGS="--no-cache $$mode" \
+			./tools/run_conformance_tests.sh || exit 1; \
+	done
 
 clean:
 	rm -rf $(BIN_DIR)

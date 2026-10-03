@@ -1924,8 +1924,7 @@ static void compile_stmt(UfRegCompiler* c, const UfStmt* stmt) {
 
 /* --- Public API --- */
 
-UfRegFunction* uf_reg_compile(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
-    if (!program) return NULL;
+static UfRegFunction* compile_program(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
 
     UfRegCompiler compiler;
     compiler_init(&compiler, NULL, REG_FN_SCRIPT, "<script>", 0, 0, false, rt, reporter);
@@ -1964,4 +1963,16 @@ UfRegFunction* uf_reg_compile(const UfProgram* program, UfRuntime* rt, UfDiagnos
     }
 
     return compiler.function;
+}
+
+UfRegFunction* uf_reg_compile(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
+    if (!program) return NULL;
+    /* Functions under construction and methods waiting in C arrays for their
+     * struct are unreachable from the GC roots until the VM runs the result,
+     * so a collection mid-compile (including inside an import, which runs
+     * module code) would free them out from under the compiler. */
+    uf_gc_pause(rt);
+    UfRegFunction* fn = compile_program(program, rt, reporter);
+    uf_gc_resume(rt);
+    return fn;
 }

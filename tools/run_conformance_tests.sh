@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-UNFISH_BIN="./bin/unfish"
+UNFISH_BIN="${UNFISH_BIN:-./bin/unfish}"
 
 if [ ! -f "$UNFISH_BIN" ]; then
     echo "Binary $UNFISH_BIN not found. Please run 'make' first."

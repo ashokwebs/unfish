@@ -64,6 +64,9 @@ struct UfRuntime {
     size_t bytes_allocated;
     size_t next_gc_threshold;
     size_t gc_count;
+    /* While non-zero, allocation never triggers a collection (see
+     * uf_gc_pause). */
+    size_t gc_pause_depth;
 
     UfCallFrame frames[UF_MAX_CALL_FRAMES];
     size_t frame_count;
@@ -111,6 +114,12 @@ void uf_runtime_pop_temp_roots(UfRuntime* rt, size_t count);
 void uf_gc_mark_value(UfValue val);
 void uf_gc_mark_env(UfEnv* env);
 void uf_gc_collect(UfRuntime* rt);
+
+/* Suspend collection while building object graphs the GC cannot see yet,
+ * such as a compiler's half-built functions or a function being loaded from
+ * the bytecode cache. Calls nest and must be balanced. */
+void uf_gc_pause(UfRuntime* rt);
+void uf_gc_resume(UfRuntime* rt);
 
 bool uf_runtime_push_frame(UfRuntime* rt, const char* fn_name, SourceSpan call_span, UfEnv* env);
 void uf_runtime_pop_frame(UfRuntime* rt);

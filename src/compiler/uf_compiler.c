@@ -1842,8 +1842,7 @@ static void compile_stmt(UfCompiler* c, const UfStmt* stmt) {
     }
 }
 
-UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
-    if (!program) return NULL;
+static UfBytecodeFunction* compile_program(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
 
     /* Optimization Pass 1: Constant folding & Dead code elimination on AST */
     uf_optimize_ast((UfProgram*)program, rt);
@@ -1880,4 +1879,18 @@ UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagno
     uf_optimize_function_tree(compiler.function, rt);
 
     return compiler.function;
+}
+
+UfBytecodeFunction* uf_compile(const UfProgram* program, UfRuntime* rt, UfDiagnosticReporter* reporter) {
+    if (!program) return NULL;
+    /* Functions under construction, methods waiting in C arrays for their
+     * struct, and strings the optimizer folds into the AST are all
+     * unreachable from the GC roots until the VM runs the result, so a
+     * collection mid-compile would free them out from under the compiler.
+     * This includes imports, which run module code at compile time: their
+     * garbage is collected once compilation finishes. */
+    uf_gc_pause(rt);
+    UfBytecodeFunction* fn = compile_program(program, rt, reporter);
+    uf_gc_resume(rt);
+    return fn;
 }

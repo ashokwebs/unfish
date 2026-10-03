@@ -155,8 +155,10 @@ UfValue uf_call_value(UfRuntime* rt, UfValue callee, size_t argc, UfValue* args,
                     result = uf_val_null();
                 }
                 if (fn->is_async) {
+                    uf_runtime_push_temp_root(rt, result);
                     UfPromiseObject* p = uf_promise_create(rt);
                     uf_promise_resolve(rt, p, result);
+                    uf_runtime_pop_temp_root(rt);
                     result = uf_val_promise(rt, p);
                 }
             }
@@ -1139,6 +1141,7 @@ static void execute_struct_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
                                        m->as.function_stmt.body,
                                        env);
             mvals[idx].as.function->is_async = m->as.function_stmt.is_async;
+            uf_runtime_push_temp_root(rt, mvals[idx]);
             idx++;
         }
         for (size_t b = 0; b < stmt->as.struct_stmt.impl_block_count; ++b) {
@@ -1156,6 +1159,7 @@ static void execute_struct_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
                                            m->as.function_stmt.body,
                                            env);
                 mvals[idx].as.function->is_async = m->as.function_stmt.is_async;
+                uf_runtime_push_temp_root(rt, mvals[idx]);
                 idx++;
             }
         }
@@ -1179,6 +1183,9 @@ static void execute_struct_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
                                                  traits,
                                                  trait_count);
     uf_env_declare(env, stmt->as.struct_stmt.name, sdef);
+    /* The methods sat in a plain C array until the definition took them, so
+     * they were rooted one by one as they were created. */
+    uf_runtime_pop_temp_roots(rt, total_mcount);
 }
 
 static void execute_impl_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
@@ -1192,10 +1199,13 @@ static void execute_impl_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
                 size_t new_mcount = sdef->method_count + add_mcount;
                 sdef->method_names = (const char**)realloc((void*)sdef->method_names, new_mcount * sizeof(const char*));
                 sdef->method_values = (UfValue*)realloc((void*)sdef->method_values, new_mcount * sizeof(UfValue));
+                /* Count each method in as soon as it is stored: the next
+                 * one's allocation may collect, and only the first
+                 * method_count slots are marked. */
                 for (size_t i = 0; i < add_mcount; ++i) {
                     UfStmt* m = stmt->as.impl_stmt.methods[i];
-                    sdef->method_names[sdef->method_count + i] = m->as.function_stmt.name;
-                    sdef->method_values[sdef->method_count + i] = uf_val_function(rt,
+                    sdef->method_names[sdef->method_count] = m->as.function_stmt.name;
+                    sdef->method_values[sdef->method_count] = uf_val_function(rt,
                                                                                   m->as.function_stmt.name,
                                                                                   m->as.function_stmt.params,
                                                                                   m->as.function_stmt.param_defaults,
@@ -1204,9 +1214,9 @@ static void execute_impl_def(UfRuntime* rt, UfEnv* env, const UfStmt* stmt) {
                                                                                   m->as.function_stmt.has_rest,
                                                                                   m->as.function_stmt.body,
                                                                                   env);
-                    sdef->method_values[sdef->method_count + i].as.function->is_async = m->as.function_stmt.is_async;
+                    sdef->method_values[sdef->method_count].as.function->is_async = m->as.function_stmt.is_async;
+                    sdef->method_count++;
                 }
-                sdef->method_count = new_mcount;
             }
             if (stmt->as.impl_stmt.trait_name) {
                 sdef->impl_traits = (const char**)realloc((void*)sdef->impl_traits, (sdef->impl_trait_count + 1) * sizeof(const char*));
@@ -1498,10 +1508,15 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             } else if (iter_val.kind == UF_VAL_STRING) {
                 UfStringObject* str = iter_val.as.string;
                 for (size_t i = 0; i < str->length; ++i) {
-                    UfEnv* loop_env = uf_env_create(rt, env);
+                    /* Make the character first and root it: creating the
+                     * loop scope may collect, and so may anything allocated
+                     * while that scope is not yet current. */
                     char ch[2] = { str->chars[i], '\0' };
                     UfValue char_val = uf_val_string(rt, ch, 1);
+                    uf_runtime_push_temp_root(rt, char_val);
+                    UfEnv* loop_env = uf_env_create(rt, env);
                     uf_env_declare(loop_env, stmt->as.for_stmt.var_name, char_val);
+                    uf_runtime_pop_temp_root(rt);
 
                     UfEnv* prev_env = rt->current_env;
                     rt->current_env = loop_env;
@@ -1630,13 +1645,12 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             }
 
             if (stmt->as.try_catch.finally_block) {
-                if (rethrow_pending) {
-                    uf_runtime_push_temp_root(rt, caught_err);
-                }
+                /* While the finally block runs, a pending return value and an
+                 * error still to be rethrown are held only here. */
+                uf_runtime_push_temp_root(rt, res.value);
+                uf_runtime_push_temp_root(rt, caught_err);
                 ExecResult fin_res = execute_statement(rt, env, stmt->as.try_catch.finally_block);
-                if (rethrow_pending) {
-                    uf_runtime_pop_temp_roots(rt, 1);
-                }
+                uf_runtime_pop_temp_roots(rt, 2);
                 if (fin_res.status == EXEC_RETURN || fin_res.status == EXEC_ERROR ||
                     fin_res.status == EXEC_BREAK || fin_res.status == EXEC_CONTINUE) {
                     res = fin_res;
@@ -1749,12 +1763,17 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
             ExecResult arm_res = exec_ok();
 
             for (size_t i = 0; i < stmt->as.match_stmt.arm_count; ++i) {
+                /* The arm's scope is reachable only through current_env while
+                 * its pattern binds, its guard runs and its body executes. */
                 UfEnv* arm_env = uf_env_create(rt, env);
+                UfEnv* prev_env = rt->current_env;
+                rt->current_env = arm_env;
                 if (match_pattern_and_bind(rt, arm_env, stmt->as.match_stmt.arms[i].pattern, val)) {
                     bool guard_ok = true;
                     if (stmt->as.match_stmt.arms[i].guard) {
                         UfValue gval = uf_evaluate_expression(rt, arm_env, stmt->as.match_stmt.arms[i].guard);
                         if (rt->had_runtime_error) {
+                            rt->current_env = prev_env;
                             uf_runtime_pop_temp_root(rt);
                             return exec_error();
                         }
@@ -1763,9 +1782,11 @@ static ExecResult execute_statement(UfRuntime* rt, UfEnv* env, const UfStmt* stm
                     if (guard_ok) {
                         matched = true;
                         arm_res = execute_statement(rt, arm_env, stmt->as.match_stmt.arms[i].body);
+                        rt->current_env = prev_env;
                         break;
                     }
                 }
+                rt->current_env = prev_env;
             }
 
             uf_runtime_pop_temp_root(rt);
