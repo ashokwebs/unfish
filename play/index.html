@@ -460,7 +460,7 @@
 
       <select id="fish-engine-select" class="select-ocean" title="Select Backend Engine">
         <option value="ast">🌊 Tree-Walking Interpreter</option>
-        <option value="vm">⚡ 57-Opcode Stack VM</option>
+        <option value="vm">⚡ 59-Opcode Stack VM</option>
         <option value="regvm">🚀 256-Register VM</option>
       </select>
 
@@ -618,6 +618,7 @@
   </div>
 
   <script src="../unfish_engine.js"></script>
+  <script src="../unfish_wasm.js"></script>
   <script>
     const FISH_EXAMPLES = {
       school: `## 🐠 School of Fish Simulation
@@ -685,7 +686,8 @@ let tropical_f = map(tropical_c, to_fahrenheit)
 say f"Ocean Samples (Celsius):    {ocean_temperatures_c}"
 say f"Filtered Tropical Waters:  {tropical_c}"
 say f"Converted to Fahrenheit:   {tropical_f}"
-say f"Warmest Reading:           {max(tropical_c)}°C"
+let warmest = reduce(tropical_c, fn(a, b): max(a, b), tropical_c[0])
+say f"Warmest Reading:           {warmest}°C"
 `,
 
       concurrency: `## 🎣 Fish Catcher (Cooperative Fibers & Channels)
@@ -1040,14 +1042,18 @@ say f"Standard Deviation (σ):       {round(std_dev)} atm"
       // Run
       btnRun.addEventListener('click', runProgram);
 
-      function runProgram() {
+      window.UnfishRunner.preload();
+
+      async function runProgram() {
         const code = editor.value;
         const mode = engineSelect.value;
         statusInfo.textContent = `Swimming through code with ${mode.toUpperCase()}...`;
+        btnRun.disabled = true;
 
         const t0 = performance.now();
-        const res = engine.run(code);
+        const res = await window.UnfishRunner.run(code, { engine: mode === 'ast' ? 'interp' : mode });
         const elapsed = (performance.now() - t0).toFixed(2);
+        btnRun.disabled = false;
 
         terminal.innerHTML = '';
         if (res.stdout) {

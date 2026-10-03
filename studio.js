@@ -24,7 +24,7 @@
     },
     closures: {
       'unfish.toml': `[package]\nname = "closures_demo"\nversion = "1.0.0"\nentry = "src/main.uf"`,
-      'src/main.uf': `## Closures and Higher-Order Pipelines\n\nfunction make_counter(start = 0):\n    let c = start\n    return fn():\n        c = c + 1\n        return c\n\nlet counter = make_counter(10)\nsay f"Count 1: {counter()}"\nsay f"Count 2: {counter()}"\nsay f"Count 3: {counter()}"\n\nlet numbers = [1, 2, 3, 4, 5]\nlet squared = map(numbers, fn(x): x * x)\nsay f"Squared: {squared}"\n`
+      'src/main.uf': `## Closures and Higher-Order Pipelines\n\nfunction make_counter(start = 0):\n    let c = start\n    function next():\n        c = c + 1\n        return c\n    return next\n\nlet counter = make_counter(10)\nsay f"Count 1: {counter()}"\nsay f"Count 2: {counter()}"\nsay f"Count 3: {counter()}"\n\nlet numbers = [1, 2, 3, 4, 5]\nlet squared = map(numbers, fn(x): x * x)\nsay f"Squared: {squared}"\n`
     },
     algorithms: {
       'unfish.toml': `[package]\nname = "bubble_sort"\nversion = "1.0.0"\nentry = "src/main.uf"`,
@@ -123,7 +123,8 @@
       .catch(() => {
         hasNativeBackend = false;
         backendStatusPill.className = 'status-badge';
-        backendStatusText.textContent = 'In-Browser Engine';
+        backendStatusText.textContent = 'In-Browser WebAssembly Engine';
+        window.UnfishRunner.preload();
       });
   }
 
@@ -462,21 +463,37 @@
         handleExecutionOutput(data, elapsed, `${modeName} (Native C99)`);
       })
       .catch(() => {
-        runInBrowserFallback(code, modeName);
+        runInBrowserFallback(code, modeName, engineMode);
       });
     } else {
-      runInBrowserFallback(code, modeName);
+      runInBrowserFallback(code, modeName, engineMode);
     }
 
     // Also update AST, Disasm, and Tokens inspectors asynchronously
     updateInspectors(code);
   }
 
-  function runInBrowserFallback(code, modeName) {
+  // Without the local `unfish playground` server, run the real engines
+  // compiled to WebAssembly in a worker (see unfish_wasm.js). The project is
+  // mounted in the run's in-memory filesystem with the active file's
+  // siblings beside it, so imports between project files resolve as on disk.
+  async function runInBrowserFallback(code, modeName, engineMode) {
+    const dir = activeFile.includes('/') ? activeFile.slice(0, activeFile.lastIndexOf('/') + 1) : '';
+    const projectFiles = {};
+    for (const [path, text] of Object.entries(files)) {
+      projectFiles[path] = text;
+      if (path !== activeFile && path.startsWith(dir) && !path.slice(dir.length).includes('/')) {
+        projectFiles[path.slice(dir.length)] = text;
+      }
+    }
     const startTime = performance.now();
-    const result = currentEngine.run(code);
+    const result = await window.UnfishRunner.run(code, {
+      engine: ['interp', 'vm', 'regvm'][engineMode] || 'interp',
+      files: projectFiles,
+    });
     const elapsed = Math.round(performance.now() - startTime);
-    handleExecutionOutput(result, elapsed, `${modeName} (Browser Engine)`);
+    const where = result.engine === 'wasm' ? 'WebAssembly' : 'JavaScript fallback';
+    handleExecutionOutput(result, elapsed, `${modeName} (${where})`);
   }
 
   function handleExecutionOutput(data, elapsed, modeLabel) {

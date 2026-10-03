@@ -194,6 +194,7 @@
   </footer>
 
   <script src="unfish_engine.js"></script>
+  <script src="unfish_wasm.js"></script>
   <script>
     (function() {
       const EXAMPLES = {
@@ -239,7 +240,6 @@ say f"Circle area: {calculate_area(Shape.Circle(5))}"
 say f"Box area:    {calculate_area(Shape.Box(4, 6))}"`
       };
 
-      const engine = new window.UnfishEngine();
       const editor = document.getElementById('quick-editor');
       const terminal = document.getElementById('quick-terminal');
       const select = document.getElementById('quick-example-select');
@@ -253,9 +253,15 @@ say f"Box area:    {calculate_area(Shape.Box(4, 6))}"`
         terminal.textContent = "Click 'Run' to execute in the browser engine.";
       });
 
-      btnRun.addEventListener('click', () => {
+      window.UnfishRunner.preload();
+
+      btnRun.addEventListener('click', async () => {
         const code = editor.value;
-        const res = engine.run(code);
+        btnRun.disabled = true;
+        terminal.textContent = 'Running...';
+        terminal.style.color = '';
+        const res = await window.UnfishRunner.run(code, { engine: 'vm' });
+        btnRun.disabled = false;
         if (res.exit_code === 0) {
           terminal.textContent = res.stdout || '(Program completed with no output)';
           terminal.style.color = 'var(--accent-green)';

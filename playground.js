@@ -41,7 +41,7 @@ struct Vector2D:
     y
 
     fn magnitude(self):
-        return (self.x^2 + self.y^2)^0.5
+        return sqrt(pow(self.x, 2) + pow(self.y, 2))
 
     fn scale(self, factor):
         return Vector2D(self.x * factor, self.y * factor)
@@ -154,7 +154,8 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     .catch(() => {
       hasBackend = false;
-      backendStatus.textContent = '○ Standalone Browser Engine';
+      backendStatus.textContent = '○ In-Browser WebAssembly Engine';
+      window.UnfishRunner.preload();
       backendStatus.className = 'status-badge';
     });
 
@@ -256,18 +257,21 @@ document.addEventListener('DOMContentLoaded', () => {
         handleExecutionResult(data, elapsed, modeName);
       })
       .catch(err => {
-        runFallbackSimulation(code, modeName);
+        runInBrowser(code, useVm, modeName);
       });
     } else {
-      runFallbackSimulation(code, modeName);
+      runInBrowser(code, useVm, modeName);
     }
   }
 
-  function runFallbackSimulation(code, modeName) {
+  // Without the local `unfish playground` server, run the real engines
+  // compiled to WebAssembly in a worker (see unfish_wasm.js).
+  async function runInBrowser(code, useVm, modeName) {
     const startTime = performance.now();
-    const result = engine.run(code);
+    const result = await window.UnfishRunner.run(code, { engine: useVm ? 'vm' : 'interp' });
     const elapsed = Math.round(performance.now() - startTime);
-    handleExecutionResult(result, elapsed, `${modeName} (Browser Engine)`);
+    const where = result.engine === 'wasm' ? 'WebAssembly' : 'JavaScript fallback';
+    handleExecutionResult(result, elapsed, `${modeName} (${where})`);
   }
 
   function handleExecutionResult(data, elapsed, mode) {

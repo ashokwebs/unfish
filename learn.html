@@ -234,7 +234,7 @@ make -j4
           <div class="runner-header">
             <span class="runner-title">Verification Commands</span>
           </div>
-          <pre class="runner-editor" style="user-select:all;"># Run all 21 unit test suites and 91/91 5-way differential conformance tests
+          <pre class="runner-editor" style="user-select:all;"># Run all 21 unit test suites and the 104-test differential conformance suite
 make test
 
 # Verify zero memory leaks under AddressSanitizer & UndefinedBehaviorSanitizer
@@ -336,7 +336,7 @@ say f"Sum is {get_sum(count)}"</textarea>
       <article id="doc-tut-01" class="doc-chapter">
         <h1>01. Hello World &amp; Text Output</h1>
         <p>
-          In Unfish, printing to standard output is done with <code>say</code> (appends a newline) or <code>print</code> (no trailing newline). Unfish also features Python-style string interpolation via <code>f"..."</code>.
+          In Unfish, printing to standard output is done with <code>say</code> (appends a newline) or the <code>print(value)</code> function (no trailing newline). Unfish also features Python-style string interpolation via <code>f"..."</code>.
         </p>
 
         <div class="code-runner">
@@ -348,9 +348,9 @@ say f"Sum is {get_sum(count)}"</textarea>
             </div>
           </div>
           <textarea class="runner-editor" rows="6" spellcheck="false">say "Hello, Unfish!"
-print "Counting: "
-print "1, "
-print "2, "
+print("Counting: ")
+print("1, ")
+print("2, ")
 say "3!"
 
 let user = "Ada Lovelace"
@@ -380,13 +380,9 @@ say f"Welcome, {user}!"</textarea>
               <button class="btn btn-sm btn-open-studio">🚀 Open in Studio</button>
             </div>
           </div>
-          <textarea class="runner-editor" rows="8" spellcheck="false">say f"type_of(42)      -> {type_of(42)}"
-say f"type_of(3.14)    -> {type_of(3.14)}"
-say f"type_of('hello') -> {type_of('hello')}"
-say f"type_of(true)    -> {type_of(true)}"
-say f"type_of(null)    -> {type_of(null)}"
-say f"type_of([1, 2])  -> {type_of([1, 2])}"
-say f"type_of({'a': 1})-> {type_of({'a': 1})}"</textarea>
+          <textarea class="runner-editor" rows="8" spellcheck="false">let samples = [42, 3.14, "hello", true, null, [1, 2], {"a": 1}]
+for value in samples:
+    say f"type_of({value}) = {type_of(value)}"</textarea>
           <div class="runner-output"></div>
         </div>
       </article>
@@ -424,7 +420,7 @@ if true:
       <article id="doc-tut-04" class="doc-chapter">
         <h1>04. Expressions &amp; Operators</h1>
         <p>
-          Unfish parses expressions using Vaughan Pratt's top-down operator precedence table. It supports standard arithmetic (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code>), comparisons, logical operators (<code>and</code>, <code>or</code>, <code>not</code>), and the forward pipe operator (<code>|&gt;</code>).
+          Unfish parses expressions using Vaughan Pratt's top-down operator precedence table. It supports standard arithmetic (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, with <code>pow(a, b)</code> for exponents), comparisons, logical operators (<code>and</code>, <code>or</code>, <code>not</code>), and the forward pipe operator (<code>|&gt;</code>).
         </p>
 
         <div class="code-runner">
@@ -436,7 +432,7 @@ if true:
             </div>
           </div>
           <textarea class="runner-editor" rows="8" spellcheck="false">say f"2 + 3 * 4 = {2 + 3 * 4}"
-say f"2 ^ 10 = {2 ^ 10}"
+say f"pow(2, 10) = {pow(2, 10)}"
 say f"10 / 3 = {10 / 3}"
 say f"10 % 3 = {10 % 3}"
 
@@ -535,7 +531,8 @@ say greet("Grace Hopper")
 say greet("Alan Turing", "Good morning")
 
 function factorial(n):
-    if n <= 1: return 1
+    if n <= 1:
+        return 1
     return n * factorial(n - 1)
 
 say f"factorial(6) = {factorial(6)}"</textarea>
@@ -663,12 +660,15 @@ handle_result(safe_divide(42, 0))</textarea>
           </div>
           <textarea class="runner-editor" rows="16" spellcheck="false">let ch = channel(5)
 
-spawn function():
+function worker(ch):
     say "Worker fiber active"
     for i in [100, 200, 300]:
         send(ch, i)
         yield
     close_channel(ch)
+
+spawn(worker, ch)
+run_scheduler()
 
 say "Main fiber reading channel:"
 while true:
@@ -769,6 +769,7 @@ say "Scheduler drained cleanly."</textarea>
   </div>
 
   <script src="unfish_engine.js"></script>
+  <script src="unfish_wasm.js"></script>
   <script src="learn.js"></script>
 </body>
 </html>
