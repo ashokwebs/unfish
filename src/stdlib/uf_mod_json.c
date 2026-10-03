@@ -384,7 +384,7 @@ static bool stringify_value(StringBuilder* sb, UfValue val, UfJsonVisited* vis) 
              * is undefined behavior in C, so it has to be known-safe first. */
             if (!isnan(val.as.number) && !isinf(val.as.number) &&
                 fabs(val.as.number) < 1e15 && val.as.number == floor(val.as.number)) {
-                snprintf(num_buf, sizeof(num_buf), "%ld", (long)(int64_t)val.as.number);
+                snprintf(num_buf, sizeof(num_buf), "%lld", (long long)val.as.number); /* long is 32-bit on wasm32/ARM */
             } else {
                 snprintf(num_buf, sizeof(num_buf), "%.14g", val.as.number);
             }

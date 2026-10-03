@@ -1241,7 +1241,7 @@ static UfValue std_to_hex(UfRuntime* rt, int argc, UfValue* args) {
     }
     uint64_t v = (uint64_t)safe_num_to_i64(args[0].as.number);
     char buf[32];
-    snprintf(buf, sizeof(buf), "%lx", (unsigned long)v);
+    snprintf(buf, sizeof(buf), "%llx", (unsigned long long)v); /* long is 32-bit on wasm32/ARM */
     return uf_val_string(rt, buf, strlen(buf));
 }
 
