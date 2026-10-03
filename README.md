@@ -14,7 +14,7 @@ It is designed to provide an unbroken path of intellectual ascent: from visual b
 
 Unfish features a unique **five-backend execution engine**, kept in lockstep by a differential test suite that requires byte-identical output from every one of them:
 1. **Tree-Walking AST Interpreter**: Fast startup, direct syntax tree interpretation, ideal for interactive exploration, REPL, and visual blocks.
-2. **Bytecode Virtual Machine (`--vm`)**: 57-opcode stack-based VM with lexical upvalue capture cells, exception unwinding, and a 2x–6x execution speedup over AST tree-walking with 100% behavioral differential parity.
+2. **Bytecode Virtual Machine (`--vm`)**: 59-opcode stack-based VM with lexical upvalue capture cells, exception unwinding, and a 2x–6x execution speedup over AST tree-walking with 100% behavioral differential parity.
 3. **Register-Based Bytecode VM (`--regvm`)**: 256-register, 3-address VM with computed-goto dispatch, typically the fastest of the two interpreted VM tiers.
 4. **Native C99 AOT Compiler (`build` / `emit-c`)**: Direct translation to standalone C99 with single-header runtime, measured at 25–60× faster than the interpreter with zero interpreter dependencies.
 5. **WebAssembly Backend (`build --wasm`)**: The same program compiled to run in a browser or under Node.
@@ -90,7 +90,7 @@ make
 ### Running Tests & Benchmarks
 
 ```bash
-# Run all unit tests, stress tests, and 91/91 differential tests
+# Run all unit tests, stress tests, and the 104-test conformance and differential suites
 make test
 
 # Run full test suite under AddressSanitizer and UndefinedBehaviorSanitizer
@@ -98,6 +98,9 @@ make test-asan
 
 # Run the conformance suite on every engine with a GC on every allocation (ASan)
 make test-gc-stress
+
+# Build the browser engine (web/unfish.wasm) and check it against bin/unfish
+make wasm-web test-wasm-web
 
 # Run multi-tier performance benchmarks comparing AST vs VM vs Native
 make bench
@@ -121,7 +124,7 @@ Compile all books and publications locally with `make pdfs` (requires `pandoc` a
 - [**`docs/VISION.md`**](docs/VISION.md) — Pedagogical philosophy, "Glass Box" paradigm, and curriculum integration.
 - [**`docs/ARCHITECTURE.md`**](docs/ARCHITECTURE.md) — Decoupled 5-backend pipeline, memory boundaries, and subsystem inventory.
 - [**`docs/LANGUAGE_SPEC.md`**](docs/LANGUAGE_SPEC.md) — Formal EBNF grammar, lexical rules, and 13-tier operator table.
-- [**`docs/VM.md`**](docs/VM.md) — 57-opcode Stack VM ISA and 256-register RegVM computed-goto architecture.
+- [**`docs/VM.md`**](docs/VM.md) — 59-opcode Stack VM ISA and 256-register RegVM computed-goto architecture.
 - [**`docs/COMPILER.md`**](docs/COMPILER.md) — Bytecode compiler, scope resolution, peephole optimization, and `.ufc` caching.
 - [**`docs/NATIVE_COMPILER.md`**](docs/NATIVE_COMPILER.md) — Standalone C99 AOT transpiler, WebAssembly (WASI), and bare-metal ARM.
 - [**`docs/RUNTIME.md`**](docs/RUNTIME.md) — 16-byte tagged unions, heap objects, and cooperative fiber concurrency.

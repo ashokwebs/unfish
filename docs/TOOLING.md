@@ -40,7 +40,7 @@ unfish run [options] <file.unfish>
 Executes an Unfish source script. If no execution flag is specified, the script is evaluated by the AST Tree-Walking Interpreter.
 
 #### Flags:
-* `--vm`: Execute script via the high-speed 57-opcode Stack Bytecode Virtual Machine.
+* `--vm`: Execute script via the high-speed 59-opcode Stack Bytecode Virtual Machine.
 * `--regvm`: Execute script via the 256-register computed-goto Bytecode Virtual Machine.
 * `--wasm`: Compile to WebAssembly on the fly and execute via the host WASI runtime.
 * `--strict`: Enforce strict type annotation consistency; any type mismatch aborts execution with exit code 2.

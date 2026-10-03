@@ -78,7 +78,7 @@ Every subsystem in the Unfish codebase is implemented with zero external library
 | **AST Interpreter** | `src/interpreter/uf_interpreter.c` | `src/interpreter/uf_interpreter.h` | **100% IMPLEMENTED** | Direct AST tree-walker, interactive REPL engine, execution hooks |
 | **Bytecode Chunk** | `src/compiler/uf_chunk.c` | `src/compiler/uf_chunk.h` | **100% IMPLEMENTED** | Linear instruction streams, constant pools, source line mapping |
 | **Bytecode Compiler** | `src/compiler/uf_compiler.c` | `src/compiler/uf_compiler.h` | **100% IMPLEMENTED** | Single-pass AST-to-bytecode compiler, jump patching, upvalue capture |
-| **Stack Bytecode VM** | `src/vm/uf_vm.c` | `src/vm/uf_vm.h` | **100% IMPLEMENTED** | 57-opcode virtual machine, operand stack, call frames, unwinding |
+| **Stack Bytecode VM** | `src/vm/uf_vm.c` | `src/vm/uf_vm.h` | **100% IMPLEMENTED** | 59-opcode virtual machine, operand stack, call frames, unwinding |
 | **Bytecode Disassembler**| `src/vm/uf_disasm.c` | `src/vm/uf_disasm.h` | **100% IMPLEMENTED** | Human-readable instruction dumping with source coordinates |
 | **Register Compiler** | `src/compiler/uf_reg_compiler.c`| `src/compiler/uf_reg_compiler.h` | **100% IMPLEMENTED** | Linear scan register allocation, 3-address instruction synthesis |
 | **Register Bytecode VM**| `src/vm2/uf_regvm.c` | `src/vm2/uf_regvm.h` | **100% IMPLEMENTED** | 256-register computed-goto VM, register windowing |
@@ -141,7 +141,7 @@ Once the AST is semantically validated, it can be executed across any of five ba
 │ Backend            │ Execution Mode     │ Typical Speedup    │ Primary Target          │
 ├────────────────────┼────────────────────┼────────────────────┼─────────────────────────┤
 │ 1. AST Interpreter │ Direct Tree-Walk   │ 1.0x (Baseline)    │ REPL, Debugger, Blocks  │
-│ 2. Stack Bytecode  │ 57-Opcode Stack VM │ 2.0x – 6.0x        │ Standard Execution      │
+│ 2. Stack Bytecode  │ 59-Opcode Stack VM │ 2.0x – 6.0x        │ Standard Execution      │
 │ 3. Register VM     │ 256-Reg Computed-G │ 3.0x – 9.0x        │ High-Speed Interpretation│
 │ 4. Native C99 AOT  │ Compiled Machine   │ 25x – 60x          │ Production Native Apps  │
 │ 5. WebAssembly     │ WASI / Browser Wasm│ 15x – 40x          │ Web Apps, Sandboxes     │

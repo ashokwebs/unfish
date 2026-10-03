@@ -5,7 +5,7 @@
 ## 1. Executive Summary & Compilation Pipeline
 
 The Unfish compilation subsystem translates semantically validated Abstract Syntax Trees (ASTs) into high-performance virtual machine bytecode representations:
-1. **Stack Bytecode Compiler (`src/compiler/uf_compiler.c`)**: Generates linear 57-opcode instruction chunks (`UfChunk`) for the Stack VM.
+1. **Stack Bytecode Compiler (`src/compiler/uf_compiler.c`)**: Generates linear 59-opcode instruction chunks (`UfChunk`) for the Stack VM.
 2. **Register Bytecode Compiler (`src/compiler/uf_reg_compiler.c`)**: Performs linear-scan register allocation and synthesizes 3-address instructions for the 256-register RegVM.
 3. **Bytecode Optimizer (`src/compiler/uf_optimize.c`)**: Performs multi-pass AST and bytecode optimizations including constant folding, dead code elimination, and peephole simplifications.
 4. **Bytecode Disk Cache (`src/compiler/uf_cache.c`)**: Serializes compiled chunks into `.ufc` (Stack VM) and `.ufrc` (Register VM) binary files with cryptographic source hashing and timestamp validation.

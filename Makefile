@@ -49,7 +49,7 @@ CLI_SRC = src/cli/main.c
 
 BIN_DIR = bin
 
-.PHONY: all asan test test-asan test-gc-stress bench pdfs clean
+.PHONY: all asan test test-asan test-gc-stress wasm-web test-wasm-web bench pdfs clean
 
 all: $(BIN_DIR)/unfish
 
@@ -188,6 +188,27 @@ test-gc-stress:
 		UNFISH_BIN=$(BIN_DIR)/unfish-gcstress UNFISH_GC_STRESS=1 EXTRA_FLAGS="--no-cache $$mode" \
 			./tools/run_conformance_tests.sh || exit 1; \
 	done
+
+# The website runs programs on the real interpreter and VMs compiled to
+# WebAssembly (web/unfish.wasm, driven by web/unfish_worker.js) instead of a
+# separate JavaScript reimplementation. Needs clang with the wasm32 target and
+# a WASI sysroot (wasi-libc); point WASI_SYSROOT at it if it lives elsewhere.
+# The CLI-only tooling, C code generator and LSP are left out. 32 MB of stack
+# covers the interpreter's 512-frame recursion limit with room to spare.
+WASI_SYSROOT ?= $(HOME)/.wasi-sysroot
+WASM_WEB_SRCS = $(filter-out src/codegen/% src/lsp/% src/tooling/uf_test_runner.c src/tooling/uf_pkg.c \
+                  src/tooling/uf_playground.c src/tooling/uf_doc.c src/tooling/uf_learn.c,$(SRCS)) \
+                src/wasm/uf_wasm_entry.c src/wasm/uf_wasm_builtins.c
+
+wasm-web:
+	clang --target=wasm32-wasi --sysroot=$(WASI_SYSROOT) $(CFLAGS) -O2 -mexec-model=reactor -mllvm -wasm-enable-sjlj \
+		$(WASM_WEB_SRCS) -nodefaultlibs -lc -lm -lsetjmp -Wl,-z,stack-size=33554432 -Wl,--strip-all -o web/unfish.wasm
+	node tools/wasm/gen_stdlib_json.js
+
+# Run the conformance suite through web/unfish.wasm on all three engines and
+# compare with bin/unfish, the way the browser runs it.
+test-wasm-web: $(BIN_DIR)/unfish wasm-web
+	node tools/wasm/test_wasm_web.js
 
 clean:
 	rm -rf $(BIN_DIR)

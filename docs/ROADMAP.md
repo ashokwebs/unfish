@@ -21,7 +21,7 @@ This document records the completed milestone ledger and outlines future enginee
 │ Phase 4  │ Structs, Methods, Traits, Enums & Generics   │ COMPLETED    │
 │ Phase 5  │ Pattern Matching, Destructuring & Pipes      │ COMPLETED    │
 │ Phase 6  │ 4-Tier Gradual Type System & Semantic Check  │ COMPLETED    │
-│ Phase 7  │ 57-Opcode Stack Bytecode VM & Disassembler   │ COMPLETED    │
+│ Phase 7  │ 59-Opcode Stack Bytecode VM & Disassembler   │ COMPLETED    │
 │ Phase 8  │ 256-Register Computed-Goto Bytecode VM       │ COMPLETED    │
 │ Phase 9  │ Native C99 Transpiler, WASM & Bare-Metal ARM │ COMPLETED    │
 │ Phase 10 │ Developer Tooling (LSP, Debugger, Studio)    │ COMPLETED    │
@@ -74,7 +74,7 @@ This document records the completed milestone ledger and outlines future enginee
 * `--strict` mode turning gradual inconsistencies into fatal compilation errors.
 
 ### Phase 7: Stack Bytecode Virtual Machine
-* 57-opcode stack-based virtual machine (`uf_vm.c`).
+* 59-opcode stack-based virtual machine (`uf_vm.c`).
 * Single-pass bytecode compiler (`uf_compiler.c`) with jump backpatching.
 * Lexical upvalue capture cells with open/closed linked list migration.
 * Bytecode disassembler (`unfish disasm`) and step-by-step visual stack tracer.

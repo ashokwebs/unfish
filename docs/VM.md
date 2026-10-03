@@ -6,7 +6,7 @@
 ## 1. Executive Summary & Dual VM Architecture
 
 Unfish features a unique **dual virtual machine architecture**:
-* **Tier 2: 57-Opcode Stack-Based Virtual Machine (`src/vm/uf_vm.c`)**: A zero-dependency, stack-oriented virtual CPU executing flat bytecode chunks. It features explicit operand stack evaluation, lexical upvalue capture cells, and structured exception unwinding. It provides an ideal educational vehicle for teaching computer architecture, compiler backends, and virtual machines.
+* **Tier 2: 59-Opcode Stack-Based Virtual Machine (`src/vm/uf_vm.c`)**: A zero-dependency, stack-oriented virtual CPU executing flat bytecode chunks. It features explicit operand stack evaluation, lexical upvalue capture cells, and structured exception unwinding. It provides an ideal educational vehicle for teaching computer architecture, compiler backends, and virtual machines.
 * **Tier 3: 256-Register Computed-Goto Virtual Machine (`src/vm2/uf_regvm.c`)**: A high-performance 3-address register virtual machine modeled after modern production runtimes (Lua 5.0, LuaJIT). It maps variable computations directly to virtual registers, uses direct-threaded computed-goto dispatch, and reduces instruction dispatch overhead by 45%–60%.
 
 Both virtual machines execute the same user code with 100% behavioral differential parity, verified against the AST interpreter, native C99 binaries, and WebAssembly.
@@ -68,7 +68,7 @@ A compiled function or script is stored in a linear `UfChunk`:
 
 ---
 
-## 3. The 57-Opcode Stack ISA Reference
+## 3. The 59-Opcode Stack ISA Reference
 
 Every instruction in the Stack VM ISA is encoded as an 8-bit opcode (`UfOpcode`), optionally followed by 8-bit or 16-bit operands encoded in little-endian format.
 
@@ -172,6 +172,8 @@ Every instruction in the Stack VM ISA is encoded as an 8-bit opcode (`UfOpcode`)
 | `OP_POP_TRY` | None | `[] -> []` | Pop exception unwind frame upon normal completion |
 | `OP_RETHROW` | None | `[err] -> []` | Re-raise unhandled exception to enclosing frame |
 | `OP_AWAIT` | None | `[promise] -> [res]` | Cooperatively suspend until promise resolves |
+| `OP_MATCH_SHAPE` | `u8 shape, u16 count` | `[val] -> [bool]` | Test a `match` pattern's shape: array length, map-or-instance, or field count |
+| `OP_MATCH_FIELD` | `u16 index` | `[val] -> [field]` | Positional field of a struct instance or enum value (`null` if absent) |
 
 ---
 
@@ -273,6 +275,8 @@ Format isAx:   [ Opcode: 8 bits | sAx (signed): 24 bits ]
 | `ROP_POP_TRY` | `iABC` | pop try | Unregister exception handler |
 | `ROP_RETHROW` | `iABC` | rethrow $R(A)$ | Re-raise error in register $A$ |
 | `ROP_AWAIT` | `iABC` | $R(A) = \text{await } R(B)$ | Await promise into register $A$ |
+| `ROP_MATCH_SHAPE` | `iABC` | $R(A) = R(B)$ has shape $C$ | `match` shape test; the next word holds the count or struct/variant name |
+| `ROP_MATCH_FIELD` | `iABC` | $R(A) = R(B).\text{field}[C]$ | Positional field of an instance or enum value, or `null` |
 
 ### 5.4. Computed-Goto Direct-Threaded Dispatch
 Under modern C compilers (`gcc`, `clang`), `src/vm2/uf_regvm.c` leverages GCC's labels-as-values extension (`&&label`) to implement **direct-threaded computed-goto dispatch**:

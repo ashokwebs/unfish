@@ -55,7 +55,7 @@ Unfish replaces fragmented tools with a single, elegant programming language tha
 │  Raw byte buffers, little-endian codecs, MMIO, ARM Cortex-M micro      │
 ├────────────────────────────────────────────────────────────────────────┤
 │                       STAGE 4: COMPILERS & RUNTIMES                    │
-│  Pratt parsing, 57-opcode stack VM, 256-register VM, AOT C99 transpiler│
+│  Pratt parsing, 59-opcode stack VM, 256-register VM, AOT C99 transpiler│
 ├────────────────────────────────────────────────────────────────────────┤
 │                      STAGE 3: ALGORITHMS & DATA STRUCTURES             │
 │  Lexical closures, recursion, pattern matching, structs, fibers        │
@@ -83,7 +83,7 @@ In Unfish, complexity is never hidden behind an impenetrable wall:
 ### 1. 5 Execution Engines in a 680 KB Binary
 Unfish packs five complete execution backends into a single 680 KB standalone binary with **100% mathematical differential parity**:
 1. **Tree-Walking AST Interpreter**: Fast, interactive feedback and semantic debugging.
-2. **57-Opcode Stack Bytecode VM**: Classic virtual CPU model for compiler courses.
+2. **59-Opcode Stack Bytecode VM**: Classic virtual CPU model for compiler courses.
 3. **256-Register Computed-Goto VM**: High-performance Lua-style register architecture.
 4. **Ahead-of-Time Native C99 Transpiler**: Compiles directly to standalone C99.
 5. **WebAssembly Target**: Direct execution in browsers and WASI runtimes.

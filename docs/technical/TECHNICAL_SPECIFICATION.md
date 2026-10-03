@@ -42,7 +42,7 @@ header-includes:
 │       ┌───────────────┬───────────┼───────────┬───────────────┐        │
 │       ▼               ▼           ▼           ▼               ▼        │
 │   [Tier 1]        [Tier 2]    [Tier 3]    [Tier 4]        [Tier 5]     │
-│   AST Tree        57-Opcode   256-Reg     Native C99      WASM Linear  │
+│   AST Tree        59-Opcode   256-Reg     Native C99      WASM Linear  │
 │  Interpreter      Stack VM     RegVM      Transpiler        Memory     │
 │       │               │           │           │               │        │
 │       └───────────────┴───────────┼───────────┴───────────────┘        │
@@ -91,7 +91,7 @@ Expressions are parsed using Vaughan Pratt's top-down operator precedence algori
 
 Unfish features two distinct virtual machine implementations to provide both pedagogical clarity and execution speed:
 
-### 3.1. Tier 2: 57-Opcode Stack-Based Virtual Machine (`src/vm/uf_vm.c`)
+### 3.1. Tier 2: 59-Opcode Stack-Based Virtual Machine (`src/vm/uf_vm.c`)
 * **Call Frame Structure**:
   ```c
   typedef struct {

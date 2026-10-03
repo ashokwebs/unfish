@@ -16,7 +16,7 @@ Unfish enforces a **Zero-Compromise Verification Philosophy** built around four 
 ├────────────────────────────────────────────────────────────────────────┤
 │ Pillar 3: Memory Safety Sanitizers (ASan, LSan, UBSan zero-leak rule)  │
 ├────────────────────────────────────────────────────────────────────────┤
-│ Pillar 2: 5-Way Differential Parity Verification (95/95 conformance)   │
+│ Pillar 2: 5-Way Differential Parity Verification (104/104 conformance)   │
 ├────────────────────────────────────────────────────────────────────────┤
 │ Pillar 1: Modular C Unit Tests (20+ isolated test suites in tests/unit)│
 └────────────────────────────────────────────────────────────────────────┘
@@ -36,7 +36,7 @@ Individual C modules are tested in isolation using lightweight, standalone test 
 | `test_interpreter.c`| `src/interpreter/` | Direct AST evaluation, environment resolution, runtime errors |
 | `test_chunk.c` | `src/compiler/uf_chunk.c` | Instruction emission, constant pool management, line mapping |
 | `test_compiler.c`| `src/compiler/uf_compiler.c` | Bytecode generation, local/upvalue resolution, jump patching |
-| `test_vm.c` | `src/vm/uf_vm.c` | 57-opcode Stack VM execution, operand stack bounds, unwinding |
+| `test_vm.c` | `src/vm/uf_vm.c` | 59-opcode Stack VM execution, operand stack bounds, unwinding |
 | `test_regvm.c` | `src/vm2/uf_regvm.c` | 256-register RegVM execution, computed-goto dispatch, 3-address ISA |
 | `test_optimize.c`| `src/compiler/uf_optimize.c`| Constant folding, dead code elimination, peephole optimizations |
 | `test_cache.c` | `src/compiler/uf_cache.c` | `.ufc` / `.ufrc` binary cache serialization and checksum verification |
@@ -73,9 +73,11 @@ $$\text{exit}(\text{Interp}) \equiv \text{exit}(\text{VM}) \equiv \text{exit}(\t
 If a single character, newline, or exit code diverges between any backend, the test harness reports an immediate failure with a unified diff.
 
 ### 3.2. Current Conformance Census
-As of v2.1.0, **95 out of 95 conformance tests pass with 100% differential parity across all five execution engines**:
-* 68 Valid Language Feature Tests (`01_hello.unfish` through `68_fish_simulation.unfish`)
-* 27 Intentional Error Tests (`err_arity_mismatch.unfish` through `err_unterminated_string.unfish`)
+**104 out of 104 conformance tests pass with 100% differential parity across all five execution engines**:
+* 75 Valid Language Feature Tests (`01_hello.unfish` through `75_numeric_literals.unfish`)
+* 29 Intentional Error Tests (`err_arity_mismatch.unfish` through `err_unterminated_string.unfish`)
+
+The same suite also runs through the browser build (`web/unfish.wasm`) on the interpreter and both VMs with `make test-wasm-web`, and under a collect-on-every-allocation garbage collector with `make test-gc-stress`.
 
 ---
 

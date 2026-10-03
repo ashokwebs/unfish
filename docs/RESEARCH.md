@@ -77,7 +77,7 @@ Key empirical findings from Shi et al. (2005):
 
 ### 3.2. Unfish Dual VM Strategy
 Rather than choosing one model dogmatically, Unfish implements **both**:
-1. **Tier 2 (Stack VM, `src/vm/uf_vm.c`)**: Provides an extraordinarily clean, educational 57-opcode stack architecture. Students can trace the evaluation stack step-by-step with `unfish run --vm --debug`, building an intuitive mental model of push/pop semantics.
+1. **Tier 2 (Stack VM, `src/vm/uf_vm.c`)**: Provides an extraordinarily clean, educational 59-opcode stack architecture. Students can trace the evaluation stack step-by-step with `unfish run --vm --debug`, building an intuitive mental model of push/pop semantics.
 2. **Tier 3 (Register VM, `src/vm2/uf_regvm.c`)**: Provides an industrial-grade 256-register, 3-address architecture utilizing computed-goto dispatch. It demonstrates how compilers optimize away intermediate stack traffic via register allocation.
 
 ---

@@ -48,8 +48,7 @@
         btnRun.textContent = 'Running...';
         btnRun.disabled = true;
 
-        setTimeout(() => {
-          const res = engine.run(code);
+        window.UnfishRunner.run(code, { engine: 'vm' }).then((res) => {
           output.classList.add('active');
           if (res.exit_code === 0) {
             output.textContent = res.stdout || '(Program completed with no output)';
@@ -60,7 +59,7 @@
           }
           btnRun.textContent = '▶ Run in Place';
           btnRun.disabled = false;
-        }, 30);
+        });
       });
     }
 
@@ -87,13 +86,13 @@
   let currentPipelineData = null;
   let activePipelineStage = 'tokens';
 
-  function analyzePipeline() {
+  async function analyzePipeline() {
     const code = pipelineCodeInput.value;
     try {
       const { tokens } = engine.tokenize(code);
       const ast = engine.parse(code);
       const disasm = engine.disassemble(code);
-      const runRes = engine.run(code);
+      const runRes = await window.UnfishRunner.run(code, { engine: 'vm' });
 
       currentPipelineData = {
         tokens: tokens.map(t => t.toString()).join('\n'),
@@ -178,7 +177,7 @@
     { target: 'stdlib-json', title: 'Module: json', text: 'json parse serialize stringify json_parse json_stringify' },
     { target: 'stdlib-testing', title: 'Module: testing', text: 'testing assert assert_eq test suites unit testing' },
     { target: 'spec-ebnf', title: 'Formal Grammar & EBNF Specification', text: 'ebnf grammar syntax parser pratt precedence associativity ast formal specification' },
-    { target: 'spec-vm-isa', title: '57-Opcode Stack VM ISA Specification', text: 'vm isa opcode stack instructions bytecode binary ufc container assembly disasm' },
+    { target: 'spec-vm-isa', title: '59-Opcode Stack VM ISA Specification', text: 'vm isa opcode stack instructions bytecode binary ufc container assembly disasm' },
     { target: 'spec-regvm', title: '256-Register VM Architecture', text: 'register vm regvm 3-address code instructions register allocation windowing throughput' },
     { target: 'spec-embed', title: 'C99 AOT & Embedding Guide', text: 'c99 aot compiler embedding unfish_runtime.h host integration native c api baremetal' },
     { target: 'spec-comparison', title: 'Architectural Comparison Matrix', text: 'comparison benchmark python lua go rust javascript tradeoffs performance' }

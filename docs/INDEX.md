@@ -24,7 +24,7 @@ All manuals and books can be compiled directly via `make pdfs` and are available
 * [**The Book: The Unfish Programming Language**](file:///home/charizard/unfish/docs/pdf/The_Unfish_Book.pdf) (`docs/pdf/The_Unfish_Book.pdf`): Complete, publication-grade textbook covering pedagogy, language tour, systems programming, virtual machines, and formal grammar.
 * [**Executive Pitch Deck**](file:///home/charizard/unfish/docs/pdf/Unfish_Executive_Pitch_Deck.pdf) (`docs/pdf/Unfish_Executive_Pitch_Deck.pdf`): High-impact presentation on the educational crisis, the unbroken continuum, 5-engine architecture, and market strategy.
 * [**Beginner's Guide & Tutorial**](file:///home/charizard/unfish/docs/pdf/Unfish_Beginners_Guide.pdf) (`docs/pdf/Unfish_Beginners_Guide.pdf`): Step-by-step tutorial from first code to the School of Fish simulation and practical challenges.
-* [**Technical Architecture Specification**](file:///home/charizard/unfish/docs/pdf/Unfish_Technical_Specification.pdf) (`docs/pdf/Unfish_Technical_Specification.pdf`): Deep systems engineering manual detailing the 57-opcode Stack VM, 256-register RegVM, memory arenas, mark-sweep GC, and endian byte buffers.
+* [**Technical Architecture Specification**](file:///home/charizard/unfish/docs/pdf/Unfish_Technical_Specification.pdf) (`docs/pdf/Unfish_Technical_Specification.pdf`): Deep systems engineering manual detailing the 59-opcode Stack VM, 256-register RegVM, memory arenas, mark-sweep GC, and endian byte buffers.
 
 ---
 
@@ -91,7 +91,7 @@ All manuals and books can be compiled directly via `make pdfs` and are available
 ### Volume III: Virtual Machines, Compilers & Code Generation
 * [**Chapter 8: Virtual Machine Specification & Instruction Sets**](file:///home/charizard/unfish/docs/VM.md)
   * Stack-based VM: execution loop, operand stack, call frames, and instruction dispatch
-  * Complete 57-opcode Stack VM ISA reference table with stack effects and formal semantics
+  * Complete 59-opcode Stack VM ISA reference table with stack effects and formal semantics
   * Lexical upvalue capture implementation: open upvalue linked list and closing mechanism
   * Register-based VM (RegVM): 256-register windowing, 3-address instructions, computed-goto dispatch
   * Complete 40+ opcode Register VM ISA reference table and register allocation strategy

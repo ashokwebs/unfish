@@ -87,7 +87,8 @@ static UfValue sys_exec(UfRuntime* rt, int argc, UfValue* args) {
     if (argc < 1 || args[0].kind != UF_VAL_STRING) {
         return uf_val_number(-1);
     }
-#if defined(UF_EMBEDDED)
+#if defined(UF_EMBEDDED) || defined(__wasi__)
+    /* No process spawning on embedded targets or under WASI (the browser). */
     return uf_val_number(-1);
 #else
     int res = system(args[0].as.string->chars);

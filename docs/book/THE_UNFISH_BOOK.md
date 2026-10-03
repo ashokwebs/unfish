@@ -280,7 +280,7 @@ Unfish includes two virtual machines running in 100% differential parity lockste
 
 ```
 ┌───────────────────────────────────┬───────────────────────────────────┐
-│     57-Opcode Stack VM            │    256-Register Computed-Goto VM   │
+│     59-Opcode Stack VM            │    256-Register Computed-Goto VM   │
 ├───────────────────────────────────┼───────────────────────────────────┤
 │ • Classic 1-address stack model   │ • Modern 3-address register model │
 │ • Explicit push / pop operations  │ • 256 virtual registers per frame │

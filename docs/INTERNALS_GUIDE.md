@@ -45,7 +45,7 @@ Source Code (.unfish)
         |                       |                       |                       |
         v                       v                       v                       |
  [ uf_vm.c ]             [ uf_regvm.c ]          [ gcc / clang ]                |
-  57-Opcode Stack VM      256-Reg 3-Address VM    Native Machine Code           |
+  59-Opcode Stack VM      256-Reg 3-Address VM    Native Machine Code           |
         |                       |                       |                       |
         +-----------------------+-----------------------+-----------------------+
                                 |
@@ -64,7 +64,7 @@ Source Code (.unfish)
 | `src/parser/` | Pratt expression parser, statement grammar | `uf_parser.h` |
 | `src/semantic/` | Symbol tables, variable hoisting, type checking | `uf_semantic.h` |
 | `src/compiler/` | Stack bytecode emitter, peephole optimizer | `uf_chunk.h`, `uf_compiler.h`, `uf_optimize.h` |
-| `src/vm/` | 57-opcode Stack Virtual Machine | `uf_vm.h`, `uf_disasm.h` |
+| `src/vm/` | 59-opcode Stack Virtual Machine | `uf_vm.h`, `uf_disasm.h` |
 | `src/compiler/uf_reg_compiler.c` | Register bytecode emitter (3-address format) | `uf_reg_compiler.h` |
 | `src/vm2/` | 256-register Virtual Machine | `uf_regvm.h` |
 | `src/codegen/` | Standalone ANSI C99 transpiler | `uf_emit_c.h` |
