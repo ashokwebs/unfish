@@ -180,8 +180,13 @@ static char* resolve_module_path(const char* name, SourceSpan span) {
         snprintf(path, sizeof(path), "%s/../src/stdlib/%s.unfish", exe_dir, name);
         if (access(path, R_OK) == 0) return strdup(path);
 
-        /* Installed layouts: <prefix>/bin/unfish -> <prefix>/lib/unfish/stdlib
-         * or a stdlib directory sitting beside the binary. */
+        /* Installed layouts: <prefix>/bin/unfish -> <prefix>/stdlib (what
+         * install.sh and the release tarball lay out under ~/.unfish),
+         * <prefix>/lib/unfish/stdlib, or a stdlib directory beside the
+         * binary. */
+        snprintf(path, sizeof(path), "%s/../stdlib/%s.unfish", exe_dir, name);
+        if (access(path, R_OK) == 0) return strdup(path);
+
         snprintf(path, sizeof(path), "%s/../lib/unfish/stdlib/%s.unfish", exe_dir, name);
         if (access(path, R_OK) == 0) return strdup(path);
 

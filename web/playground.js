@@ -7,7 +7,7 @@ const EXAMPLES = {
 ## String interpolation and basic output
 
 let name = "Developer"
-let version = "2.0.0"
+let version = "2.1.0"
 let speed_rating = 99.8
 
 say f"Hello, {name}! Welcome to Unfish v{version}."

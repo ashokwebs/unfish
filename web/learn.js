@@ -145,7 +145,7 @@
   const searchResultsList = document.getElementById('search-results-list');
 
   const SEARCH_INDEX = [
-    { target: 'downloads', title: 'Official Downloads (v2.0.0)', text: 'download linux binary tarball vscode vsix extension runtime unfish_runtime.h curl installer' },
+    { target: 'downloads', title: 'Official Downloads (v2.1.0)', text: 'download linux binary tarball vscode vsix extension runtime unfish_runtime.h curl installer' },
     { target: 'quickstart', title: 'Quick Start & CLI Reference', text: 'cli run vm regvm build wasm debug check test lsp repl studio playground' },
     { target: 'intro', title: 'What is Unfish?', text: 'general-purpose programming language pure ANSI C99 zero dependencies philosophy 5 execution backends' },
     { target: 'install', title: 'Installation & Setup', text: 'make gcc clang build from source test-asan benchmarks' },

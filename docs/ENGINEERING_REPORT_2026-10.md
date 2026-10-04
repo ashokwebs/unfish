@@ -2,7 +2,7 @@
 
 *October 3, 2026 · commits `165b256` through `00939a2` on `main`*
 
-Ten commits are on `main` and the website is live. All four engines now agree, the garbage collector no longer frees live objects, and the site runs the real interpreter in the browser. Every test suite passes. The one open decision is whether to cut a v2.1.0 release so command-line users get the fixes.
+Ten commits are on `main` and the website is live. All four engines now agree, the garbage collector no longer frees live objects, and the site runs the real interpreter in the browser. Every test suite passes, and the fixes ship to command-line users as [v2.1.0](https://github.com/ashokwebs/unfish/releases/tag/v2.1.0).
 
 ---
 
@@ -119,11 +119,9 @@ The 128-bit multiply helpers written for the WebAssembly build were checked agai
 
 ---
 
-## 7. Known Limits and Open Decision
+## 7. Release and Known Limits
 
-The installer still downloads the v2.0.0 binaries, so command-line users get none of these fixes until a new release ships.
-
-- [ ] **Decide on a v2.1.0 release.** Hex literals and the browser engine are new features, so a minor bump fits. The release would bump the version everywhere, build the Linux tarball and the VS Code extension, publish the GitHub release, and point the installer at it.
+Everything above ships as **v2.1.0** (2026-10-04): a minor bump, since hex literals and the browser engine are new features. The release carries the Linux x86_64 tarball, the VS Code extension (which now highlights `0x`/`0b`/`0o` literals), `unfish_runtime.h` and the installer, and `curl -fsSL https://ashokwebs.github.io/unfish/install.sh | bash` now installs it.
 
 Limits that remain (also recorded in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) §7):
 

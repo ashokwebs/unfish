@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-UNFISH_VERSION="2.0.0"
+UNFISH_VERSION="2.1.0"
 GITHUB_REPO="ashokwebs/unfish"
 INSTALL_DIR="${HOME}/.unfish"
 BIN_DIR="${INSTALL_DIR}/bin"
@@ -26,9 +26,10 @@ if [ "$OS" != "linux" ] || [ "$ARCH" != "x86_64" ]; then
     cd "${TMP_DIR}/unfish"
     make -j4
     
-    mkdir -p "${BIN_DIR}" "${INSTALL_DIR}/stdlib"
+    mkdir -p "${BIN_DIR}" "${INSTALL_DIR}/stdlib" "${INSTALL_DIR}/include"
     cp bin/unfish "${BIN_DIR}/"
     cp src/stdlib/*.unfish "${INSTALL_DIR}/stdlib/" 2>/dev/null || true
+    cp src/codegen/unfish_runtime.h "${INSTALL_DIR}/include/"
     rm -rf "${TMP_DIR}"
 else
     TARBALL="unfish-v${UNFISH_VERSION}-linux-x86_64.tar.gz"

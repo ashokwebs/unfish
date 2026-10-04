@@ -242,7 +242,7 @@ All manuals and books can be compiled directly via `make pdfs` and are available
   * Backend parity fixes across the interpreter, both VMs and native C
   * Garbage-collector rooting bugs found with `UNFISH_GC_STRESS=1`, and `make test-gc-stress`
   * The website running the real engine via WebAssembly, and the content fixes it exposed
-  * Verification results, known limits and the open v2.1.0 release decision
+  * Verification results, the v2.1.0 release and known limits
 
 ---
 

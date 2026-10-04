@@ -3507,6 +3507,13 @@ static void get_runtime_include_dir(char* buf, size_t size) {
                 *parent_slash = '\0';
                 snprintf(buf, size, "%.900s/src/codegen", exe_path);
                 if (access(buf, R_OK) == 0) return;
+                /* Installed layout (install.sh, release tarball):
+                 * <prefix>/bin/unfish and <prefix>/include/unfish_runtime.h. */
+                snprintf(buf, size, "%.900s/include/unfish_runtime.h", exe_path);
+                if (access(buf, R_OK) == 0) {
+                    snprintf(buf, size, "%.900s/include", exe_path);
+                    return;
+                }
             }
         }
     }

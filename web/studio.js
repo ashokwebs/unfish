@@ -11,7 +11,7 @@
   const TEMPLATES = {
     hello: {
       'unfish.toml': `[package]\nname = "hello_world"\nversion = "1.0.0"\nentry = "src/main.uf"`,
-      'src/main.uf': `## Welcome to Unfish Studio!\n## String interpolation, math, and formatted output\n\nlet language = "Unfish"\nlet version = "2.0.0"\nlet performance = 100.0\n\nsay f"Hello from {language} v{version}!"\nsay f"5-way differential parity: {performance}% identical output across all tiers."\n`,
+      'src/main.uf': `## Welcome to Unfish Studio!\n## String interpolation, math, and formatted output\n\nlet language = "Unfish"\nlet version = "2.1.0"\nlet performance = 100.0\n\nsay f"Hello from {language} v{version}!"\nsay f"5-way differential parity: {performance}% identical output across all tiers."\n`,
       'README.md': `# Hello World Project\nA simple starter project in Unfish.`
     },
     enums: {

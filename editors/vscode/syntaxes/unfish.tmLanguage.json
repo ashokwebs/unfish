@@ -113,7 +113,7 @@
       "patterns": [
         {
           "name": "constant.numeric.unfish",
-          "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
+          "match": "\\b(0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\\d+(\\.\\d+)?([eE][+-]?\\d+)?)\\b"
         }
       ]
     },
