@@ -172,8 +172,21 @@ static char* resolve_module_path(const char* name, SourceSpan span) {
         free(copy);
     }
 
-    /* 4. Built-in stdlib Unfish modules (e.g. testing), located relative to
-     *    the executable so they resolve wherever the binary is run from. */
+    /* 4. Built-in stdlib Unfish modules (e.g. testing). */
+    char* bundled = uf_module_find_bundled_stdlib(name);
+    if (bundled) return bundled;
+
+    /* 5. Finally the historical working-directory-relative location. */
+    snprintf(path, sizeof(path), "src/stdlib/%s.unfish", name);
+    if (access(path, R_OK) == 0) return strdup(path);
+
+    return NULL;
+}
+
+char* uf_module_find_bundled_stdlib(const char* name) {
+    /* Located relative to the executable, so they resolve wherever the
+     * binary is run from. */
+    char path[1024];
     const char* exe_dir = executable_dir();
     if (exe_dir) {
         /* Running from the source tree: <repo>/bin/unfish -> <repo>/src/stdlib */
@@ -193,11 +206,6 @@ static char* resolve_module_path(const char* name, SourceSpan span) {
         snprintf(path, sizeof(path), "%s/stdlib/%s.unfish", exe_dir, name);
         if (access(path, R_OK) == 0) return strdup(path);
     }
-
-    /* 5. Finally the historical working-directory-relative location. */
-    snprintf(path, sizeof(path), "src/stdlib/%s.unfish", name);
-    if (access(path, R_OK) == 0) return strdup(path);
-
     return NULL;
 }
 

@@ -44,4 +44,9 @@ void uf_module_cache_remove(UfRuntime* rt, const char* name);
 
 UfModuleObject* uf_module_load(UfRuntime* rt, const char* name, SourceSpan span);
 
+/* Path of a stdlib module written in Unfish (e.g. `testing`) bundled with
+ * this executable, in a source checkout or an installed layout, or NULL.
+ * The caller frees it. Shared by the runtime and the native compiler. */
+char* uf_module_find_bundled_stdlib(const char* name);
+
 #endif /* UF_MODULE_H */

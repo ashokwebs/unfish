@@ -4,6 +4,7 @@
 #include "../parser/uf_parser.h"
 #include "../semantic/uf_semantic.h"
 #include "../common/uf_diagnostic.h"
+#include "../runtime/uf_module.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -3154,7 +3155,12 @@ static char* resolve_module_file_path(const char* mod_name, const char* caller_p
     snprintf(path, sizeof(path), "%s", mod_name);
     if (access(path, R_OK) == 0) return strdup(path);
 
-    /* 3. Standard library path: src/stdlib/<name>.unfish */
+    /* 3. Standard library modules bundled with this executable, wherever it
+     *    is run from, then the historical src/stdlib under the working
+     *    directory. */
+    char* bundled = uf_module_find_bundled_stdlib(mod_name);
+    if (bundled) return bundled;
+
     snprintf(path, sizeof(path), "src/stdlib/%s.unfish", mod_name);
     if (access(path, R_OK) == 0) return strdup(path);
 
